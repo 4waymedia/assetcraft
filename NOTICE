@@ -1,0 +1,15 @@
+AssetCraft
+Copyright (c) 2026 Paul Gemignani and the AssetCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+Third-party material
+
+None bundled. The per-file list (author, source, license) is in ATTRIBUTION.md.
+
+Source provenance
+
+Architecture patterns (command registry, layering check, catalog and preview designs) are
+modelled on the storytold Crafting Apps (LightCraft, FilmCraft, PhotoCraft, DesignCraft,
+PdfCraft, WordCraft), which are MIT OR Apache-2.0. Any code adapted from them will be listed
+here with repository, path and revision.

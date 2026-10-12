@@ -1,0 +1,19 @@
+[package]
+name = "assetcraft-cli"
+description = "AssetCraft headless command line: list, probe, thumb, commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "assetcraft-cli"
+path = "src/main.rs"
+
+[dependencies]
+assetcraft-engine = { workspace = true }

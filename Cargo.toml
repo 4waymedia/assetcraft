@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/4waymedia/assetcraft"
+publish = false
+
+[workspace.dependencies]
+# internal
+assetcraft-fs = { path = "crates/fs" }
+assetcraft-probe = { path = "crates/probe" }
+assetcraft-thumbs = { path = "crates/thumbs" }
+assetcraft-engine = { path = "crates/engine" }
+assetcraft-ui-egui = { path = "crates/ui-egui" }
+# external (tooling)
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "warn"
+dbg_macro = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+debug = "line-tables-only"

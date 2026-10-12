@@ -2,17 +2,31 @@
 
 _Last updated: 2026-10-12_
 
-## Current: AssetCraft Stage 0 (Navigator), not started
+## Current: AssetCraft Stage 0 (Navigator), step 1 done
 
-**Plan:** [docs/assetcraft-plan.md](docs/assetcraft-plan.md) · **Plan mode spec:** [docs/storyline-builder.md](docs/storyline-builder.md) · **Study notes:** [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md)
+**Plan:** [docs/assetcraft-plan.md](docs/assetcraft-plan.md) · **Plan mode spec:** [docs/storyline-builder.md](docs/storyline-builder.md) · **Study notes:** [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) · **Agent rules:** [AGENTS.md](AGENTS.md)
 
 **Decided 2026-10-12**
 - Storyline Builder is AssetCraft's Plan mode.
 - AI providers are chosen in Preferences: Local, API or ArtCraft account (credits).
 - Stage 0 is a Bridge-style navigator; `test_data/library/` holds 24 generated test files.
 - Elo stays out of AssetCraft.
+- This repo is `4waymedia/assetcraft` (renamed from ArtCraft-Library; history kept). Old ArtCraft material is in `docs/archive/`.
 
-**Next action:** Paul answers "new `assetcraft` repo vs this one"; Claude then scaffolds Stage 0 step 1.
+### Stage 0 checklist (steps from the plan)
+
+- [x] 1. Workspace scaffold: `Cargo.toml` (edition 2024, Rust 1.95+), lints (no `unsafe`, no `unwrap`/`expect`/`panic` outside tests), stub crates `fs` L0, `probe` L1, `thumbs` L2, `engine` L5, `ui-egui` L6, apps `assetcraft` + `assetcraft-cli`, `xtask` (`ci`, `layers`), AGENTS.md, licences, NOTICE, ATTRIBUTION.md
+- [ ] 2. `crates/fs`: `Services` trait, real + fake file system, bounded walks
+- [ ] 3. `crates/probe`: magic-byte sniffing, header-only dimensions, file times
+- [ ] 4. `crates/thumbs`: decode + downscale on a prioritized worker pool
+- [ ] 5. `crates/engine`: `Session`, `CommandSpec` registry, navigation state
+- [ ] 6. `crates/ui-egui` + desktop app: panels, craft-ui docking
+- [ ] 7. `assetcraft-cli`: `list`, `probe`, `thumb`, `commands`
+- [ ] 8. Tests over `test_data/library`; Stage 0 exit criteria
+
+**Verified (Linux, Rust 1.97):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 12 tests, layers ok (8 crates). The layer check rejects an L0 crate that depends on `egui`.
+
+**Next action:** Paul runs `cargo xtask ci` on Windows and commits (block in chat). Claude then does step 2 (`crates/fs`).
 
 ---
 

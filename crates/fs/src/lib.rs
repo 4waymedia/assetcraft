@@ -1,0 +1,15 @@
+//! File-system access behind a Services trait (real disk, fake disk for tests).
+//!
+//! Layer L0. See `AGENTS.md` → "Layers" for what this crate may depend on.
+//! Stage 0 placeholder: functionality arrives in later steps of `docs/assetcraft-plan.md`.
+
+/// Crate name, used by `assetcraft-cli --version` and the about box.
+pub const CRATE: &str = env!("CARGO_PKG_NAME");
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn crate_name_is_prefixed() {
+        assert!(super::CRATE.starts_with("assetcraft-"));
+    }
+}

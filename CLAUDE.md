@@ -21,31 +21,18 @@ and executes. It's a sibling of the storytold Crafting Apps.
   git push
   ```
   Read-only git (`status`, `diff`, `log`, `show`) is fine.
+- **When a tool can't do something** (e.g. writing into `.cargo/`, building on Windows), don't stop:
+  hand Paul the exact PowerShell commands to run, then carry on.
 - Small steps: one stage at a time, and one step at a time within a stage. No rewrites.
 - Lead with artifacts (file:line, diffs, API shapes, schemas), then prose.
 - Every finding names its scope, the goal it serves, the suggested fix and who owns it.
   Frame gaps as opportunities.
 - Update `STATUS.md` at the end of every working session.
 
-## House rules (from the Crafting Apps; follow from day one)
+## Code rules
 
-- **Rust only.** egui/eframe on wgpu; the web build is the same Rust compiled to WASM. Never
-  add Tauri, Electron, a webview or JS.
-- **Layering is enforced** by `cargo xtask layers`. UI crates (egui, eframe, winit, rfd,
-  craft-ui) are only allowed in the UI layer and the apps.
-- **Everything is a command:** a `CommandSpec { id, label, menu, shortcut, params, enabled, run }`
-  registry. One `Session::execute(id, params)` entry point serves the UI, keys, CLI, control
-  channel and MCP.
-- **Never crash:** production crate roots deny `unwrap`, `expect` and `panic`, and forbid
-  `unsafe`. Treat every file and input as hostile.
-- **Clean room:** no Adobe or Microsoft assets or code, and no GPL dependencies. Every bundled
-  asset gets an `ATTRIBUTION.md` entry.
-- **Read before write:** nothing changes files on disk before Stage 2. After that, every write
-  is atomic, every batch operation has a dry run, and undo works.
-- **AI is optional.** Providers come from Preferences (Local, API, ArtCraft account). Every
-  feature works with none selected. Secrets live in the OS keyring, never in files.
-- **Elo is out of scope** for AssetCraft.
-- Markdown tables are space-padded so columns line up in plain text.
+The code rules live in [AGENTS.md](AGENTS.md): Rust only, enforced layers, everything is a
+command, never crash, read before write, clean room, optional AI. Read it before writing code.
 
 ## Verify
 

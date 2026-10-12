@@ -10,7 +10,17 @@ DesignCraft, WordCraft).
 - **Immediate area of improvement:** the Crafting Apps have no Bridge. Each app opens its own
   files, and nothing sits above them to find, group, plan and hand off work.
 
-**Status:** planning complete; Stage 0 (Navigator) not started. See [STATUS.md](STATUS.md).
+**Status:** Stage 0 (Navigator) in progress. See [STATUS.md](STATUS.md).
+
+## Build (Windows, PowerShell)
+
+```powershell
+Set-Location F:\Script-Projects\assetcraft
+cargo xtask ci                     # fmt, clippy, tests, layers
+cargo run -p assetcraft-cli -- --help
+```
+
+Needs Rust 1.95 or later (`rustup update stable`).
 
 ## What it will do
 

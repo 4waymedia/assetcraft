@@ -1,0 +1,15 @@
+[package]
+name = "assetcraft-fs"
+description = "File-system access behind a Services trait (real disk, fake disk for tests)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+

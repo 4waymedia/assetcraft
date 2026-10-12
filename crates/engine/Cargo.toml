@@ -1,0 +1,17 @@
+[package]
+name = "assetcraft-engine"
+description = "Session, command registry and navigation state. Every action is a command."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+assetcraft-fs = { workspace = true }
+assetcraft-probe = { workspace = true }
+assetcraft-thumbs = { workspace = true }
