@@ -1,0 +1,179 @@
+diff --git a/frontend/apps/artcraft/app/src/components/signaled/TopBar/TopBar.tsx b/frontend/apps/artcraft/app/src/components/signaled/TopBar/TopBar.tsx
+index 0aee614..a673fe1 100644
+--- a/frontend/apps/artcraft/app/src/components/signaled/TopBar/TopBar.tsx
++++ b/frontend/apps/artcraft/app/src/components/signaled/TopBar/TopBar.tsx
+@@ -382,6 +382,8 @@ export const TopBar = ({ pageName }: Props) => {
+         return ["Studio", "Edit Video"];
+       case "MOODBOARD":
+         return ["Studio", "Moodboard"];
++      case "LIBRARY":
++        return ["Studio", "Library"];
+       case "APPS":
+         return ["Home"];
+       default:
+diff --git a/frontend/apps/artcraft/app/src/config/appMenu.tsx b/frontend/apps/artcraft/app/src/config/appMenu.tsx
+index 0e90686..0d26dd8 100644
+--- a/frontend/apps/artcraft/app/src/config/appMenu.tsx
++++ b/frontend/apps/artcraft/app/src/config/appMenu.tsx
+@@ -1,4 +1,4 @@
+-import { BoxIcon, CrosshairIcon, DropletIcon, FilmIcon, GlobeIcon, GroupIcon, ImageIcon, ImagesIcon, MusicIcon, PenToolIcon, PencilIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
++import { BoxIcon, CrosshairIcon, FolderOpenIcon, DropletIcon, FilmIcon, GlobeIcon, GroupIcon, ImageIcon, ImagesIcon, MusicIcon, PenToolIcon, PencilIcon, SparklesIcon, WandSparklesIcon } from "lucide-react";
+ import type { LucideIcon } from "lucide-react";
+ import { useMemo } from "react";
+ import {
+@@ -24,7 +24,8 @@ export type AppId =
+   | "STORYBOARD"
+   | "BACKGROUND_CHANGE"
+   | "VIDEO_EDITOR"
+-  | "MOODBOARD";
++  | "MOODBOARD"
++  | "LIBRARY";
+ 
+ export interface AppDescriptor {
+   id: AppId;
+@@ -334,6 +335,16 @@ export const ALL_APPS: FullAppItem[] = [
+     color: "bg-orange-500/40",
+     badge: "BETA",
+   },
++  {
++    id: "library",
++    label: "Library",
++    description: "Browse, organize and find your generated assets",
++    icon: FolderOpenIcon,
++    category: "edit",
++    action: "LIBRARY",
++    color: "bg-teal-500/40",
++    badge: "BETA",
++  },
+   {
+     id: "background-change",
+     label: "Background Change",
+@@ -444,6 +455,7 @@ export const goToApp = (action?: string) => {
+       "BACKGROUND_CHANGE",
+       "VIDEO_EDITOR",
+       "MOODBOARD",
++      "LIBRARY",
+     ].includes(action)
+   ) {
+     if (action === "STORYBOARD") {
+diff --git a/frontend/apps/artcraft/app/src/pages/MainApp.tsx b/frontend/apps/artcraft/app/src/pages/MainApp.tsx
+index b35bebd..777b882 100644
+--- a/frontend/apps/artcraft/app/src/pages/MainApp.tsx
++++ b/frontend/apps/artcraft/app/src/pages/MainApp.tsx
+@@ -105,6 +105,9 @@ const PageVideoEditor = lazy(() =>
+ const PageMoodboard = lazy(() =>
+   import("./PageMoodboard").then((m) => ({ default: m.PageMoodboard })),
+ );
++const PageLibrary = lazy(() =>
++  import("./PageLibrary").then((m) => ({ default: m.PageLibrary })),
++);
+ 
+ interface Props {
+   sceneToken?: string;
+@@ -350,6 +353,12 @@ const TabBody = ({ sceneToken }: { sceneToken?: string }) => {
+           <PageMoodboard />
+         </div>
+       );
++    case "LIBRARY":
++      return (
++        <div className="h-[calc(100vh-56px)] w-full overflow-hidden">
++          <PageLibrary />
++        </div>
++      );
+     default:
+       return null;
+   }
+diff --git a/frontend/apps/artcraft/app/src/pages/PageLibrary/PageLibrary.tsx b/frontend/apps/artcraft/app/src/pages/PageLibrary/PageLibrary.tsx
+new file mode 100644
+index 0000000..8902011
+--- /dev/null
++++ b/frontend/apps/artcraft/app/src/pages/PageLibrary/PageLibrary.tsx
+@@ -0,0 +1,67 @@
++import { useEffect, useState } from "react";
++import { FoldersApi, MediaFilesApi } from "@storyteller/api";
++import { authentication } from "~/signals";
++
++// Stage 0 spike: an empty Library tab that logs real account data once.
++// Throwaway — replaced by the three-panel layout in Stage 1.
++type SpikeStatus = "idle" | "loading" | "done" | "error";
++
++export const PageLibrary = () => {
++  const [status, setStatus] = useState<SpikeStatus>("idle");
++  const [summary, setSummary] = useState<string>("");
++
++  useEffect(() => {
++    const username = authentication.userInfo.value?.username;
++    if (!username) {
++      setStatus("error");
++      setSummary("Not signed in: sign in, then reopen the Library tab.");
++      return;
++    }
++
++    setStatus("loading");
++    const mediaApi = new MediaFilesApi();
++    const foldersApi = new FoldersApi();
++
++    Promise.all([
++      mediaApi.ListUserMediaFiles({ username, page_size: 24 }),
++      foldersApi.ListAllFolders(),
++      // Probe for Stage 3: this endpoint exists in libs/api but nothing calls it.
++      mediaApi.SearchUserMediaFiles({ search_term: "reaper" }),
++    ])
++      .then(([media, folders, search]) => {
++        console.group("[Library spike]");
++        console.log("ListUserMediaFiles", media);
++        console.log("first MediaFile", media.data?.[0]);
++        console.log("ListAllFolders", folders);
++        console.log("first FolderInfo", folders.data?.[0]);
++        console.log("SearchUserMediaFiles('reaper')", search);
++        console.groupEnd();
++
++        setStatus("done");
++        setSummary(
++          [
++            `media: ${media.success ? media.data?.length ?? 0 : `error: ${media.errorMessage}`}`,
++            `folders: ${folders.success ? folders.data?.length ?? 0 : `error: ${folders.errorMessage}`}`,
++            `search "reaper": ${search.success ? search.data?.length ?? 0 : `error: ${search.errorMessage}`}`,
++          ].join(" · "),
++        );
++      })
++      .catch((err: unknown) => {
++        console.error("[Library spike] failed", err);
++        setStatus("error");
++        setSummary(String(err));
++      });
++  }, []);
++
++  return (
++    <div className="flex h-full w-full flex-col items-center justify-center gap-2 pt-14 text-base-fg">
++      <h1 className="text-xl font-semibold">Library</h1>
++      <p className="text-sm opacity-70">
++        Stage 0 placeholder. Open DevTools and look for the [Library spike] group.
++      </p>
++      <p className="font-mono text-xs opacity-60" data-status={status}>
++        {status === "loading" ? "Loading…" : summary}
++      </p>
++    </div>
++  );
++};
+diff --git a/frontend/apps/artcraft/app/src/pages/PageLibrary/index.ts b/frontend/apps/artcraft/app/src/pages/PageLibrary/index.ts
+new file mode 100644
+index 0000000..74090dc
+--- /dev/null
++++ b/frontend/apps/artcraft/app/src/pages/PageLibrary/index.ts
+@@ -0,0 +1 @@
++export { PageLibrary } from "./PageLibrary";
+diff --git a/frontend/apps/artcraft/app/src/pages/Stores/TabState.ts b/frontend/apps/artcraft/app/src/pages/Stores/TabState.ts
+index e42a04f..64c8478 100644
+--- a/frontend/apps/artcraft/app/src/pages/Stores/TabState.ts
++++ b/frontend/apps/artcraft/app/src/pages/Stores/TabState.ts
+@@ -18,7 +18,8 @@ export type TabId =
+   | "STORYBOARD"
+   | "BACKGROUND_CHANGE"
+   | "VIDEO_EDITOR"
+-  | "MOODBOARD";
++  | "MOODBOARD"
++  | "LIBRARY";
+ 
+ const DEFAULT_TAB: TabId = "APPS";
+ 
