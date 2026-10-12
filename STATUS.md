@@ -1,8 +1,24 @@
 # STATUS
 
-_Last updated: 2026-10-12_ · Upstream baseline: `storytold/artcraft@d4e4ac6` (2026-10-11)
+_Last updated: 2026-10-12_
 
-## Current stage: 0 — Fork, build and spike
+## Current: AssetCraft Stage 0 (Navigator), not started
+
+**Plan:** [docs/assetcraft-plan.md](docs/assetcraft-plan.md) · **Plan mode spec:** [docs/storyline-builder.md](docs/storyline-builder.md) · **Study notes:** [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md)
+
+**Decided 2026-10-12**
+- Storyline Builder is AssetCraft's Plan mode.
+- AI providers are chosen in Preferences: Local, API or ArtCraft account (credits).
+- Stage 0 is a Bridge-style navigator; `test_data/library/` holds 24 generated test files.
+- Elo stays out of AssetCraft.
+
+**Next action:** Paul answers "new `assetcraft` repo vs this one"; Claude then scaffolds Stage 0 step 1.
+
+---
+
+_Everything below is the superseded ArtCraft Library history._
+
+## ArtCraft Library stage: 0 — Fork, build and spike
 
 **Next action (Paul):** launch the app from `artcraft-wt\library`, open Apps → Library, and paste the `[Library spike]` console group back here.
 
@@ -96,7 +112,16 @@ Add another app later: `git branch <app>/main main; git worktree add ..\artcraft
 | Cloud + local: one merged view or two sections             | Two sections first, merge later if it earns it     | Stage 4   |
 | Deal type (OSS credit / license / role)                    | Decide before any code is shared                   | Stage 6   |
 
+## Direction change (2026-10-12)
+
+ArtCraft (credit-based AI studio) is not the hub. New target: **AssetCraft**, a pure-Rust
+Bridge-style sibling of the storytold Crafting Apps (browse, structure, organize, plan,
+execute). Elo stays out. The ArtCraft clone/worktree and Stage 0 patch are superseded; keep or
+delete at will. Study notes: [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md).
+
 ## Log
 
 - 2026-10-12: Workspace docs created. Stage 0 patch prepared against `d4e4ac6`.
 - 2026-10-12: Private clone + Library worktree set up; Stage 0 patch applied cleanly.
+- 2026-10-12: Studied LightCraft, FilmCraft, PhotoCraft, DesignCraft, PdfCraft, WordCraft, craft-libs; notes written.
+- 2026-10-12: AssetCraft plan, Storyline Builder spec and test_data/library written.
