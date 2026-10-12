@@ -23,6 +23,7 @@ and executes. It's a sibling of the storytold Crafting Apps.
   Read-only git (`status`, `diff`, `log`, `show`) is fine.
 - **When a tool can't do something** (e.g. writing into `.cargo/`, building on Windows), don't stop:
   hand Paul the exact PowerShell commands to run, then carry on.
+- **Every command block starts with `Set-Location <full path>`** so Paul knows where to run it.
 - Small steps: one stage at a time, and one step at a time within a stage. No rewrites.
 - Lead with artifacts (file:line, diffs, API shapes, schemas), then prose.
 - Every finding names its scope, the goal it serves, the suggested fix and who owns it.
