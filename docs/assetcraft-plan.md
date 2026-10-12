@@ -1,6 +1,6 @@
 # AssetCraft: development plan
 
-_2026-10-12 · supersedes `development-stages.md` (the ArtCraft Library plan, kept for history)._
+_2026-10-12 · supersedes `archive/artcraft-library-stages.md` (the ArtCraft Library plan, kept for history)._
 
 - **What it is:** a pure-Rust sibling of the storytold Crafting Apps for **browsing,
   structuring, organizing, planning and executing plans** over creative assets. It does what
@@ -199,7 +199,7 @@ only.
 
 | Decision                                     | Recommendation                                        | Needed by |
 |----------------------------------------------|-------------------------------------------------------|-----------|
-| New `assetcraft` repo vs this workspace repo | New repo for code; move these docs into it            | Stage 0   |
+| Repo                                         | Decided: this repo, renamed to `assetcraft`           | Done      |
 | Study VectorCraft and EffectCraft            | Yes, before Stage 1 (SVG/AI and motion thumbnails)    | Stage 1   |
 | Sibling crates: git dependencies or CLIs     | CLIs first; depend on small standalone crates when stable | Stage 1 |
 | ArtCraft-account provider terms              | Ask the ArtCraft team before building it              | Stage 5   |

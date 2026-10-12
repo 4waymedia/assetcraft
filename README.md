@@ -1,66 +1,48 @@
-# ArtCraft Library
+# AssetCraft
 
-A Bridge-style asset browser for [ArtCraft](https://github.com/storytold/artcraft):
-browse, organize and find generated assets (images, video, and later local files
-and trellis.cpp 3D meshes) from one Library tab.
+Browse, structure, organize, plan and execute: an asset app for creative work, in the spirit
+of Adobe Bridge. Built in pure Rust as a sibling of the storytold
+[Crafting Apps](https://getartcraft.com/apps) (PhotoCraft, FilmCraft, LightCraft, PdfCraft,
+DesignCraft, WordCraft).
 
-- **Project goal it serves:** one place to manage Reapers art across cloud and disk.
-- **Immediate area of improvement:** ArtCraft's backend already has folders, tags,
-  ratings and prompt metadata, but no page shows them.
+- **Project goal it serves:** one place to find, organize and plan creative assets
+  (concepts, plates, video, 3D meshes), and then to produce from them.
+- **Immediate area of improvement:** the Crafting Apps have no Bridge. Each app opens its own
+  files, and nothing sits above them to find, group, plan and hand off work.
 
-## Layout
+**Status:** planning complete; Stage 0 (Navigator) not started. See [STATUS.md](STATUS.md).
 
-This repository is the **workspace**: plan, status, agent guidance and patches.
-The ArtCraft source lives in a separate private clone, nested and git-ignored, so
-upstream files (their `README.md`, `CLAUDE.md`, `AGENTS.md`) are never touched.
+## What it will do
 
-```
-ArtCraft-Library/              # this repo (private): docs + patches
-├── README.md                  # you are here
-├── CLAUDE.md                  # guidance for coding agents in this workspace
-├── STATUS.md                  # current stage, checklists, findings, next action
-├── docs/
-│   └── development-stages.md  # the 7-stage plan (source of truth for scope)
-├── patches/
-│   └── stage0-library-tab.patch
-└── artcraft/                  # private clone of storytold/artcraft (git-ignored)
-    └── ...                    # remotes: origin = your private repo, upstream = storytold
-```
+| Verb      | Highlights                                                                                     |
+|-----------|------------------------------------------------------------------------------------------------|
+| Browse    | Bridge-style folder navigator, thumbnails for every Craft format (PSD, raw, video, PDF, DOCX, 3D) |
+| Structure | Catalog with undo, entities (characters, locations, props), version stacks, lineage            |
+| Organize  | XMP ratings, labels and keywords (shared with LightCraft), collections, smart collections, batch rename |
+| Plan      | [Storyline Builder](docs/storyline-builder.md): blocks, animatic preview, OTIO export into FilmCraft |
+| Execute   | Recipes that drive the sibling apps headlessly, any-CLI steps, hot folders                     |
 
-## Stages
+AI is optional. Each capability uses a provider chosen in Preferences: **Local**, **API**, or
+**ArtCraft account**.
 
-| Stage | Name                       | Kind              | Status      |
-|-------|----------------------------|-------------------|-------------|
-| 0     | Fork, build and spike      | Frontend          | Patch ready |
-| 1     | Read-only cloud library    | Frontend          | Not started |
-| 2     | Organize                   | Frontend          | Not started |
-| 3     | Find                       | Frontend          | Not started |
-| 4     | Local folders              | Rust + SQLite     | Not started |
-| 5     | Asset pipeline             | Rust + Three.js   | Not started |
-| 6     | Package and offer          | Release + pitch   | Not started |
+## Docs
 
-Full scope, steps and exit criteria: [docs/development-stages.md](docs/development-stages.md).
-Live progress: [STATUS.md](STATUS.md).
+| Doc                                                        | What it covers                                        |
+|------------------------------------------------------------|-------------------------------------------------------|
+| [docs/assetcraft-plan.md](docs/assetcraft-plan.md)         | Stages 0–7, Stage 0 in detail, feature backlog        |
+| [docs/storyline-builder.md](docs/storyline-builder.md)     | Plan mode spec, slices A–F, provider design           |
+| [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) | What we learned from each sibling app, with file refs |
+| [test_data/README.md](test_data/README.md)                 | The generated test library                            |
+| [docs/archive/](docs/archive/)                             | The earlier ArtCraft Library plan (superseded)        |
 
-## Quick start (Windows, PowerShell)
+## Stack (planned, following the siblings)
 
-Prerequisites: Rust, Node 20+ (upstream tests with v24.13.0), Tauri CLI 2.x, `gh`.
+- Rust (edition 2024, 1.95+), egui/eframe on wgpu, WASM web build. No Tauri, Electron or JS.
+- Every action is a command; opt-in MCP server and loopback control channel.
+- `craft-ui` from [storytold/craft-libs](https://github.com/storytold/craft-libs) for docking
+  and theming.
 
-```powershell
-# From F:\Script-Projects\ArtCraft-Library, after the clone is set up (see STATUS.md)
-Set-Location .\artcraft
+## Licence
 
-# Terminal 1: frontend dev server (Vite, port 5173)
-.\script\artcraft\windows_frontend_dev.ps1
-
-# Terminal 2: Tauri Rust app
-.\script\artcraft\windows_rust_dev.ps1
-```
-
-Then open **Apps → Library** in the running app.
-
-## Licensing note
-
-ArtCraft is dual-licensed MIT / Apache-2.0. Anything pushed to a public place can
-be used without a deal, so both repos stay private until Stage 6 step 1 (deal
-terms) is decided.
+MIT OR Apache-2.0 (to match the suite). Test images in `test_data/library` are generated
+procedurally and released as CC0.

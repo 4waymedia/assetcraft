@@ -1,73 +1,55 @@
 # CLAUDE.md
 
-Guidance for coding agents working in the ArtCraft Library workspace.
+Guidance for coding agents working on AssetCraft.
 
 ## What this is
 
-A Bridge-style Library tab for ArtCraft, built in seven stages
-(`docs/development-stages.md`). This folder is the workspace repo; the ArtCraft
-source is the nested private clone at `artcraft/`.
-
-- Inside `artcraft/`, **upstream's `AGENTS.md` / `CLAUDE.md` apply first.** This file
-  adds Library-specific rules on top; it never overrides upstream conventions.
-- Read `STATUS.md` before starting work: it names the current stage and next action.
+AssetCraft is a pure-Rust, Bridge-style asset app that browses, structures, organizes, plans
+and executes. It's a sibling of the storytold Crafting Apps.
+- Read `STATUS.md` first. It names the current stage and the next action.
+- The plan is `docs/assetcraft-plan.md`.
+- Sibling patterns and file references are in `docs/crafting-apps-notes.md`.
 
 ## Working agreement with Paul
 
-- **Never run git write commands** (commit, push, rebase, merge, checkout of changed
-  files). Paul runs all git himself. Hand over a PowerShell block instead:
+- **Never run git write commands** (commit, push, rebase, merge, checkout of changed files).
+  Paul runs all git himself, so hand over a PowerShell block instead:
   ```powershell
-  Set-Location F:\Script-Projects\ArtCraft-Library\artcraft
+  Set-Location F:\Script-Projects\AssetCraft
   git add -A
   git commit -m "Stage N: <what changed>"
   git push
   ```
   Read-only git (`status`, `diff`, `log`, `show`) is fine.
-- Small steps. One stage at a time; within a stage, one step at a time. No rewrites.
-- Lead with artifacts: file:line, diffs, API shapes, DDL. Prose second.
-- Every finding comes with: scope, the goal it serves, the suggested fix, and who owns it.
-  Frame gaps as opportunities; this is all in active development.
-- Update `STATUS.md` at the end of every working session (checkboxes, findings, next action).
+- Small steps: one stage at a time, and one step at a time within a stage. No rewrites.
+- Lead with artifacts (file:line, diffs, API shapes, schemas), then prose.
+- Every finding names its scope, the goal it serves, the suggested fix and who owns it.
+  Frame gaps as opportunities.
+- Update `STATUS.md` at the end of every working session.
 
-## Where Library code goes (keeps upstream rebases clean)
+## House rules (from the Crafting Apps; follow from day one)
 
-| What                         | Path (inside `artcraft/`)                                       |
-|------------------------------|-----------------------------------------------------------------|
-| Library page and components  | `frontend/apps/artcraft/app/src/pages/PageLibrary/`             |
-| Reusable logic (Stage 1+)    | `frontend/libs/library/` (survives a move to `artcraft-native`) |
-| Rust commands (Stage 4+)     | one file per command, `library_*` names, per upstream `AGENTS.md` |
-| Local DB (Stage 4+)          | `library_v1.sqlite` with its own migrations folder              |
-
-Shared upstream files get **one-line touches only**. The Stage 0 touch points:
-
-| File                                                        | Touch                                  |
-|-------------------------------------------------------------|----------------------------------------|
-| `frontend/apps/artcraft/app/src/pages/Stores/TabState.ts`   | `"LIBRARY"` in `TabId`                 |
-| `frontend/apps/artcraft/app/src/pages/MainApp.tsx`          | lazy import + `case "LIBRARY"`         |
-| `frontend/apps/artcraft/app/src/config/appMenu.tsx`         | `AppId`, `ALL_APPS` entry, `goToApp`   |
-| `frontend/apps/artcraft/app/src/components/signaled/TopBar/TopBar.tsx` | breadcrumb case            |
-
-## Hard rules
-
-- **No backend changes.** `artcraft-services` is private and out of scope.
-- **Never edit the `tasks` SQLite migrations** or `TASK_DATABASE_VERSION` (a missed
-  bump segfaults on Windows). Library data goes in `library_v1.sqlite`.
-- **Use `@storyteller/api`** (`frontend/libs/api`) for API calls, not the app-local
-  duplicate in `app/src/Classes/ApiManager/`, so Library logic can move into a lib.
-- Stages 1 to 3 are frontend only: no Rust, no schema, no new Tauri permissions.
-- Stage 1 is read-only: nothing may change server data.
-- Before Stage 6, narrow the asset protocol scope from `**` to the library roots.
-- Never push to `upstream`; its push URL is disabled on purpose.
-- Rust (Stage 4+): `sqlx::query!` macros, `log` macros (no `println!`), two-space
-  indentation in TS, refreshed `.sqlx` metadata.
-- Markdown tables are space-padded so columns align in plain text (upstream rule).
+- **Rust only.** egui/eframe on wgpu; the web build is the same Rust compiled to WASM. Never
+  add Tauri, Electron, a webview or JS.
+- **Layering is enforced** by `cargo xtask layers`. UI crates (egui, eframe, winit, rfd,
+  craft-ui) are only allowed in the UI layer and the apps.
+- **Everything is a command:** a `CommandSpec { id, label, menu, shortcut, params, enabled, run }`
+  registry. One `Session::execute(id, params)` entry point serves the UI, keys, CLI, control
+  channel and MCP.
+- **Never crash:** production crate roots deny `unwrap`, `expect` and `panic`, and forbid
+  `unsafe`. Treat every file and input as hostile.
+- **Clean room:** no Adobe or Microsoft assets or code, and no GPL dependencies. Every bundled
+  asset gets an `ATTRIBUTION.md` entry.
+- **Read before write:** nothing changes files on disk before Stage 2. After that, every write
+  is atomic, every batch operation has a dry run, and undo works.
+- **AI is optional.** Providers come from Preferences (Local, API, ArtCraft account). Every
+  feature works with none selected. Secrets live in the OS keyring, never in files.
+- **Elo is out of scope** for AssetCraft.
+- Markdown tables are space-padded so columns line up in plain text.
 
 ## Verify
 
 ```powershell
-# Type-check the app (inside artcraft/frontend/apps/artcraft)
-npx tsc --noEmit -p tsconfig.json
+cargo xtask ci        # fmt, clippy, tests, layers (once scaffolded in Stage 0)
 ```
-Upstream already has ~185 `tsc -b` errors in `frontend/libs/*` (build-config and spec
-files) as of `d4e4ac6`. Judge changes by **no new errors in touched files**, then by
-the stage's exit criteria checked by hand in the running app.
+Test against `test_data/library`. Every edge case there must load or fail gracefully.
