@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-12_
 
-## Current: AssetCraft Stage 0 (Navigator), steps 1–4 done
+## Current: AssetCraft Stage 0 (Navigator), steps 1–5 done
 
 **Plan:** [docs/assetcraft-plan.md](docs/assetcraft-plan.md) · **Plan mode spec:** [docs/storyline-builder.md](docs/storyline-builder.md) · **Study notes:** [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) · **Agent rules:** [AGENTS.md](AGENTS.md)
 
@@ -19,16 +19,16 @@ _Last updated: 2026-10-12_
 - [x] 2. `crates/fs`: `Services` trait (`list_entries`, `entry`, `volumes`, `home_dir`, `known_folder`), `RealFs` (Windows hidden attribute, junctions treated as symlinks, drive letters, OneDrive fallback for known folders), `FakeFs` for tests, bounded symlink-safe `walk`
 - [x] 3. `crates/probe`: format from contents (22 formats incl. PSD, camera raw, HEIF/AVIF, MP4/MOV, MKV, PDF, glTF/GLB, ZIP), header-only dimensions (PNG, JPEG, GIF, BMP, WebP lossy/lossless/extended, TIFF both byte orders incl. IFD at end of file, PSD), `Status` Ok/Unrecognized/Damaged, extension kept as a claim (`is_unreadable`, `extension_mismatch`). `fs` gained `read_head` and `read_range`
 - [x] 4. `crates/thumbs`: `render` (probe first, `image` crate for PNG/JPEG/GIF/BMP/WebP/TIFF only, decode limits 32,768 px / 1 GiB / 256 MB file, decoder panics caught), `ThumbPool` (worker threads, priority then newest-first, dedupe, `retain` for scrolled-away rows, clean shutdown), byte-budgeted LRU `ThumbCache` (256 MiB default). First third-party dependency: 43 crates, all permissive (no GPL)
-- [ ] 5. `crates/engine`: `Session`, `CommandSpec` registry, navigation state
+- [x] 5. `crates/engine`: `Session::execute(id, params)` + 23-command registry (`nav.*`, `view.*`, `select.*`, `file.*`, `item.probe`, `app.state`, `app.commands`); Computer view of drives; back/forward/up history (up and back focus the folder you came from); natural sort with folders first; selection by path (click / Ctrl / Shift / arrows / Ctrl+A) that survives sort and refresh; favorites; `Prefs` JSON that tolerates junk; `Launcher` trait so tests never spawn Explorer
 - [ ] 6. `crates/ui-egui` + desktop app: panels, craft-ui docking
 - [ ] 7. `assetcraft-cli`: `list`, `probe`, `thumb`, `commands`
 - [ ] 8. Tests over `test_data/library`; Stage 0 exit criteria
 
-**Verified (Linux, Rust 1.97):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 62 tests + 1 doc test (20 `fs`, 16 `probe`, 15 `thumbs`: all 23 library images render ≤ 256 px with aspect kept, transparency kept, a forged 100,000² PNG header refused before decoding, the pool renders the whole library and caches it), layers ok.
+**Verified (Linux, Rust 1.97):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 81 tests + 1 doc test (fs 20, probe 16, thumbs 15, engine 21: incl. keyboard-only browse of `test_data/library` down to `characters/reaper/turnaround` and back, every command fed junk params without a panic), layers ok.
 
 **Opportunity (step 2):** known folders use `%USERPROFILE%\<name>` with a OneDrive fallback. Exact locations need the Windows Known Folder API; suggested fix is a small `known-folders` crate behind `cfg(windows)` in Stage 1 (owner: Claude).
 
-**Next action:** Paul runs `cargo xtask ci` on Windows and commits (block in chat). Claude then does step 5 (`crates/engine`).
+**Next action:** Paul runs `cargo xtask ci` on Windows and commits (block in chat). Claude then does step 6 (desktop window: egui panels + craft-ui docking).
 
 ---
 

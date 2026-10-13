@@ -15,3 +15,5 @@ workspace = true
 assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }
 assetcraft-thumbs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

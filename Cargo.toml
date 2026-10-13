@@ -20,6 +20,7 @@ assetcraft-engine = { path = "crates/engine" }
 assetcraft-ui-egui = { path = "crates/ui-egui" }
 # external
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [workspace.lints.rust]
