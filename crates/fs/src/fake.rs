@@ -13,6 +13,7 @@
 use crate::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Listing, Services, Volume};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Clone)]
@@ -22,6 +23,7 @@ struct Node {
     hidden: bool,
     modified: SystemTime,
     unreadable: bool,
+    data: Option<Arc<Vec<u8>>>,
 }
 
 /// In-memory file system. Cheap to clone; immutable once built.
@@ -56,6 +58,17 @@ impl FakeFs {
     /// Add a file of `size` bytes (and its parent folders).
     pub fn file(mut self, path: impl AsRef<Path>, size: u64) -> Self {
         self.insert(path.as_ref(), EntryKind::File, size, false, false);
+        self
+    }
+
+    /// Add a file with real contents (its size is the content length).
+    pub fn file_with(mut self, path: impl AsRef<Path>, bytes: impl Into<Vec<u8>>) -> Self {
+        let bytes: Vec<u8> = bytes.into();
+        let path = path.as_ref();
+        self.insert(path, EntryKind::File, bytes.len() as u64, false, false);
+        if let Some(node) = self.nodes.get_mut(path) {
+            node.data = Some(Arc::new(bytes));
+        }
         self
     }
 
@@ -102,7 +115,7 @@ impl FakeFs {
     fn node(&mut self, kind: EntryKind, size: u64, hidden: bool, unreadable: bool) -> Node {
         self.clock += 1;
         let modified = SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000 + self.clock * 60);
-        Node { kind, size, hidden, modified, unreadable }
+        Node { kind, size, hidden, modified, unreadable, data: None }
     }
 
     fn to_entry(path: &Path, node: &Node) -> Entry {
@@ -145,6 +158,25 @@ impl Services for FakeFs {
 
     fn entry(&self, path: &Path) -> Result<Entry, FsError> {
         self.nodes.get(path).map(|n| Self::to_entry(path, n)).ok_or_else(|| FsError::NotFound(path.to_path_buf()))
+    }
+
+    fn read_head(&self, path: &Path, max: usize) -> Result<Vec<u8>, FsError> {
+        let node = self.nodes.get(path).ok_or_else(|| FsError::NotFound(path.to_path_buf()))?;
+        if node.kind != EntryKind::File {
+            return Err(FsError::Io { path: path.to_path_buf(), message: "not a file".into() });
+        }
+        // Files added without contents read as zeros, up to their declared size.
+        let len = usize::try_from(node.size).unwrap_or(usize::MAX).min(max);
+        Ok(match &node.data {
+            Some(data) => data.iter().take(max).copied().collect(),
+            None => vec![0; len],
+        })
+    }
+
+    fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
+        let head = self.read_head(path, usize::MAX)?;
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(head.len());
+        Ok(head[start..].iter().take(len).copied().collect())
     }
 
     fn volumes(&self) -> Vec<Volume> {
@@ -204,6 +236,18 @@ mod tests {
         assert_eq!(fs.known_folder(KnownFolder::Pictures).as_deref(), Some(Path::new("/home/paul/Pictures")));
         assert_eq!(fs.known_folder(KnownFolder::Videos), None);
         assert_eq!(fs.volumes().len(), 2);
+    }
+
+    #[test]
+    fn read_head_returns_contents_or_zeros() {
+        let fs = FakeFs::new().file_with("/a.png", b"\x89PNG\r\n\x1a\nrest".to_vec()).file("/z", 3).dir("/d");
+        assert_eq!(fs.read_head(Path::new("/a.png"), 4).unwrap(), b"\x89PNG");
+        assert_eq!(fs.entry(Path::new("/a.png")).unwrap().size, 12);
+        assert_eq!(fs.read_head(Path::new("/z"), 99).unwrap(), vec![0, 0, 0]);
+        assert!(fs.read_head(Path::new("/d"), 4).is_err());
+        assert!(matches!(fs.read_head(Path::new("/nope"), 4), Err(FsError::NotFound(_))));
+        assert_eq!(fs.read_range(Path::new("/a.png"), 8, 99).unwrap(), b"rest");
+        assert!(fs.read_range(Path::new("/a.png"), 99, 4).unwrap().is_empty());
     }
 
     #[test]

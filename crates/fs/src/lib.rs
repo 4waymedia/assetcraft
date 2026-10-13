@@ -186,6 +186,14 @@ pub trait Services: Send + Sync {
     /// Metadata for one path, without following a final symlink.
     fn entry(&self, path: &Path) -> Result<Entry, FsError>;
 
+    /// Read at most `max` bytes from the start of a file (for type sniffing and headers).
+    /// Returns fewer bytes for short files. Never reads past `max`.
+    fn read_head(&self, path: &Path, max: usize) -> Result<Vec<u8>, FsError>;
+
+    /// Read at most `len` bytes starting at byte `offset`. Returns fewer bytes (possibly none)
+    /// when the file ends first.
+    fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, FsError>;
+
     /// Mounted volumes / drive roots.
     fn volumes(&self) -> Vec<Volume>;
 

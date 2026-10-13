@@ -2,7 +2,7 @@
 
 _Last updated: 2026-10-12_
 
-## Current: AssetCraft Stage 0 (Navigator), steps 1–2 done
+## Current: AssetCraft Stage 0 (Navigator), steps 1–3 done
 
 **Plan:** [docs/assetcraft-plan.md](docs/assetcraft-plan.md) · **Plan mode spec:** [docs/storyline-builder.md](docs/storyline-builder.md) · **Study notes:** [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) · **Agent rules:** [AGENTS.md](AGENTS.md)
 
@@ -17,18 +17,18 @@ _Last updated: 2026-10-12_
 
 - [x] 1. Workspace scaffold: `Cargo.toml` (edition 2024, Rust 1.95+), lints (no `unsafe`, no `unwrap`/`expect`/`panic` outside tests), stub crates `fs` L0, `probe` L1, `thumbs` L2, `engine` L5, `ui-egui` L6, apps `assetcraft` + `assetcraft-cli`, `xtask` (`ci`, `layers`), AGENTS.md, licences, NOTICE, ATTRIBUTION.md
 - [x] 2. `crates/fs`: `Services` trait (`list_entries`, `entry`, `volumes`, `home_dir`, `known_folder`), `RealFs` (Windows hidden attribute, junctions treated as symlinks, drive letters, OneDrive fallback for known folders), `FakeFs` for tests, bounded symlink-safe `walk`
-- [ ] 3. `crates/probe`: magic-byte sniffing, header-only dimensions, file times
+- [x] 3. `crates/probe`: format from contents (22 formats incl. PSD, camera raw, HEIF/AVIF, MP4/MOV, MKV, PDF, glTF/GLB, ZIP), header-only dimensions (PNG, JPEG, GIF, BMP, WebP lossy/lossless/extended, TIFF both byte orders incl. IFD at end of file, PSD), `Status` Ok/Unrecognized/Damaged, extension kept as a claim (`is_unreadable`, `extension_mismatch`). `fs` gained `read_head` and `read_range`
 - [ ] 4. `crates/thumbs`: decode + downscale on a prioritized worker pool
 - [ ] 5. `crates/engine`: `Session`, `CommandSpec` registry, navigation state
 - [ ] 6. `crates/ui-egui` + desktop app: panels, craft-ui docking
 - [ ] 7. `assetcraft-cli`: `list`, `probe`, `thumb`, `commands`
 - [ ] 8. Tests over `test_data/library`; Stage 0 exit criteria
 
-**Verified (Linux, Rust 1.97):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 30 tests (18 in `fs`, incl. a walk of `test_data/library` = 24 files, 10 folders), layers ok. The layer check rejects an L0 crate that depends on `egui`.
+**Verified (Linux, Rust 1.97):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 47 tests + 1 doc test (20 in `fs`, 16 in `probe`: all 24 library files match Pillow's format and size; every 0–600-byte prefix of every file parses without panic), layers ok.
 
 **Opportunity (step 2):** known folders use `%USERPROFILE%\<name>` with a OneDrive fallback. Exact locations need the Windows Known Folder API; suggested fix is a small `known-folders` crate behind `cfg(windows)` in Stage 1 (owner: Claude).
 
-**Next action:** Paul runs `cargo xtask ci` on Windows and commits (block in chat). Claude then does step 3 (`crates/probe`).
+**Next action:** Paul runs `cargo xtask ci` on Windows and commits (block in chat). Claude then does step 4 (`crates/thumbs`).
 
 ---
 

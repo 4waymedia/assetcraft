@@ -53,6 +53,23 @@ impl Services for RealFs {
         Ok(to_entry(crate::display_name(path), path.to_path_buf(), &meta))
     }
 
+    fn read_head(&self, path: &Path, max: usize) -> Result<Vec<u8>, FsError> {
+        use std::io::Read;
+        let file = fs::File::open(path).map_err(|e| FsError::from_io(path, &e))?;
+        let mut buf = Vec::with_capacity(max.min(1 << 20));
+        file.take(max as u64).read_to_end(&mut buf).map_err(|e| FsError::from_io(path, &e))?;
+        Ok(buf)
+    }
+
+    fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = fs::File::open(path).map_err(|e| FsError::from_io(path, &e))?;
+        file.seek(SeekFrom::Start(offset)).map_err(|e| FsError::from_io(path, &e))?;
+        let mut buf = Vec::with_capacity(len.min(1 << 20));
+        file.take(len as u64).read_to_end(&mut buf).map_err(|e| FsError::from_io(path, &e))?;
+        Ok(buf)
+    }
+
     fn volumes(&self) -> Vec<Volume> {
         volumes()
     }
@@ -205,6 +222,18 @@ mod tests {
         let listing = RealFs.list_entries(&library(), &opts).unwrap();
         assert_eq!(listing.entries.len(), 2);
         assert!(listing.truncated);
+    }
+
+    #[test]
+    fn read_head_is_bounded() {
+        let png = library().join("props/scythe_transparent.png");
+        let head = RealFs.read_head(&png, 8).unwrap();
+        assert_eq!(head, b"\x89PNG\r\n\x1a\n");
+        let broken = library().join("edge-cases/broken_not_an_image.jpg");
+        assert_eq!(RealFs.read_head(&broken, 4096).unwrap(), b"this is not a jpeg");
+        assert!(RealFs.read_head(&library(), 8).is_err());
+        assert_eq!(RealFs.read_range(&broken, 8, 3).unwrap(), b"not");
+        assert!(RealFs.read_range(&broken, 1_000, 3).unwrap().is_empty());
     }
 
     #[test]
