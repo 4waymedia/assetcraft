@@ -18,7 +18,8 @@ assetcraft-probe = { path = "crates/probe" }
 assetcraft-thumbs = { path = "crates/thumbs" }
 assetcraft-engine = { path = "crates/engine" }
 assetcraft-ui-egui = { path = "crates/ui-egui" }
-# external (tooling)
+# external
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
 serde_json = "1"
 
 [workspace.lints.rust]
