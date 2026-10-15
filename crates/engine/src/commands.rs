@@ -189,7 +189,7 @@ static COMMANDS: &[CommandSpec] = &[
         "{name?, sample?: bool} (Manual start, or the 24-clip handoff sample); opens Storyboard mode",
         storyboard::sb_new
     ),
-    cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip}", storyboard::sb_view),
+    cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip|fill}", storyboard::sb_view),
     cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),
     cmd!(
         EDIT,
@@ -209,6 +209,43 @@ static COMMANDS: &[CommandSpec] = &[
         "{bpm?: 20..400, seconds?, keepTitleCards?: bool} (defaults: the current track)",
         storyboard::sb_recut
     ),
+    cmd!(
+        EDIT,
+        "storyboard.autofill",
+        "Auto-fill Rest",
+        "Storyboard",
+        None,
+        "{assets?: [path]} (default: the open folder's files; unused ones first, then repeats)",
+        storyboard::sb_autofill
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.clear",
+        "Clear Shots",
+        "Storyboard",
+        None,
+        "{} (every clip's assets; undoable)",
+        storyboard::sb_clear
+    ),
+    cmd!(
+        APP,
+        "storyboard.play",
+        "Watch your Cut",
+        "Storyboard",
+        Some("Space"),
+        "{from?: seconds} (from the end starts over)",
+        storyboard::sb_play
+    ),
+    cmd!(
+        APP,
+        "storyboard.pause",
+        "Pause",
+        "Storyboard",
+        Some("Space"),
+        "{at?: seconds} (where the playhead stopped)",
+        storyboard::sb_pause
+    ),
+    cmd!(APP, "storyboard.seek", "Seek", "Storyboard", None, "{seconds}", storyboard::sb_seek),
     cmd!(APP_STEP, "storyboard.undo", "Undo", "Storyboard", Some("Ctrl+Z"), "{}", storyboard::sb_undo),
     cmd!(APP_STEP, "storyboard.redo", "Redo", "Storyboard", Some("Ctrl+Y"), "{}", storyboard::sb_redo),
     cmd!(READ, "storyboard.state", "Storyboard State", "Help", None, "{}", storyboard::sb_state),

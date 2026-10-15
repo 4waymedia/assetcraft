@@ -240,4 +240,27 @@ fn screenshot() {
     if let Some(strip) = strip {
         save(&out.with_file_name(format!("{stem}-strip.png")), strip);
     }
+
+    // Fifth and sixth: Quick fill part-way, then all filled after a Re-cut (toast showing).
+    nav.run("storyboard.view", json!({ "view": "fill" }));
+    let mut fill = None;
+    for _ in 0..10 {
+        t += 0.05;
+        fill = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        nav.wait_thumbs(Duration::from_millis(50));
+    }
+    if let Some(fill) = fill {
+        save(&out.with_file_name(format!("{stem}-fill.png")), fill);
+    }
+    nav.run("storyboard.autofill", json!({}));
+    nav.run("storyboard.recut", json!({ "bpm": 128, "seconds": 30 }));
+    let mut done = None;
+    for _ in 0..12 {
+        t += 0.05;
+        done = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        nav.wait_thumbs(Duration::from_millis(50));
+    }
+    if let Some(done) = done {
+        save(&out.with_file_name(format!("{stem}-fill-done.png")), done);
+    }
 }

@@ -78,7 +78,7 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
         ui.weak(format);
         ui.spacing_mut().item_spacing.x = 0.0;
         let view = nav.session.board_view();
-        for (v, label) in [(BoardView::Map, "Shot map"), (BoardView::Strip, "Strip")] {
+        for (v, label) in [(BoardView::Map, "Shot map"), (BoardView::Strip, "Strip"), (BoardView::Fill, "Quick fill")] {
             if ui.selectable_label(view == v, label).clicked() && view != v {
                 nav.run("storyboard.view", json!({ "view": v.as_str() }));
             }
@@ -106,7 +106,8 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
         if ui.add_enabled(can_redo, egui::Button::new("Redo")).on_hover_text("Ctrl+Y").clicked() {
             nav.run("storyboard.redo", json!({}));
         }
-        ui.label(RichText::new(format!("0:00.0 / {}", total.timecode())).font(FontId::monospace(12.0)));
+        let _ = total;
+        crate::strip_view::transport_controls(nav, ui);
     });
 }
 
@@ -116,7 +117,7 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
         empty_state(nav, ui);
         return;
     }
-    if nav.session.board_view() == BoardView::Strip {
+    if nav.session.board_view() != BoardView::Map {
         crate::strip_view::show(nav, ui);
         return;
     }
@@ -124,6 +125,7 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
         inspector(nav, ui);
     });
     egui::CentralPanel::default().show(ui, |ui| shot_map(nav, ui));
+    crate::strip_view::toast(nav, ui.ctx(), 0.0);
 }
 
 fn empty_state(nav: &mut Navigator, ui: &mut Ui) {
@@ -145,6 +147,9 @@ fn empty_state(nav: &mut Navigator, ui: &mut Ui) {
 fn shot_map(nav: &mut Navigator, ui: &mut Ui) {
     let Some(board) = nav.session.storyboard().cloned() else { return };
     let selected = nav.session.selected_clip();
+    // While the Cut plays, the tile under the playhead gets the ring.
+    let at = crate::strip_view::playhead(nav, ui.ctx());
+    let playing_clip = nav.session.transport().playing.then(|| board.clip_at(at).map(|c| c.id)).flatten();
     let next = assetcraft_storyboard::next_empty(&board);
     let mut clicked: Option<ClipId> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -169,7 +174,7 @@ fn shot_map(nav: &mut Navigator, ui: &mut Ui) {
             let scene_start = prev_scene != Some(clip.scene_id);
             prev_scene = Some(clip.scene_id);
             paint_tile(nav, ui, tile, clip, scene_start);
-            if selected == Some(clip.id) {
+            if playing_clip == Some(clip.id) || (playing_clip.is_none() && selected == Some(clip.id)) {
                 ui.painter().rect_stroke(tile.expand(3.0), 8, Stroke::new(2.0, SELECT), StrokeKind::Outside);
             } else if next == Some(clip.id) {
                 ui.painter().rect_stroke(tile.expand(3.0), 8, Stroke::new(1.0, ACCENT), StrokeKind::Outside);

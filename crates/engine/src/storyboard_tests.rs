@@ -1,5 +1,6 @@
 use super::*;
 use assetcraft_fs::FakeFs;
+use assetcraft_storyboard::Ticks;
 use serde_json::json;
 
 fn session() -> Session {
@@ -112,4 +113,66 @@ fn view_switches_between_map_and_strip() {
     assert_eq!(run(&mut s, "storyboard.state", json!({}))["view"], "strip");
     assert!(matches!(s.execute("storyboard.view", &json!({"view": "tracks"})), Err(CmdError::BadParams(_))));
     assert_eq!(s.board_view(), BoardView::Strip);
+}
+
+#[test]
+fn autofill_and_clear_are_single_undo_steps() {
+    let mut s = session();
+    assert!(matches!(s.execute("storyboard.autofill", &json!({})), Err(CmdError::Unavailable(_))));
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    // The fake home folder has no files: nothing to fill with.
+    assert!(matches!(s.execute("storyboard.autofill", &json!({})), Err(CmdError::Unavailable(_))));
+    let before = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.autofill", json!({"assets": ["/a.png", "/b.png"]}));
+    assert_eq!(r["filled"].as_array().map(Vec::len), Some(19));
+    assert_eq!(s.boards.undo_len(), before + 1);
+    assert_eq!(s.selected_clip(), None, "nothing left to target");
+    assert!(matches!(s.execute("storyboard.autofill", &json!({"assets": ["/a.png"]})), Err(CmdError::Unavailable(_))));
+    for bad in [json!({"assets": "x"}), json!({"assets": [1]}), json!({"assets": [""]})] {
+        assert!(matches!(s.execute("storyboard.autofill", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    assert_eq!(run(&mut s, "storyboard.clear", json!({}))["cleared"], 19);
+    assert!(matches!(s.execute("storyboard.clear", &json!({})), Err(CmdError::Unavailable(_))));
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().fill_progress().0, 19);
+}
+
+#[test]
+fn autofill_defaults_to_the_open_folder() {
+    let fs = FakeFs::new()
+        .known(KnownFolder::Home, "/home/paul")
+        .known(KnownFolder::Pictures, "/home/paul/Pictures")
+        .file("/home/paul/Pictures/one.png", 10)
+        .file("/home/paul/Pictures/two.png", 10)
+        .dir("/home/paul/Pictures/sub");
+    let mut s = Session::new(Arc::new(fs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    run(&mut s, "storyboard.autofill", json!({}));
+    let board = s.storyboard().unwrap();
+    assert_eq!(board.fill_progress(), (19, 19));
+    assert!(board.clips.iter().flat_map(|c| &c.asset_ids).all(|a| a.0.ends_with(".png")), "folders are skipped");
+}
+
+#[test]
+fn transport_plays_pauses_and_seeks_within_the_cut() {
+    let mut s = session();
+    assert!(matches!(s.execute("storyboard.play", &json!({})), Err(CmdError::Unavailable(_))));
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    let total = s.storyboard().unwrap().total();
+    let r = run(&mut s, "storyboard.play", json!({}));
+    assert_eq!((r["playing"].as_bool(), r["position"].as_f64()), (Some(true), Some(0.0)));
+    run(&mut s, "storyboard.pause", json!({"at": 12.5}));
+    assert_eq!(s.transport(), Transport { playing: false, position: Ticks::from_secs_f64(12.5).unwrap() });
+    run(&mut s, "storyboard.pause", json!({"at": 1e6}));
+    assert_eq!(s.transport().position, total, "clamped to the Cut");
+    run(&mut s, "storyboard.play", json!({}));
+    assert_eq!(s.transport().position, Ticks::ZERO, "play from the end starts over");
+    run(&mut s, "storyboard.seek", json!({"seconds": 3}));
+    assert!(!s.transport().playing);
+    for bad in [json!({"seconds": -1}), json!({"seconds": "x"}), json!({})] {
+        assert!(matches!(s.execute("storyboard.seek", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    assert_eq!(run(&mut s, "storyboard.state", json!({}))["transport"]["timecode"], "0:03.0");
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    assert_eq!(s.transport(), Transport::default(), "a new storyboard rewinds");
 }

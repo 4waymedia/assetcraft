@@ -50,3 +50,32 @@ pub fn place(board: &mut Storyboard, asset: AssetId, target: Option<ClipId>) -> 
     clip.asset_ids = vec![asset];
     Ok(id)
 }
+
+/// Auto-fill rest: put an asset into every empty clip, in Cut order. Assets not used anywhere
+/// yet go first (in the order given); once those run out the whole list repeats. Returns the
+/// clips filled, in order. Empty `assets` fills nothing.
+pub fn auto_fill(board: &mut Storyboard, assets: &[AssetId]) -> Vec<ClipId> {
+    if assets.is_empty() {
+        return Vec::new();
+    }
+    let used: std::collections::HashSet<&AssetId> = board.clips.iter().flat_map(|c| c.asset_ids.iter()).collect();
+    let queue: Vec<AssetId> = assets.iter().filter(|a| !used.contains(a)).cloned().collect();
+    let fresh = queue.len();
+    let mut filled = Vec::new();
+    for (k, clip) in board.clips.iter_mut().filter(|c| c.is_empty_shot()).enumerate() {
+        let asset = if k < fresh { queue[k].clone() } else { assets[(k - fresh) % assets.len()].clone() };
+        clip.asset_ids = vec![asset];
+        filled.push(clip.id);
+    }
+    filled
+}
+
+/// Clear: remove every assigned asset. Returns how many clips were emptied.
+pub fn clear(board: &mut Storyboard) -> usize {
+    let mut n = 0;
+    for clip in board.clips.iter_mut().filter(|c| !c.asset_ids.is_empty()) {
+        clip.asset_ids.clear();
+        n += 1;
+    }
+    n
+}

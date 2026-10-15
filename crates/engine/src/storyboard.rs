@@ -7,13 +7,16 @@
 
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{
-    AssetId, Bpm, Clip, ClipId, Limits, RecutOptions, Scene, SceneId, ShotType, Storyboard, Ticks, Track, next_empty,
-    place, recut, sample,
+    AssetId, Bpm, Clip, ClipId, Limits, RecutOptions, Scene, SceneId, ShotType, Storyboard, Ticks, Track, auto_fill,
+    clear, next_empty, place, recut, sample,
 };
 use serde_json::{Value, json};
 
 /// Most undo steps kept.
 pub const MAX_UNDO: usize = 100;
+
+/// Most assets `storyboard.autofill` takes.
+pub const MAX_AUTOFILL_ASSETS: usize = 10_000;
 
 /// Which mode the window shows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -43,6 +46,8 @@ pub enum BoardView {
     Map,
     /// Editor layout: Content panel, Viewer, Inspector, full-width timeline (2b).
     Strip,
+    /// Quick fill (4a): click assets into empty clips in order, then Watch your Cut.
+    Fill,
 }
 
 impl BoardView {
@@ -51,8 +56,22 @@ impl BoardView {
         match self {
             BoardView::Map => "map",
             BoardView::Strip => "strip",
+            BoardView::Fill => "fill",
         }
     }
+}
+
+/// Watch your Cut: whether the Cut is playing and where it was started or paused.
+///
+/// The engine records play, pause and seek (every user action is a command); while playing,
+/// the window advances the playhead from `position` with its own clock and reports where it
+/// stopped through `storyboard.pause {at}`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Transport {
+    /// Playing now.
+    pub playing: bool,
+    /// Where playback started (when playing) or the paused playhead (when not).
+    pub position: Ticks,
 }
 
 /// Storyboard state held by the session.
@@ -60,6 +79,7 @@ impl BoardView {
 pub struct Boards {
     mode: Mode,
     view: BoardView,
+    transport: Transport,
     board: Option<Storyboard>,
     selected: Option<ClipId>,
     undo: Vec<(Option<Storyboard>, Option<ClipId>)>,
@@ -90,6 +110,11 @@ impl Session {
     /// The Shot map view Storyboard mode shows.
     pub fn board_view(&self) -> BoardView {
         self.boards.view
+    }
+
+    /// Watch your Cut transport.
+    pub fn transport(&self) -> Transport {
+        self.boards.transport
     }
 
     /// The open storyboard.
@@ -129,7 +154,8 @@ pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
     let view = match p.get("view").and_then(Value::as_str) {
         Some("map") => BoardView::Map,
         Some("strip") => BoardView::Strip,
-        _ => return Err(CmdError::BadParams("need `view`: map|strip".into())),
+        Some("fill") => BoardView::Fill,
+        _ => return Err(CmdError::BadParams("need `view`: map|strip|fill".into())),
     };
     s.boards.view = view;
     Ok(json!({ "view": view.as_str() }))
@@ -149,6 +175,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     s.boards.selected = next_empty(&board).or_else(|| board.clips.first().map(|c| c.id));
     s.boards.board = Some(board);
     s.boards.mode = Mode::Storyboard;
+    s.boards.transport = Transport::default();
     Ok(state(s))
 }
 
@@ -199,8 +226,10 @@ pub(crate) fn sb_place(s: &mut Session, p: &Value) -> CmdResult {
         place(&mut board, AssetId(asset.to_owned()), target).map_err(|e| CmdError::Unavailable(e.to_string()))?;
     s.boards.checkpoint();
     s.boards.board = Some(board);
+    // The cursor moves on to the next empty clip; once every clip is filled nothing is selected,
+    // so Quick fill shows "All n clips filled" rather than offering to replace the last one.
     let next = s.boards.board.as_ref().and_then(next_empty);
-    s.boards.selected = next.or(Some(placed));
+    s.boards.selected = next;
     let (filled, fillable) = s.boards.board.as_ref().map(Storyboard::fill_progress).unwrap_or((0, 0));
     Ok(json!({
         "placed": placed.0,
@@ -249,6 +278,105 @@ pub(crate) fn sb_recut(s: &mut Session, p: &Value) -> CmdResult {
     }))
 }
 
+pub(crate) fn sb_autofill(s: &mut Session, p: &Value) -> CmdResult {
+    let assets: Vec<AssetId> = match p.get("assets") {
+        Some(Value::Array(list)) => {
+            if list.len() > MAX_AUTOFILL_ASSETS {
+                return Err(CmdError::BadParams(format!("at most {MAX_AUTOFILL_ASSETS} `assets`")));
+            }
+            let mut out = Vec::with_capacity(list.len());
+            for v in list {
+                let a = v
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty() && a.len() <= Limits::default().max_string)
+                    .ok_or_else(|| CmdError::BadParams("`assets` must be paths".into()))?;
+                out.push(AssetId(a.to_owned()));
+            }
+            out
+        }
+        None => s
+            .items
+            .iter()
+            .filter(|e| e.kind == assetcraft_fs::EntryKind::File)
+            .take(MAX_AUTOFILL_ASSETS)
+            .map(|e| AssetId(e.path.to_string_lossy().into_owned()))
+            .collect(),
+        Some(_) => return Err(CmdError::BadParams("`assets` must be a list of paths".into())),
+    };
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    if next_empty(&board).is_none() {
+        return Err(CmdError::Unavailable("every clip already has a shot".into()));
+    }
+    if assets.is_empty() {
+        return Err(CmdError::Unavailable("no assets to fill with (open a folder in the Organizer)".into()));
+    }
+    let filled = auto_fill(&mut board, &assets);
+    s.boards.checkpoint();
+    s.boards.board = Some(board);
+    s.boards.selected = None;
+    Ok(json!({
+        "filled": filled.iter().map(|c| c.0).collect::<Vec<_>>(),
+        "message": format!("Auto-filled {} clips", filled.len()),
+    }))
+}
+
+pub(crate) fn sb_clear(s: &mut Session, _: &Value) -> CmdResult {
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let n = clear(&mut board);
+    if n == 0 {
+        return Err(CmdError::Unavailable("no clip has a shot yet".into()));
+    }
+    s.boards.checkpoint();
+    s.boards.selected = next_empty(&board);
+    s.boards.board = Some(board);
+    Ok(json!({ "cleared": n, "message": format!("Cleared {n} clips (Ctrl+Z to undo)") }))
+}
+
+pub(crate) fn sb_play(s: &mut Session, p: &Value) -> CmdResult {
+    let total = s.boards.board.as_ref().ok_or_else(no_board)?.total();
+    if total == Ticks::ZERO {
+        return Err(CmdError::Unavailable("the Cut is empty".into()));
+    }
+    let from = match p.get("from") {
+        None => s.boards.transport.position,
+        Some(v) => seconds(v, "from")?,
+    };
+    // Playing from the end starts over.
+    let from = if from >= total { Ticks::ZERO } else { from };
+    s.boards.transport = Transport { playing: true, position: from };
+    Ok(transport_json(s))
+}
+
+pub(crate) fn sb_pause(s: &mut Session, p: &Value) -> CmdResult {
+    let total = s.boards.board.as_ref().ok_or_else(no_board)?.total();
+    let at = match p.get("at") {
+        None => s.boards.transport.position,
+        Some(v) => seconds(v, "at")?,
+    };
+    s.boards.transport = Transport { playing: false, position: at.min(total) };
+    Ok(transport_json(s))
+}
+
+pub(crate) fn sb_seek(s: &mut Session, p: &Value) -> CmdResult {
+    let total = s.boards.board.as_ref().ok_or_else(no_board)?.total();
+    let at = seconds(p.get("seconds").unwrap_or(&Value::Null), "seconds")?;
+    s.boards.transport = Transport { playing: false, position: at.min(total) };
+    Ok(transport_json(s))
+}
+
+fn seconds(v: &Value, key: &str) -> Result<Ticks, CmdError> {
+    v.as_f64()
+        .filter(|s| *s >= 0.0)
+        .and_then(Ticks::from_secs_f64)
+        .ok_or_else(|| CmdError::BadParams(format!("`{key}` must be seconds, 0 or more")))
+}
+
+fn transport_json(s: &Session) -> Value {
+    let t = s.boards.transport;
+    json!({ "playing": t.playing, "position": t.position.as_secs_f64(), "timecode": t.position.timecode() })
+}
+
 pub(crate) fn sb_undo(s: &mut Session, _: &Value) -> CmdResult {
     let (board, selected) = s.boards.undo.pop().ok_or_else(|| CmdError::Unavailable("nothing to undo".into()))?;
     let current = (std::mem::replace(&mut s.boards.board, board), s.boards.selected);
@@ -286,6 +414,7 @@ pub(crate) fn state(s: &Session) -> Value {
     json!({
         "mode": b.mode.as_str(),
         "view": b.view.as_str(),
+        "transport": transport_json(s),
         "board": b.board.as_ref().and_then(|board| serde_json::to_value(board).ok()),
         "summary": summary,
         "selected": b.selected.map(|c| c.0),

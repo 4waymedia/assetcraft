@@ -218,3 +218,21 @@ fn the_sample_board_is_valid_and_matches_the_handoff() {
     assert_eq!(back, board);
     assert_eq!(board.scene_title(SceneId(4)), Some("Hollow Saint"));
 }
+
+#[test]
+fn auto_fill_prefers_unused_assets_then_repeats() {
+    let mut board = sample();
+    place(&mut board, AssetId("a".into()), None).unwrap(); // clip 2
+    let assets: Vec<AssetId> = ["a", "b", "c"].iter().map(|s| AssetId((*s).into())).collect();
+    let filled = auto_fill(&mut board, &assets);
+    assert_eq!(filled.len(), 18);
+    assert_eq!(board.fill_progress(), (19, 19));
+    let order: Vec<&str> = filled.iter().map(|id| board.clip(*id).unwrap().asset_ids[0].0.as_str()).collect();
+    assert_eq!(&order[..5], &["b", "c", "a", "b", "c"], "unused first, then the list repeats");
+    assert!(board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl).all(|c| c.asset_ids.is_empty()));
+    assert!(auto_fill(&mut board, &assets).is_empty(), "nothing left to fill");
+    assert!(auto_fill(&mut sample(), &[]).is_empty());
+    assert_eq!(clear(&mut board), 19);
+    assert_eq!(board.fill_progress(), (0, 19));
+    assert_eq!(clear(&mut board), 0);
+}

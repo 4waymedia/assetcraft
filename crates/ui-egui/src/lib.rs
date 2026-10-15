@@ -82,6 +82,8 @@ struct UiState {
     model: Option<model_preview::ModelPreview>,
     /// Open In ▸ entries and the session generation they were built at.
     open_in_cache: std::cell::RefCell<Option<(u64, Vec<MenuEntry>)>>,
+    /// Storyboard view plumbing: playback clock and the Re-cut toast.
+    storyboard: strip_view::SbUi,
 }
 
 impl Navigator {
@@ -129,7 +131,12 @@ impl Navigator {
                 if id == "formats.heic" {
                     self.thumbs.set_options(self.session.decode_options());
                 }
-                if let Some(text) = value.get("message").and_then(Value::as_str) {
+                if id == "storyboard.recut" {
+                    // Re-cut reports as a toast over the timeline (design 4a), not the status bar.
+                    if let Some(text) = value.get("message").and_then(Value::as_str) {
+                        self.state.storyboard.toast = Some((text.to_owned(), None));
+                    }
+                } else if let Some(text) = value.get("message").and_then(Value::as_str) {
                     self.inform(text.to_owned());
                 }
                 Some(value)
@@ -321,12 +328,17 @@ impl Navigator {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo) = ctx.input_mut(|i| {
+            let (undo, redo, space) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
                 )
             });
+            if space && self.session.storyboard().is_some() {
+                let at = strip_view::playhead(self, ctx);
+                strip_view::toggle_play(self, at);
+            }
             if undo && self.session.can_undo_storyboard() {
                 self.run("storyboard.undo", json!({}));
             }

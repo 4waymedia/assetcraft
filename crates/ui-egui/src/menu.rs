@@ -33,6 +33,11 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",
+    "storyboard.autofill",
+    "storyboard.clear",
+    "storyboard.play",
+    "storyboard.pause",
+    "storyboard.seek",
 ];
 
 /// What a menu item does.
@@ -334,6 +339,7 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 MenuEntry::Separator,
                 check("Shot Map", on && view == BoardView::Map, on, cmd(spec.id, json!({ "view": "map" }))),
                 check("Strip", on && view == BoardView::Strip, on, cmd(spec.id, json!({ "view": "strip" }))),
+                check("Quick Fill", on && view == BoardView::Fill, on, cmd(spec.id, json!({ "view": "fill" }))),
             ]
         }
         "storyboard.new" => vec![

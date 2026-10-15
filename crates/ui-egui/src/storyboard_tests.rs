@@ -130,3 +130,112 @@ fn dragging_an_organizer_file_onto_a_strip_clip_places_it() {
     assert_eq!(clip2.asset_ids.len(), 1, "dropped on clip #02");
     assert!(clip2.asset_ids[0].0.contains("reaper"));
 }
+
+fn click(ctx: &Context, nav: &mut Navigator, at: Pos2, t: &mut f64) {
+    let press =
+        |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)], Vec::new()] {
+        *t += 0.05;
+        frame(ctx, nav, events, *t);
+    }
+}
+
+fn reaper_nav() -> (Navigator, Vec<std::path::PathBuf>) {
+    let mut nav = nav();
+    let reaper = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/characters/reaper");
+    let reaper = reaper.canonicalize().unwrap_or(reaper);
+    assert!(nav.open_folder(&reaper));
+    let files = nav
+        .session()
+        .items()
+        .iter()
+        .filter(|e| e.kind == assetcraft_fs::EntryKind::File)
+        .map(|e| e.path.clone())
+        .collect();
+    (nav, files)
+}
+
+#[test]
+fn quick_fill_clicks_fill_in_order_and_replace_the_selected_clip() {
+    let ctx = Context::default();
+    let (mut nav, files) = reaper_nav();
+    assert!(files.len() >= 2);
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "fill" }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let rect = |ctx: &Context, id| ctx.read_response(id).map(|r| r.rect).expect("widget drawn");
+    let first = rect(&ctx, crate::strip_view::asset_cell_id(&files[0]));
+    click(&ctx, &mut nav, first.center(), &mut t);
+    let second = rect(&ctx, crate::strip_view::asset_cell_id(&files[1]));
+    click(&ctx, &mut nav, second.center(), &mut t);
+    let clip = |nav: &Navigator, n: u32| {
+        nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(n)).unwrap().asset_ids.clone()
+    };
+    assert_eq!(clip(&nav, 2)[0].0, files[0].to_string_lossy());
+    assert_eq!(clip(&nav, 3)[0].0, files[1].to_string_lossy(), "the cursor advanced");
+    assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(4));
+    // Click clip #02 in the timeline: it becomes the REPLACING target.
+    let c2 = rect(&ctx, crate::strip_view::strip_clip_id(assetcraft_storyboard::ClipId(2)));
+    click(&ctx, &mut nav, c2.center(), &mut t);
+    assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(2));
+    let second = rect(&ctx, crate::strip_view::asset_cell_id(&files[1]));
+    click(&ctx, &mut nav, second.center(), &mut t);
+    assert_eq!(clip(&nav, 2)[0].0, files[1].to_string_lossy(), "replaced");
+    assert_eq!(nav.session().storyboard().unwrap().fill_progress().0, 2);
+}
+
+#[test]
+fn auto_fill_then_watch_the_cut_to_the_end() {
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "fill" }));
+    nav.run("storyboard.autofill", json!({}));
+    let total = nav.session().storyboard().unwrap().total().as_secs_f64();
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    // Space plays; time runs on egui's clock.
+    let space = Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![space.clone()], t);
+    assert!(nav.session().transport().playing);
+    t += 10.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![space], t);
+    let paused = nav.session().transport();
+    assert!(!paused.playing);
+    assert!(
+        (paused.position.as_secs_f64() - 10.0).abs() < 0.2,
+        "paused near 10 s, got {}",
+        paused.position.as_secs_f64()
+    );
+    nav.run("storyboard.play", json!({}));
+    frame(&ctx, &mut nav, Vec::new(), t);
+    t += total + 5.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let end = nav.session().transport();
+    assert!(!end.playing, "stops at the end of the Cut");
+    assert!((end.position.as_secs_f64() - total).abs() < 1e-6);
+}
+
+#[test]
+fn recut_shows_a_toast_not_a_status_message() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.recut", json!({ "bpm": 128, "seconds": 30 }));
+    assert!(
+        nav.state.storyboard.toast.as_ref().is_some_and(|(m, _)| m.starts_with("Re-cut to Sample track · 128 BPM"))
+    );
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    frame(&ctx, &mut nav, Vec::new(), 4.0);
+    assert!(nav.state.storyboard.toast.is_none(), "gone after 3.8 s");
+}

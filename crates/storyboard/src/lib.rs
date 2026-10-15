@@ -22,7 +22,7 @@ pub mod sample;
 pub mod time;
 pub mod validate;
 
-pub use fill::{FillError, next_empty, place};
+pub use fill::{FillError, auto_fill, clear, next_empty, place};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, Transition,
 };
