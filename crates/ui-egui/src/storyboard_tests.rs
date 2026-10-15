@@ -91,3 +91,42 @@ fn clicking_a_tile_selects_it_and_ctrl_z_undoes_a_placement() {
     frame(&ctx, &mut nav, Vec::new(), t + 0.1);
     assert_eq!(nav.session().mode(), Mode::Organizer);
 }
+
+#[test]
+fn dragging_an_organizer_file_onto_a_strip_clip_places_it() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let reaper = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/characters/reaper");
+    let reaper = reaper.canonicalize().unwrap_or(reaper);
+    assert!(nav.open_folder(&reaper));
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    // First Content-panel cell: just inside the left panel, below the tabs and folder line.
+    let from = Pos2::new(40.0, 150.0);
+    // Clip #02 in the timeline: the strip starts 8 px in, clip #01 (title card) is 2.6 s at 44 px/s.
+    let strip_y = 860.0 - 24.0 - 150.0 / 2.0 - 12.0;
+    let to = Pos2::new(8.0 + 2.6 * 44.0 + 40.0, strip_y);
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        let p = from + (to - from) * (k as f32 / 8.0);
+        steps.push(vec![Event::PointerMoved(p)]);
+    }
+    steps.push(vec![press(to, false)]);
+    steps.push(Vec::new());
+    for events in steps {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    let board = nav.session().storyboard().unwrap();
+    let clip2 = board.clip(assetcraft_storyboard::ClipId(2)).unwrap();
+    assert_eq!(clip2.asset_ids.len(), 1, "dropped on clip #02");
+    assert!(clip2.asset_ids[0].0.contains("reaper"));
+}

@@ -18,6 +18,7 @@ mod model_preview;
 mod pathbar;
 pub mod prefs_file;
 mod storyboard_view;
+mod strip_view;
 pub mod theme;
 mod thumbnails;
 mod widgets;

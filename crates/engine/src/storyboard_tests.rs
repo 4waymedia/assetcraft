@@ -103,3 +103,13 @@ fn select_and_recut() {
     run(&mut s, "storyboard.undo", json!({}));
     assert!((s.storyboard().unwrap().track.as_ref().unwrap().bpm.get() - 92.0).abs() < 1e-9);
 }
+
+#[test]
+fn view_switches_between_map_and_strip() {
+    let mut s = session();
+    assert_eq!(s.board_view(), BoardView::Map);
+    assert_eq!(run(&mut s, "storyboard.view", json!({"view": "strip"}))["view"], "strip");
+    assert_eq!(run(&mut s, "storyboard.state", json!({}))["view"], "strip");
+    assert!(matches!(s.execute("storyboard.view", &json!({"view": "tracks"})), Err(CmdError::BadParams(_))));
+    assert_eq!(s.board_view(), BoardView::Strip);
+}

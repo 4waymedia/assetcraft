@@ -28,7 +28,7 @@ pub use paths::{clean_user_path, same_path};
 pub use prefs::{FormatPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
 pub use select::{ClickMode, Selection};
 pub use sort::SortKey;
-pub use storyboard::{MAX_UNDO, Mode};
+pub use storyboard::{BoardView, MAX_UNDO, Mode};
 pub use watching::{MAX_INCREMENTAL, WatchStatus};
 
 use assetcraft_fs::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Services, Volume};

@@ -8,7 +8,7 @@
 
 use crate::Navigator;
 use crate::thumbnails::Cell;
-use assetcraft_engine::Mode;
+use assetcraft_engine::{BoardView, Mode};
 use assetcraft_storyboard::{Clip, ClipId, ShotType, Storyboard, Ticks};
 use assetcraft_thumbs::ThumbKey;
 use egui::{Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2};
@@ -21,15 +21,15 @@ const CAPTION_H: f32 = 18.0;
 const GAP_X: f32 = 22.0;
 const GAP_Y: f32 = 18.0;
 /// Inspector width.
-const INSPECTOR_W: f32 = 300.0;
+pub(crate) const INSPECTOR_W: f32 = 300.0;
 
-const ACCENT: Color32 = Color32::from_rgb(0x2f, 0x6f, 0xd6);
-const SELECT: Color32 = Color32::from_rgb(0x4d, 0xa3, 0xff);
-const TILE_BORDER: Color32 = Color32::from_rgb(0x4a, 0x51, 0x60);
-const INSERT_BORDER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
-const SCENE_RED: Color32 = Color32::from_rgb(0xff, 0x4d, 0x5e);
+pub(crate) const ACCENT: Color32 = Color32::from_rgb(0x2f, 0x6f, 0xd6);
+pub(crate) const SELECT: Color32 = Color32::from_rgb(0x4d, 0xa3, 0xff);
+pub(crate) const TILE_BORDER: Color32 = Color32::from_rgb(0x4a, 0x51, 0x60);
+pub(crate) const INSERT_BORDER: Color32 = Color32::from_rgb(0x6b, 0x72, 0x80);
+pub(crate) const SCENE_RED: Color32 = Color32::from_rgb(0xff, 0x4d, 0x5e);
 const AI_TEXT: Color32 = Color32::from_rgb(0x6f, 0xa3, 0xdc);
-const CU_TEXT: Color32 = Color32::from_rgb(0x14, 0x17, 0x1d);
+pub(crate) const CU_TEXT: Color32 = Color32::from_rgb(0x14, 0x17, 0x1d);
 
 /// Stand-in tracks for trying Re-cut until real tracks arrive (plan step 8):
 /// `(label, bpm, seconds)`.
@@ -39,7 +39,7 @@ const DEMO_TRACKS: &[(&str, f64, f64)] = &[
     ("Slow burn · 70 BPM · 1:35", 70.0, 95.0),
 ];
 
-fn rgb(hex: u32) -> Color32 {
+pub(crate) fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
@@ -73,11 +73,20 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
         };
         let track = board.track.as_ref().map(|t| (t.bpm.get(), t.duration));
         let total = board.total();
+        let tname = track_name(board);
         ui.label(RichText::new(name).strong());
         ui.weak(format);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let view = nav.session.board_view();
+        for (v, label) in [(BoardView::Map, "Shot map"), (BoardView::Strip, "Strip")] {
+            if ui.selectable_label(view == v, label).clicked() && view != v {
+                nav.run("storyboard.view", json!({ "view": v.as_str() }));
+            }
+        }
+        ui.spacing_mut().item_spacing.x = 12.0;
         match track {
             Some((bpm, len)) => {
-                let current = format!("♪ {} · {} BPM · {}", track_name(board), fmt_bpm(bpm), short_time(len));
+                let current = format!("♪ {tname} · {} BPM · {}", fmt_bpm(bpm), short_time(len));
                 egui::ComboBox::from_id_salt("sb-track").selected_text(current).width(240.0).show_ui(ui, |ui| {
                     for (label, b, secs) in DEMO_TRACKS {
                         if ui.selectable_label(false, *label).clicked() {
@@ -105,6 +114,10 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
 pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     if nav.session.storyboard().is_none() {
         empty_state(nav, ui);
+        return;
+    }
+    if nav.session.board_view() == BoardView::Strip {
+        crate::strip_view::show(nav, ui);
         return;
     }
     egui::Panel::right("sb-inspector").exact_size(INSPECTOR_W).resizable(false).show(ui, |ui| {
@@ -248,7 +261,7 @@ fn hover_text(clip: &Clip) -> String {
 }
 
 /// The Inspector for the selected clip (read-only in this slice; editing is the clip editor, step 6).
-fn inspector(nav: &mut Navigator, ui: &mut Ui) {
+pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
     let Some(board) = nav.session.storyboard().cloned() else { return };
     let selected = nav.session.selected_clip().and_then(|id| board.clip(id).cloned());
     let focused = focused_file(nav);
@@ -351,7 +364,7 @@ pub(crate) fn focused_file(nav: &Navigator) -> Option<std::path::PathBuf> {
         .map(|e| e.path.clone())
 }
 
-fn hero_frame(nav: &mut Navigator, ui: &mut Ui, path: &str) {
+pub(crate) fn hero_frame(nav: &mut Navigator, ui: &mut Ui, path: &str) {
     let w = ui.available_width().min(INSPECTOR_W - 16.0);
     let (rect, _) = ui.allocate_exact_size(vec2(w, w * 9.0 / 16.0), Sense::hover());
     ui.painter().rect_filled(rect, 4, Color32::BLACK);
@@ -402,7 +415,7 @@ fn short_time(t: Ticks) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
 
-fn dashed_rect(ui: &Ui, r: Rect, color: Color32) {
+pub(crate) fn dashed_rect(ui: &Ui, r: Rect, color: Color32) {
     let stroke = Stroke::new(1.0, color);
     let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
     for w in pts.windows(2) {
@@ -411,7 +424,7 @@ fn dashed_rect(ui: &Ui, r: Rect, color: Color32) {
 }
 
 /// Largest rect of `size`'s aspect inside `r`, centred.
-fn contain(r: Rect, size: Vec2) -> Rect {
+pub(crate) fn contain(r: Rect, size: Vec2) -> Rect {
     if size.x <= 0.0 || size.y <= 0.0 {
         return r;
     }
@@ -420,7 +433,7 @@ fn contain(r: Rect, size: Vec2) -> Rect {
 }
 
 /// Rect of `size`'s aspect that covers `r`, centred.
-fn cover(r: Rect, size: Vec2) -> Rect {
+pub(crate) fn cover(r: Rect, size: Vec2) -> Rect {
     if size.x <= 0.0 || size.y <= 0.0 {
         return r;
     }
@@ -429,7 +442,7 @@ fn cover(r: Rect, size: Vec2) -> Rect {
 }
 
 /// UV sub-rect so drawing into `r` crops `target` (a cover rect) to `r`.
-fn uv_for_cover(r: Rect, target: Rect) -> Rect {
+pub(crate) fn uv_for_cover(r: Rect, target: Rect) -> Rect {
     let (w, h) = (target.width().max(1.0), target.height().max(1.0));
     Rect::from_min_max(
         pos2((r.left() - target.left()) / w, (r.top() - target.top()) / h),

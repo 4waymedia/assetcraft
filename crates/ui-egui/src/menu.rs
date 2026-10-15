@@ -9,7 +9,7 @@
 use crate::dock::{self, Panel};
 use crate::widgets::format_size;
 use crate::{Navigator, content::sort_name, pathbar};
-use assetcraft_engine::{CommandSpec, Location, Mode, SortKey, ThemeMode, ViewMode, commands, same_path};
+use assetcraft_engine::{BoardView, CommandSpec, Location, Mode, SortKey, ThemeMode, ViewMode, commands, same_path};
 use egui::{Button, Rect, Ui};
 use serde_json::{Value, json};
 
@@ -325,6 +325,15 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             vec![
                 check("Organizer", mode == Mode::Organizer, true, cmd(spec.id, json!({ "mode": "organizer" }))),
                 check("Storyboard", mode == Mode::Storyboard, true, cmd(spec.id, json!({ "mode": "storyboard" }))),
+            ]
+        }
+        "storyboard.view" => {
+            let on = s.mode() == Mode::Storyboard;
+            let view = s.board_view();
+            vec![
+                MenuEntry::Separator,
+                check("Shot Map", on && view == BoardView::Map, on, cmd(spec.id, json!({ "view": "map" }))),
+                check("Strip", on && view == BoardView::Strip, on, cmd(spec.id, json!({ "view": "strip" }))),
             ]
         }
         "storyboard.new" => vec![

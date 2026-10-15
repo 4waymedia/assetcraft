@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1–2 done, step 3 first slice done_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2 and 4 done, step 3 first slice done; step 5 next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -38,7 +38,7 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | 1    | `crates/storyboard` (L3): model, `Ticks`/`Bpm`, Re-cut, Quick fill, hostile-JSON validation with `Limits`   | done   |
 | 2    | Engine: one open storyboard in `Session` (memory only); commands `app.mode`, `storyboard.new`, `storyboard.select`, `storyboard.place`, `storyboard.recut`, `storyboard.undo`, `storyboard.redo`, `storyboard.state`; undo/redo stack (100 steps, selection included). `storyboard.clip.add` / `.clip.set` moved to step 6 with the clip editor | done   |
 | 3    | UI: Organizer \| Storyboard mode switch, toolbar chrome, Shot map 1a (112 px tiles, shot-type colours, § and ◆), Inspector 300 px, status bar | first slice done; Format › Preset menu and transport wait for steps 5 and 9 |
-| 4    | Strip view (2b): Content panel, Viewer, full-width timeline at 44 px/s, drag asset → clip                    | —      |
+| 4    | Strip view (2b): Content panel, Viewer, full-width timeline at 44 px/s, drag asset → clip                    | done; Effects / Titles tabs are placeholders, Scenes and Tracks toggles wait for steps 6 and 8 |
 | 5    | Quick fill (4a): NEXT card, click-to-place, REPLACING target, progress bar, Undo / Auto-fill rest / Clear; Re-cut on track change with toast; Watch your Cut (animatic) | —      |
 | 6    | Scenes view (2a), Clip editor modal (1d), Manual start (3e)                                                  | —      |
 | 7    | Save / open a storyboard document (needs decision D3)                                                        | —      |

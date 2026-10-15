@@ -35,10 +35,31 @@ impl Mode {
     }
 }
 
+/// Which Shot map view Storyboard mode shows (design 1a and 2b; Scenes and Tracks come later).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BoardView {
+    /// Page-map tiles (1a).
+    #[default]
+    Map,
+    /// Editor layout: Content panel, Viewer, Inspector, full-width timeline (2b).
+    Strip,
+}
+
+impl BoardView {
+    /// Name used in commands and `storyboard.state`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BoardView::Map => "map",
+            BoardView::Strip => "strip",
+        }
+    }
+}
+
 /// Storyboard state held by the session.
 #[derive(Debug, Default)]
 pub struct Boards {
     mode: Mode,
+    view: BoardView,
     board: Option<Storyboard>,
     selected: Option<ClipId>,
     undo: Vec<(Option<Storyboard>, Option<ClipId>)>,
@@ -64,6 +85,11 @@ impl Session {
     /// The mode the window shows.
     pub fn mode(&self) -> Mode {
         self.boards.mode
+    }
+
+    /// The Shot map view Storyboard mode shows.
+    pub fn board_view(&self) -> BoardView {
+        self.boards.view
     }
 
     /// The open storyboard.
@@ -97,6 +123,16 @@ pub(crate) fn app_mode(s: &mut Session, p: &Value) -> CmdResult {
     };
     s.boards.mode = mode;
     Ok(json!({ "mode": mode.as_str() }))
+}
+
+pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
+    let view = match p.get("view").and_then(Value::as_str) {
+        Some("map") => BoardView::Map,
+        Some("strip") => BoardView::Strip,
+        _ => return Err(CmdError::BadParams("need `view`: map|strip".into())),
+    };
+    s.boards.view = view;
+    Ok(json!({ "view": view.as_str() }))
 }
 
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
@@ -249,6 +285,7 @@ pub(crate) fn state(s: &Session) -> Value {
     });
     json!({
         "mode": b.mode.as_str(),
+        "view": b.view.as_str(),
         "board": b.board.as_ref().and_then(|board| serde_json::to_value(board).ok()),
         "summary": summary,
         "selected": b.selected.map(|c| c.0),

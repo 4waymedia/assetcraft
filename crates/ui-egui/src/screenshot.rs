@@ -225,4 +225,19 @@ fn screenshot() {
     if let Some(board) = board {
         save(&out.with_file_name(format!("{stem}-storyboard.png")), board);
     }
+
+    // Fourth picture: the Strip view of the same board.
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let mut strip = None;
+    for i in 0..80 {
+        t += 0.05;
+        strip = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        if i > 3 && nav.thumbs.busy() == 0 {
+            break;
+        }
+        nav.wait_thumbs(Duration::from_millis(100));
+    }
+    if let Some(strip) = strip {
+        save(&out.with_file_name(format!("{stem}-strip.png")), strip);
+    }
 }

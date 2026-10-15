@@ -189,6 +189,7 @@ static COMMANDS: &[CommandSpec] = &[
         "{name?, sample?: bool} (Manual start, or the 24-clip handoff sample); opens Storyboard mode",
         storyboard::sb_new
     ),
+    cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip}", storyboard::sb_view),
     cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),
     cmd!(
         EDIT,
