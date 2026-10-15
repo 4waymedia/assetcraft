@@ -16,12 +16,12 @@ The desktop binary also still embeds egui's default fonts as fallbacks, through 
 Noto Emoji under OFL-1.1, emoji-icon-font under MIT); their licences ship with that crate.
 
 Sibling-app crates used as dependencies (git, pinned by commit; MIT OR Apache-2.0; not copied):
-- photocraft-psd (storytold/photocraft crates/psd, rev d43db3e153c76aefce9b32cef9099e458eaf17a8):
+- photocraft-psd (storytold/photocraft crates/psd, rev c699e3cda69f4852b43c0b191ab0091aaeff9d6a, release 0.9.0):
   PSD/PSB composite for thumbnails (crates/thumbs/src/decoders/psd.rs).
 - lightcraft-raw, lightcraft-meta and their lightcraft-tiff/-geom/-color/-raster dependencies
-  (storytold/lightcraft, rev 701f78ea2e586d4748705f10fdf5c4181dc1fd49): camera raw embedded
+  (storytold/lightcraft, rev 16dbb90499d3c63a6582fcbba1b2550a6e2da032, release 0.8.0): camera raw embedded
   previews and orientation (crates/thumbs/src/decoders/raw.rs).
-- lightcraft-heif (same repository and rev) over heic-rs 0.1.1 (MIT OR Apache-2.0): HEIF/HEIC
+- lightcraft-heif (same repository and rev) over heic-rs 0.1.4 (MIT OR Apache-2.0): HEIF/HEIC
   thumbnails (crates/thumbs/src/decoders/heif.rs), compiled in only with the opt-in `heic` cargo
   feature (off by default; `cargo build -p assetcraft --features heic`) and then used only after
   the user turns on View > Formats > HEIC. Default builds contain neither crate. HEVC may be
@@ -32,7 +32,7 @@ Dependencies from sibling apps
 - pdfcraft-render (PDF first-page thumbnails in crates/thumbs/src/decoders/pdf.rs), with its
   pdfcraft-cos / -crypt / -filters / -fonts crates and PdfCraft's vendored, patched hayro,
   hayro-interpret, hayro-syntax, hayro-jbig2 and lopdf (patched in through [patch.crates-io] in
-  Cargo.toml): storytold/pdfcraft, rev 7163ba3dee8becfff6871c9a65d0d8314314742b (release 0.7.1),
+  Cargo.toml): storytold/pdfcraft, rev 9931329b9fae0b05373b4dc3ac7c58541f0891a4 (release 0.8.0),
   MIT OR Apache-2.0 (the vendored crates keep their upstream MIT / Apache-2.0 licences). Used as
   a git dependency; no code copied. Built without craft-fonts (CRAFT_FONTS_DIR unset), so no font
   files are embedded.

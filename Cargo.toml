@@ -35,26 +35,26 @@ craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb
 egui = { version = "0.36", default-features = false, features = ["default_fonts"] }
 eframe = { version = "0.36", default-features = false }
 # Stage 1 decoders from the sibling apps (MIT OR Apache-2.0), pinned by commit.
-# PSD/PSB composite: PhotoCraft 0.8.2 (deps: thiserror, flate2).
-photocraft-psd = { git = "https://github.com/storytold/photocraft", rev = "d43db3e153c76aefce9b32cef9099e458eaf17a8" }
-# Camera raw embedded previews and orientation: LightCraft 0.7.1 (no JPEG XL: default features off).
-lightcraft-raw = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49", default-features = false }
-lightcraft-meta = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49" }
-# HEIF/HEIC: LightCraft 0.7.1 over heic-rs (pure Rust). Optional (`heif` feature of thumbs).
-lightcraft-heif = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49" }
+# PSD/PSB composite: PhotoCraft 0.9.0 (deps: thiserror, flate2).
+photocraft-psd = { git = "https://github.com/storytold/photocraft", rev = "c699e3cda69f4852b43c0b191ab0091aaeff9d6a" }
+# Camera raw embedded previews and orientation: LightCraft 0.8.0 (no JPEG XL: default features off).
+lightcraft-raw = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032", default-features = false }
+lightcraft-meta = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }
+# HEIF/HEIC: LightCraft 0.8.0 over heic-rs (pure Rust). Optional (`heic` feature of thumbs, off by default).
+lightcraft-heif = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }
 # PDF first-page thumbnails (L2 thumbs). PdfCraft's renderer (hayro + vello_cpu, no UI crates),
-# MIT OR Apache-2.0, pinned to the PdfCraft 0.7.1 release.
-pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+# MIT OR Apache-2.0, pinned to the PdfCraft 0.8.0 release.
+pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
 
 # PdfCraft renders through vendored, patched hayro/lopdf (hostile-file fixes: nesting caps,
 # allocation caps, hang fixes; see PdfCraft vendor/README.md). A git dependency doesn't carry its
 # workspace's [patch] table, so the same vendored copies are patched in here from the same rev.
 [patch.crates-io]
-hayro = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
-hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
-hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
-hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
-lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "9931329b9fae0b05373b4dc3ac7c58541f0891a4" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
