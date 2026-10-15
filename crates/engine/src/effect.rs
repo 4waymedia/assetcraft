@@ -51,7 +51,8 @@ pub struct Effects {
     pub classes: &'static [EffectClass],
     /// The call can lose work that isn't trivially recoverable.
     pub destructive: bool,
-    /// The app records an undo step (`None` = unknown). AssetCraft has no undo before Stage 2.
+    /// The app records an undo step (`None` = unknown). Before Stage 2 only storyboard edits
+    /// (`Effects::EDIT`) are undoable.
     pub undoable: Option<bool>,
     /// Repeating the call with the same params has no further effect.
     pub idempotent: bool,

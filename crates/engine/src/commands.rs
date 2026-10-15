@@ -181,7 +181,7 @@ static COMMANDS: &[CommandSpec] = &[
     // Storyboard (Stage 4; in memory until saving lands, see docs/storyboard-plan.md)
     cmd!(APP, "app.mode", "Mode", "View", None, "{mode: organizer|storyboard}", storyboard::app_mode),
     cmd!(
-        EDIT,
+        APP,
         "storyboard.new",
         "New Storyboard",
         "File",
