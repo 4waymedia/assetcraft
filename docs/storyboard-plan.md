@@ -43,7 +43,7 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | 6    | Scenes view (2a), Clip editor modal (1d), Manual start (3e)                                                  | —      |
 | 7    | Save / open a storyboard document (needs decision D3)                                                        | —      |
 | 8    | Tracks view (2c): text, shots and music tracks; waveform and beat grid (audio decode: opportunity O2)        | —      |
-| 9    | Format › Preset picker (3c), Start storyboard (3b), Tag content → Init story (3a)                            | —      |
+| 9    | Style › Preset picker (3c; music-timed presets, see [storyboard-presets.md](storyboard-presets.md)), Start storyboard (3b), Tag content → Init story (3a)                            | —      |
 | 10   | OTIO export → FilmCraft (`crates/interchange`, slice B)                                                      | —      |
 | Later (Stage 5) | AI build (3d), Shape to music proposal (1e), suggested angles                                     | —      |
 
