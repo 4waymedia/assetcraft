@@ -86,6 +86,8 @@ impl Effects {
     pub const APP: Effects = Effects { classes: APP, ..Effects::READ };
     /// Changes in-app state relative to where it is now (`nav.back`, `select.move`, toggles).
     pub const APP_STEP: Effects = Effects { idempotent: false, ..Effects::APP };
+    /// Edits the open storyboard (in memory) and records an undo step (`storyboard.place`).
+    pub const EDIT: Effects = Effects { undoable: Some(true), ..Effects::APP_STEP };
     /// Starts another program on the user's files (`file.open`, `file.openIn`, `file.reveal`).
     pub const LAUNCH: Effects =
         Effects { idempotent: false, confirm_always: true, note: Some(STARTS_A_PROGRAM), ..Effects::APP };
@@ -148,7 +150,7 @@ mod tests {
         assert_eq!(ids(Effects::confirm), BTreeSet::from(["file.open", "file.openIn", "file.reveal", "file.run"]));
         assert_eq!(
             ids(Effects::read_only),
-            BTreeSet::from(["app.commands", "app.openInTargets", "app.state", "item.probe"])
+            BTreeSet::from(["app.commands", "app.openInTargets", "app.state", "item.probe", "storyboard.state"])
         );
         assert!(
             ids(|e| e.classes.iter().any(|c| matches!(c, EffectClass::WriteUserFile | EffectClass::ExternalNetwork)))

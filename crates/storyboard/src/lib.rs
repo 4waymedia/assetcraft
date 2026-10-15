@@ -9,6 +9,7 @@
 //!   and beat arithmetic.
 //! - [`recut`]: the Re-cut rule that fits clip durations to a track's beat grid.
 //! - [`fill`]: Quick fill, placing assets into empty clips in order.
+//! - [`sample`]: the handoff's 24-clip sample board (placeholder content).
 //! - [`validate`]: loading a storyboard document from bytes as hostile input, with [`Limits`].
 //!
 //! Commands that change a storyboard live in the engine (L5); this crate only answers "what
@@ -17,6 +18,7 @@
 pub mod fill;
 pub mod model;
 pub mod recut;
+pub mod sample;
 pub mod time;
 pub mod validate;
 
@@ -25,6 +27,7 @@ pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, Transition,
 };
 pub use recut::{RecutOptions, RecutReport, recut};
+pub use sample::sample;
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};
 pub use validate::{BoardError, FORMAT_VERSION, Limits};
 

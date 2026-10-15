@@ -271,6 +271,7 @@ version = "0.0.1"
 dependencies = [
  "assetcraft-fs",
  "assetcraft-probe",
+ "assetcraft-storyboard",
  "assetcraft-thumbs",
  "assetcraft-watch",
  "serde",
@@ -331,6 +332,7 @@ dependencies = [
  "assetcraft-engine",
  "assetcraft-fs",
  "assetcraft-probe",
+ "assetcraft-storyboard",
  "assetcraft-thumbs",
  "assetcraft-watch",
  "craft-ui",

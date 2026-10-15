@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · step 1 done, step 2 next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1–2 done, step 3 first slice done_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -36,8 +36,8 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | Step | Delivers                                                                                                   | Status |
 |------|------------------------------------------------------------------------------------------------------------|--------|
 | 1    | `crates/storyboard` (L3): model, `Ticks`/`Bpm`, Re-cut, Quick fill, hostile-JSON validation with `Limits`   | done   |
-| 2    | Engine: one open storyboard in `Session` (memory only); commands `storyboard.new`, `storyboard.clip.add`, `storyboard.clip.set`, `storyboard.select`, `storyboard.place`, `storyboard.recut`, `storyboard.state`; undo/redo stack; reachable from `assetcraft-cli exec` | next   |
-| 3    | UI: Organizer \| Storyboard mode switch, toolbar chrome, Shot map 1a (112 px tiles, shot-type colours, § and ◆), Inspector 300 px, status bar | —      |
+| 2    | Engine: one open storyboard in `Session` (memory only); commands `app.mode`, `storyboard.new`, `storyboard.select`, `storyboard.place`, `storyboard.recut`, `storyboard.undo`, `storyboard.redo`, `storyboard.state`; undo/redo stack (100 steps, selection included). `storyboard.clip.add` / `.clip.set` moved to step 6 with the clip editor | done   |
+| 3    | UI: Organizer \| Storyboard mode switch, toolbar chrome, Shot map 1a (112 px tiles, shot-type colours, § and ◆), Inspector 300 px, status bar | first slice done; Format › Preset menu and transport wait for steps 5 and 9 |
 | 4    | Strip view (2b): Content panel, Viewer, full-width timeline at 44 px/s, drag asset → clip                    | —      |
 | 5    | Quick fill (4a): NEXT card, click-to-place, REPLACING target, progress bar, Undo / Auto-fill rest / Clear; Re-cut on track change with toast; Watch your Cut (animatic) | —      |
 | 6    | Scenes view (2a), Clip editor modal (1d), Manual start (3e)                                                  | —      |
@@ -47,13 +47,13 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | 10   | OTIO export → FilmCraft (`crates/interchange`, slice B)                                                      | —      |
 | Later (Stage 5) | AI build (3d), Shape to music proposal (1e), suggested angles                                     | —      |
 
-## Decisions needed (Paul)
+## Decisions (Paul)
 
-| ID | Question                                                                                         | Recommendation                                                                                         | Needed by |
+| ID | Question                                                                                         | Recommendation / decision                                                                                         | Needed by |
 |----|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|-----------|
-| D1 | Adopt the handoff's vocabulary over storyline-builder's "block"                                   | Yes; storyline-builder.md keeps its history, new code and UI use Clip/Scene/Storyboard                  | Step 2    |
+| D1 | Adopt the handoff's vocabulary over storyline-builder's "block"                                   | **Decided (Paul, 2026-10-15): yes.** storyline-builder.md keeps its history; new code and UI use Clip/Scene/Storyboard | Done      |
 | D2 | Storyboard ahead of Stages 1.5, 2 and 3                                                           | Yes, as asked; it needs none of them for steps 1–6. Stage 1 W1 (Windows CI re-run) still closes first   | Now       |
-| D3 | Writing storyboard documents before Stage 2's write rules                                         | Allow AssetCraft's own new files only (never the user's assets): atomic temp + rename, save-as never overwrites without asking | Step 7 |
+| D3 | Writing storyboard documents before Stage 2's write rules                                         | **Decided (Paul, 2026-10-15): agreed.** AssetCraft's own new files only (never the user's assets): atomic temp + rename; save-as never overwrites without asking | Step 7 |
 
 ## Opportunities
 

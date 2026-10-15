@@ -9,7 +9,7 @@
 use crate::dock::{self, Panel};
 use crate::widgets::format_size;
 use crate::{Navigator, content::sort_name, pathbar};
-use assetcraft_engine::{CommandSpec, Location, SortKey, ThemeMode, ViewMode, commands, same_path};
+use assetcraft_engine::{CommandSpec, Location, Mode, SortKey, ThemeMode, ViewMode, commands, same_path};
 use egui::{Button, Rect, Ui};
 use serde_json::{Value, json};
 
@@ -27,6 +27,12 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "app.state",
     "app.commands",
     "app.openInTargets",
+    // Storyboard mode drives these from its mode bar, Shot map and Inspector (and Ctrl+Z / Ctrl+Y).
+    "storyboard.select",
+    "storyboard.recut",
+    "storyboard.undo",
+    "storyboard.redo",
+    "storyboard.state",
 ];
 
 /// What a menu item does.
@@ -314,6 +320,23 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         "file.reveal" => simple(focus || matches!(s.location(), Location::Folder(_))),
         _ if spec.params.starts_with("{}") => simple(true),
         // A new parameterized command needs a wrapper here (the registry test fails until then).
+        "app.mode" => {
+            let mode = s.mode();
+            vec![
+                check("Organizer", mode == Mode::Organizer, true, cmd(spec.id, json!({ "mode": "organizer" }))),
+                check("Storyboard", mode == Mode::Storyboard, true, cmd(spec.id, json!({ "mode": "storyboard" }))),
+            ]
+        }
+        "storyboard.new" => vec![
+            item("New Storyboard", None, true, cmd(spec.id, json!({}))),
+            item("New Storyboard from Sample", None, true, cmd(spec.id, json!({ "sample": true }))),
+        ],
+        "storyboard.place" => {
+            let file = crate::storyboard_view::focused_file(nav);
+            let has_empty = s.storyboard().and_then(assetcraft_storyboard::next_empty).is_some();
+            let path = file.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+            vec![item(spec.label, None, file.is_some() && has_empty, cmd(spec.id, json!({ "asset": path })))]
+        }
         _ => Vec::new(),
     }
 }

@@ -17,6 +17,7 @@ assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }
 assetcraft-thumbs = { workspace = true }
 assetcraft-watch = { workspace = true }
+assetcraft-storyboard = { workspace = true }
 craft-ui = { workspace = true }
 egui = { workspace = true }
 serde = { workspace = true }

@@ -184,4 +184,45 @@ fn screenshot() {
     let menu = shoot(&ctx, &mut nav, &mut textures, Vec::new(), t);
     let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "screenshot".into());
     save(&out.with_file_name(format!("{stem}-view-menu.png")), menu);
+
+    // Third picture: Storyboard mode with the sample board and a few shots placed.
+    t += 0.05;
+    shoot(
+        &ctx,
+        &mut nav,
+        &mut textures,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        t,
+    );
+    let files: Vec<String> = nav
+        .session
+        .items()
+        .iter()
+        .filter(|e| e.kind == assetcraft_fs::EntryKind::File)
+        .map(|e| e.path.to_string_lossy().into_owned())
+        .take(6)
+        .collect();
+    assert!(nav.run("storyboard.new", json!({ "sample": true })).is_some());
+    for f in &files {
+        nav.run("storyboard.place", json!({ "asset": f }));
+    }
+    nav.run("storyboard.select", json!({ "clip": 3 }));
+    let mut board = None;
+    for i in 0..80 {
+        t += 0.05;
+        board = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        if i > 3 && nav.thumbs.busy() == 0 {
+            break;
+        }
+        nav.wait_thumbs(Duration::from_millis(100));
+    }
+    if let Some(board) = board {
+        save(&out.with_file_name(format!("{stem}-storyboard.png")), board);
+    }
 }

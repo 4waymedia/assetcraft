@@ -5,6 +5,7 @@ use crate::effect::Effects;
 use crate::prefs::{THUMB_SIZE_RANGE, ThemeMode, ViewMode, panels_json_ok};
 use crate::select::ClickMode;
 use crate::sort::SortKey;
+use crate::storyboard;
 use crate::{CmdError, CmdResult, Location, Session, clean_user_path, same_path};
 use assetcraft_fs::{EntryKind, KnownFolder};
 use serde_json::{Value, json};
@@ -177,6 +178,39 @@ static COMMANDS: &[CommandSpec] = &[
         "{} (deletes the disk cache in the background)",
         cache_clear
     ),
+    // Storyboard (Stage 4; in memory until saving lands, see docs/storyboard-plan.md)
+    cmd!(APP, "app.mode", "Mode", "View", None, "{mode: organizer|storyboard}", storyboard::app_mode),
+    cmd!(
+        EDIT,
+        "storyboard.new",
+        "New Storyboard",
+        "File",
+        None,
+        "{name?, sample?: bool} (Manual start, or the 24-clip handoff sample); opens Storyboard mode",
+        storyboard::sb_new
+    ),
+    cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),
+    cmd!(
+        EDIT,
+        "storyboard.place",
+        "Place in Next Empty Clip",
+        "Edit",
+        None,
+        "{asset: path, clip?: number} (Quick fill; with `clip`, replaces that clip's shot)",
+        storyboard::sb_place
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.recut",
+        "Re-cut to Track",
+        "Storyboard",
+        None,
+        "{bpm?: 20..400, seconds?, keepTitleCards?: bool} (defaults: the current track)",
+        storyboard::sb_recut
+    ),
+    cmd!(APP_STEP, "storyboard.undo", "Undo", "Storyboard", Some("Ctrl+Z"), "{}", storyboard::sb_undo),
+    cmd!(APP_STEP, "storyboard.redo", "Redo", "Storyboard", Some("Ctrl+Y"), "{}", storyboard::sb_redo),
+    cmd!(READ, "storyboard.state", "Storyboard State", "Help", None, "{}", storyboard::sb_state),
     // App
     cmd!(READ, "app.state", "State", "Help", None, "{}", |s, _| Ok(state_json(s))),
     cmd!(READ, "app.commands", "Commands", "Help", None, "{}", |_, _| Ok(commands_json())),
@@ -614,6 +648,7 @@ pub(crate) fn state_json(s: &Session) -> Value {
         "favorites": lossy_all(&s.favorites),
         "selected": lossy_all(&s.selected_paths()),
         "focus": s.selection.focus().map(lossy),
+        "mode": s.mode().as_str(),
         "preview": s.preview_open,
         "thumb_cache": cache_json(s),
         "formats": formats_json(s),

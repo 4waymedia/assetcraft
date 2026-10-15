@@ -17,6 +17,7 @@ mod menu;
 mod model_preview;
 mod pathbar;
 pub mod prefs_file;
+mod storyboard_view;
 pub mod theme;
 mod thumbnails;
 mod widgets;
@@ -275,13 +276,27 @@ impl Navigator {
         self.handle_keys(&ctx);
         self.track_focus();
 
+        let storyboard = self.session.mode() == assetcraft_engine::Mode::Storyboard;
         egui::Panel::top("assetcraft-menubar").show(ui, |ui| menu::bar(self, ui));
-        egui::Panel::top("assetcraft-pathbar").show(ui, |ui| pathbar::show(self, ui));
-        egui::Panel::bottom("assetcraft-status").show(ui, |ui| self.status_bar(ui));
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().panel_fill)).show(ui, |ui| {
-            dock::show(self, ui);
-        });
-        if self.session.preview_open() {
+        egui::Panel::top("assetcraft-modebar").show(ui, |ui| storyboard_view::mode_bar(self, ui));
+        if storyboard {
+            egui::Panel::bottom("assetcraft-status").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    storyboard_view::status(self, ui);
+                    self.message_label(ui);
+                })
+            });
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().panel_fill)).show(ui, |ui| {
+                storyboard_view::show(self, ui);
+            });
+        } else {
+            egui::Panel::top("assetcraft-pathbar").show(ui, |ui| pathbar::show(self, ui));
+            egui::Panel::bottom("assetcraft-status").show(ui, |ui| self.status_bar(ui));
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(ui.visuals().panel_fill)).show(ui, |ui| {
+                dock::show(self, ui);
+            });
+        }
+        if !storyboard && self.session.preview_open() {
             inspector::overlay(self, &ctx);
         }
         menu::windows(self, &ctx);
@@ -303,6 +318,21 @@ impl Navigator {
         // react to Space / Enter.
         if let Some(id) = focused {
             ctx.memory_mut(|m| m.surrender_focus(id));
+        }
+        if self.session.mode() == assetcraft_engine::Mode::Storyboard {
+            let (undo, redo) = ctx.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
+                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
+                )
+            });
+            if undo && self.session.can_undo_storyboard() {
+                self.run("storyboard.undo", json!({}));
+            }
+            if redo && self.session.can_redo_storyboard() {
+                self.run("storyboard.redo", json!({}));
+            }
+            return;
         }
         let events = ctx.input(|i| i.events.clone());
         let cx = keys::KeyContext {
@@ -360,15 +390,20 @@ impl Navigator {
                 ui.separator();
                 ui.weak("Live updates off").on_hover_text(format!("{reason}\nPress F5 to refresh."));
             }
-            if let Some((text, _)) = &self.state.message {
-                ui.separator();
-                if self.state.message_is_info {
-                    ui.label(RichText::new(text).color(ui.visuals().strong_text_color()));
-                } else {
-                    ui.label(RichText::new(text).color(theme::error_color(ui.visuals())));
-                }
-            }
+            self.message_label(ui);
         });
+    }
+
+    /// The status-bar message (info or error), if one is showing.
+    fn message_label(&self, ui: &mut Ui) {
+        if let Some((text, _)) = &self.state.message {
+            ui.separator();
+            if self.state.message_is_info {
+                ui.label(RichText::new(text).color(ui.visuals().strong_text_color()));
+            } else {
+                ui.label(RichText::new(text).color(theme::error_color(ui.visuals())));
+            }
+        }
     }
 
     fn expire_message(&mut self, ctx: &egui::Context) {
@@ -401,5 +436,7 @@ impl Navigator {
 mod screenshot;
 #[cfg(test)]
 mod stage1_tests;
+#[cfg(test)]
+mod storyboard_tests;
 #[cfg(test)]
 mod tests;

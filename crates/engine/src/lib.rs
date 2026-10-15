@@ -13,6 +13,7 @@ pub mod paths;
 pub mod prefs;
 pub mod select;
 pub mod sort;
+pub mod storyboard;
 mod watching;
 
 pub use assetcraft_thumbs::DiskCache;
@@ -27,6 +28,7 @@ pub use paths::{clean_user_path, same_path};
 pub use prefs::{FormatPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
 pub use select::{ClickMode, Selection};
 pub use sort::SortKey;
+pub use storyboard::{MAX_UNDO, Mode};
 pub use watching::{MAX_INCREMENTAL, WatchStatus};
 
 use assetcraft_fs::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Services, Volume};
@@ -158,6 +160,8 @@ pub struct Session {
     generation: u64,
     /// Optional formats as saved (`formats.heic`).
     formats: FormatPrefs,
+    /// Storyboard mode: the open storyboard, selected clip, undo (`storyboard.*`).
+    boards: storyboard::Boards,
 }
 
 impl Session {
@@ -191,6 +195,7 @@ impl Session {
             apps: Vec::new(),
             generation: 0,
             formats: prefs.formats,
+            boards: storyboard::Boards::default(),
         };
         session.rescan_places();
         let start = prefs
@@ -576,5 +581,7 @@ fn same_location(a: &Location, b: &Location) -> bool {
 
 #[cfg(test)]
 mod open_in_tests;
+#[cfg(test)]
+mod storyboard_tests;
 #[cfg(test)]
 mod tests;

@@ -206,3 +206,15 @@ fn hostile_documents_are_refused() {
         Err(BoardError::Limit(_))
     ));
 }
+
+#[test]
+fn the_sample_board_is_valid_and_matches_the_handoff() {
+    let board = crate::sample();
+    assert_eq!(board.clips.len(), 24);
+    assert_eq!(board.scenes.len(), 5);
+    assert_eq!(board.fill_progress(), (0, 19));
+    assert!(board.validate(&Limits::default()).is_ok());
+    let back = Storyboard::from_json(board.to_json().unwrap().as_bytes()).unwrap();
+    assert_eq!(back, board);
+    assert_eq!(board.scene_title(SceneId(4)), Some("Hollow Saint"));
+}

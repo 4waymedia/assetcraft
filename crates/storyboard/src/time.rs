@@ -67,6 +67,9 @@ impl Ticks {
 pub struct Bpm(f64);
 
 impl Bpm {
+    /// 120 BPM, the usual default tempo.
+    pub const DEFAULT: Bpm = Bpm(120.0);
+
     /// A checked tempo.
     pub fn new(bpm: f64) -> Option<Bpm> {
         (bpm.is_finite() && (MIN_BPM..=MAX_BPM).contains(&bpm)).then_some(Bpm(bpm))
