@@ -5,7 +5,40 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 
 Third-party material
 
-None bundled. The per-file list (author, source, license) is in ATTRIBUTION.md.
+The per-file list (author, source, license) is in ATTRIBUTION.md.
+
+Inter font (assets/fonts/Inter-*.ttf): SIL Open Font License 1.1. See assets/fonts/OFL-Inter.txt.
+JetBrains Mono font (assets/fonts/JetBrainsMono-Regular.ttf): SIL Open Font License 1.1. See
+assets/fonts/OFL-JetBrainsMono.txt. Both are embedded in the desktop binary.
+
+The desktop binary also still embeds egui's default fonts as fallbacks, through the
+`epaint_default_fonts` crate (Ubuntu-Light under the Ubuntu Font Licence 1.0, Hack under MIT,
+Noto Emoji under OFL-1.1, emoji-icon-font under MIT); their licences ship with that crate.
+
+Sibling-app crates used as dependencies (git, pinned by commit; MIT OR Apache-2.0; not copied):
+- photocraft-psd (storytold/photocraft crates/psd, rev d43db3e153c76aefce9b32cef9099e458eaf17a8):
+  PSD/PSB composite for thumbnails (crates/thumbs/src/decoders/psd.rs).
+- lightcraft-raw, lightcraft-meta and their lightcraft-tiff/-geom/-color/-raster dependencies
+  (storytold/lightcraft, rev 701f78ea2e586d4748705f10fdf5c4181dc1fd49): camera raw embedded
+  previews and orientation (crates/thumbs/src/decoders/raw.rs).
+- lightcraft-heif (same repository and rev) over heic-rs 0.1.1 (MIT OR Apache-2.0): HEIF/HEIC
+  thumbnails (crates/thumbs/src/decoders/heif.rs), compiled in only with the opt-in `heic` cargo
+  feature (off by default; `cargo build -p assetcraft --features heic`) and then used only after
+  the user turns on View > Formats > HEIC. Default builds contain neither crate. HEVC may be
+  patent-encumbered in some countries.
+
+Dependencies from sibling apps
+
+- pdfcraft-render (PDF first-page thumbnails in crates/thumbs/src/decoders/pdf.rs), with its
+  pdfcraft-cos / -crypt / -filters / -fonts crates and PdfCraft's vendored, patched hayro,
+  hayro-interpret, hayro-syntax, hayro-jbig2 and lopdf (patched in through [patch.crates-io] in
+  Cargo.toml): storytold/pdfcraft, rev 7163ba3dee8becfff6871c9a65d0d8314314742b (release 0.7.1),
+  MIT OR Apache-2.0 (the vendored crates keep their upstream MIT / Apache-2.0 licences). Used as
+  a git dependency; no code copied. Built without craft-fonts (CRAFT_FONTS_DIR unset), so no font
+  files are embedded.
+- filmcraft-cli (video poster frames, crates/thumbs/src/decoders/video.rs): storytold/filmcraft,
+  MIT OR Apache-2.0. Not linked or bundled: run as a separate process when the user has it
+  installed.
 
 Source provenance
 
@@ -13,3 +46,34 @@ Architecture patterns (command registry, layering check, catalog and preview des
 modelled on the storytold Crafting Apps (LightCraft, FilmCraft, PhotoCraft, DesignCraft,
 PdfCraft, WordCraft), which are MIT OR Apache-2.0. Any code adapted from them will be listed
 here with repository, path and revision.
+
+- crates/ui-egui/src/dock.rs: panel-identity enum, default split layout and "validate, else
+  fall back to the default" restore are modelled on LightCraft crates/ui-egui/src/docking.rs
+  (local study copy, craft-ui pinned at 5c874d51eeb3de70e735c8ce87a59a7dedd47675). Written
+  fresh; no code copied. Docking itself is the craft-ui crate (storytold/craft-libs, same rev,
+  MIT OR Apache-2.0), used as a dependency.
+- crates/ui-egui/src/theme.rs: font stack (Inter first, JetBrains Mono for monospace, named
+  "medium"/"semibold" families, egui defaults kept as fallbacks) and text-style sizes follow
+  PhotoCraft crates/ui-egui/src/theme.rs install_fonts / text styles (local study copy).
+  Written fresh; the font files are copied from PhotoCraft assets/fonts/.
+- crates/thumbs/src/disk.rs: disk thumbnail cache layout (`<2 hex>/<32 hex>.<ext>`), temp +
+  rename writes, LRU-by-mtime prune to 80 % of the budget, and the own-file-name check
+  (`is_cache_file`) are adapted from LightCraft crates/preview/src/disk.rs (storytold/lightcraft,
+  rev 701f78e, MIT OR Apache-2.0). Changed: PNG via the `png` crate instead of JPEG, a source-size
+  text chunk, a head/tail content key, background prune and clear.
+- crates/thumbs/src/hash.rs: SipHash-1-3-128 streaming hasher with fixed keys, adapted from
+  LightCraft crates/preview/src/hash.rs (storytold/lightcraft, rev 701f78e, MIT OR Apache-2.0);
+  different keys and length-prefixed byte input.
+
+Other crates.io dependencies are listed in Cargo.lock; `cargo xtask deny` checks their licences
+against deny.toml. One is called out here because it stands in for platform code:
+- known-folders 1.4 (artichoke/known-folders-rs, MIT OR Apache-2.0, Windows only): the Windows
+  Known Folder API (SHGetKnownFolderPath) for Desktop/Documents/Downloads/Pictures/Videos in
+  crates/fs/src/real.rs. Used as a dependency; no code copied.
+
+Sibling apps started by File > Open In (PhotoCraft, LightCraft, FilmCraft, PdfCraft, DesignCraft,
+WordCraft; storytold, MIT OR Apache-2.0) are separate programs the user installs; nothing of them
+is linked or bundled. Their catalog in crates/engine/src/open_in.rs (program names, install
+folders, file extensions) was written from their main.rs, engine extension lists and
+packaging/windows/*.wxs at PhotoCraft d43db3e, LightCraft 701f78e, FilmCraft 71438c6, PdfCraft
+7163ba3, DesignCraft 17cf5b4, WordCraft 159b84f.

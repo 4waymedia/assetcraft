@@ -13,3 +13,20 @@ workspace = true
 
 [dependencies]
 assetcraft-engine = { workspace = true }
+assetcraft-fs = { workspace = true }
+assetcraft-probe = { workspace = true }
+assetcraft-thumbs = { workspace = true }
+assetcraft-watch = { workspace = true }
+craft-ui = { workspace = true }
+egui = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# PNG output for the opt-in CPU screenshot test (already a workspace dependency via thumbs).
+image = { workspace = true }
+
+[features]
+# HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
+# The user must still turn on View > Formats > HEIC (`formats.heic`). See assetcraft-thumbs.
+heic = ["assetcraft-engine/heic", "assetcraft-thumbs/heic"]

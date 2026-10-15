@@ -68,6 +68,13 @@ impl ThumbCache {
         }
     }
 
+    /// Remove everything.
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.by_age.clear();
+        self.used = 0;
+    }
+
     /// Bytes in use.
     pub fn used(&self) -> usize {
         self.used

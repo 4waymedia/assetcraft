@@ -15,5 +15,11 @@ workspace = true
 assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }
 assetcraft-thumbs = { workspace = true }
+assetcraft-watch = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[features]
+# HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
+# The user must still turn on View > Formats > HEIC (`formats.heic`). See assetcraft-thumbs.
+heic = ["assetcraft-thumbs/heic"]

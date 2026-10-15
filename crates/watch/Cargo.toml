@@ -1,0 +1,15 @@
+[package]
+name = "assetcraft-watch"
+description = "Folder watching: notify-based live updates behind a Watcher trait, with a debouncer and a fake."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+notify = { workspace = true }

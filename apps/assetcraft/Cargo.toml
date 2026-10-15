@@ -13,3 +13,14 @@ workspace = true
 
 [dependencies]
 assetcraft-ui-egui = { workspace = true }
+assetcraft-engine = { workspace = true }
+assetcraft-fs = { workspace = true }
+assetcraft-thumbs = { workspace = true }
+assetcraft-watch = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+egui = { workspace = true }
+
+[features]
+# HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
+# The user must still turn on View > Formats > HEIC (`formats.heic`). See assetcraft-thumbs.
+heic = ["assetcraft-ui-egui/heic", "assetcraft-engine/heic", "assetcraft-thumbs/heic"]

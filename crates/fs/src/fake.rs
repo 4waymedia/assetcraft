@@ -23,6 +23,7 @@ struct Node {
     hidden: bool,
     modified: SystemTime,
     unreadable: bool,
+    executable: bool,
     data: Option<Arc<Vec<u8>>>,
 }
 
@@ -72,6 +73,16 @@ impl FakeFs {
         self
     }
 
+    /// Add a file with its execute bit set (as on Unix).
+    pub fn executable(mut self, path: impl AsRef<Path>, size: u64) -> Self {
+        let path = path.as_ref();
+        self.insert(path, EntryKind::File, size, false, false);
+        if let Some(node) = self.nodes.get_mut(path) {
+            node.executable = true;
+        }
+        self
+    }
+
     /// Add a hidden file.
     pub fn hidden(mut self, path: impl AsRef<Path>, size: u64) -> Self {
         self.insert(path.as_ref(), EntryKind::File, size, true, false);
@@ -115,7 +126,7 @@ impl FakeFs {
     fn node(&mut self, kind: EntryKind, size: u64, hidden: bool, unreadable: bool) -> Node {
         self.clock += 1;
         let modified = SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000 + self.clock * 60);
-        Node { kind, size, hidden, modified, unreadable, data: None }
+        Node { kind, size, hidden, modified, unreadable, executable: false, data: None }
     }
 
     fn to_entry(path: &Path, node: &Node) -> Entry {
@@ -125,6 +136,8 @@ impl FakeFs {
             kind: node.kind,
             size: node.size,
             modified: Some(node.modified),
+            // A fixed hour before the modification time, so "Created" is testable and distinct.
+            created: node.modified.checked_sub(Duration::from_secs(3600)),
             hidden: node.hidden,
         }
     }
@@ -174,9 +187,22 @@ impl Services for FakeFs {
     }
 
     fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
-        let head = self.read_head(path, usize::MAX)?;
-        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(head.len());
-        Ok(head[start..].iter().take(len).copied().collect())
+        let node = self.nodes.get(path).ok_or_else(|| FsError::NotFound(path.to_path_buf()))?;
+        if node.kind != EntryKind::File {
+            return Err(FsError::Io { path: path.to_path_buf(), message: "not a file".into() });
+        }
+        let size = usize::try_from(node.size).unwrap_or(usize::MAX);
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(size);
+        let end = start.saturating_add(len).min(size);
+        // Slice instead of copying the whole file: probes hop through large files in small reads.
+        Ok(match &node.data {
+            Some(data) => data.get(start..end.min(data.len())).map(<[u8]>::to_vec).unwrap_or_default(),
+            None => vec![0; end - start],
+        })
+    }
+
+    fn is_executable(&self, path: &Path) -> bool {
+        self.nodes.get(path).is_some_and(|n| n.kind == EntryKind::File && n.executable)
     }
 
     fn volumes(&self) -> Vec<Volume> {
@@ -236,6 +262,15 @@ mod tests {
         assert_eq!(fs.known_folder(KnownFolder::Pictures).as_deref(), Some(Path::new("/home/paul/Pictures")));
         assert_eq!(fs.known_folder(KnownFolder::Videos), None);
         assert_eq!(fs.volumes().len(), 2);
+    }
+
+    #[test]
+    fn execute_bits_are_per_file() {
+        let fs = FakeFs::new().executable("/bin/tool", 10).file("/bin/readme", 1);
+        assert!(fs.is_executable(Path::new("/bin/tool")));
+        assert!(!fs.is_executable(Path::new("/bin/readme")));
+        assert!(!fs.is_executable(Path::new("/bin")), "folders are never programs");
+        assert!(!fs.is_executable(Path::new("/missing")));
     }
 
     #[test]

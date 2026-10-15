@@ -15,7 +15,7 @@ pub enum Format {
     WebP,
     /// TIFF.
     Tiff,
-    /// Camera raw that is TIFF inside (DNG, CR2, NEF, ARW, ORF, PEF, SR2, 3FR, ERF).
+    /// Camera raw (TIFF-based DNG, CR2, NEF, ARW, PEF, SR2, 3FR, ERF; also CR3, RAF, ORF, RW2).
     CameraRaw,
     /// Photoshop document (PSD / PSB).
     Psd,
@@ -81,11 +81,6 @@ impl Format {
             Zip => Category::Archive,
             Unknown => Category::Other,
         }
-    }
-
-    /// Stage 0 can decode a thumbnail for this format (via the `image` crate).
-    pub fn thumbnail_in_stage0(self) -> bool {
-        matches!(self, Format::Png | Format::Jpeg | Format::Gif | Format::Bmp | Format::WebP | Format::Tiff)
     }
 
     /// Short display label, e.g. `"JPEG"`.
@@ -165,9 +160,11 @@ impl Format {
     }
 }
 
-/// TIFF-based camera raw extensions.
-const RAW_EXTENSIONS: &[&str] =
-    &["dng", "cr2", "nef", "nrw", "arw", "srf", "sr2", "orf", "pef", "3fr", "erf", "kdc", "dcr", "mos", "iiq"];
+/// Camera raw extensions (a TIFF with one of these is camera raw).
+const RAW_EXTENSIONS: &[&str] = &[
+    "dng", "cr2", "nef", "nrw", "arw", "srf", "sr2", "orf", "pef", "3fr", "erf", "kdc", "dcr", "mos", "iiq", "cr3",
+    "raf", "rw2", "rwl", "srw",
+];
 
 /// Identify a format from the first bytes. `extension` only splits shared containers.
 pub(crate) fn sniff(head: &[u8], extension: Option<&str>) -> Format {
@@ -187,6 +184,15 @@ pub(crate) fn sniff(head: &[u8], extension: Option<&str>) -> Format {
         Format::Avi
     } else if starts(b"RIFF") && at(8, b"WAVE") {
         Format::Wav
+    } else if starts(b"FUJIFILMCCD-RAW")
+        || starts(b"IIRO")
+        || starts(b"IIRS")
+        || starts(b"MMOR")
+        || starts(b"IIU\0")
+        || (starts(b"II*\0") && at(8, b"CR"))
+    {
+        // Fujifilm RAF, Olympus ORF, Panasonic RW2 and Canon CR2 have their own magic.
+        Format::CameraRaw
     } else if starts(b"II*\0") || starts(b"MM\0*") {
         if extension.is_some_and(|e| RAW_EXTENSIONS.contains(&e)) { Format::CameraRaw } else { Format::Tiff }
     } else if starts(b"8BPS") {
@@ -198,6 +204,7 @@ pub(crate) fn sniff(head: &[u8], extension: Option<&str>) -> Format {
             Some(b"heic" | b"heix" | b"hevc" | b"hevx" | b"mif1" | b"msf1") => Format::Heif,
             Some(b"avif" | b"avis") => Format::Avif,
             Some(b"qt  ") => Format::QuickTime,
+            Some(b"crx ") => Format::CameraRaw, // Canon CR3
             Some(_) => Format::Mp4,
             None => Format::Unknown,
         }

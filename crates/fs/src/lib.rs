@@ -52,6 +52,9 @@ pub struct Entry {
     pub size: u64,
     /// Last modification time, when the OS reports one.
     pub modified: Option<SystemTime>,
+    /// Creation (birth) time, when the OS and file system report one (many Linux file systems
+    /// and network shares don't).
+    pub created: Option<SystemTime>,
     /// Hidden by OS convention (dot-file on Unix, hidden attribute on Windows).
     pub hidden: bool,
 }
@@ -202,6 +205,14 @@ pub trait Services: Send + Sync {
 
     /// A well-known folder, if it exists.
     fn known_folder(&self, which: KnownFolder) -> Option<PathBuf>;
+
+    /// `true` for a regular file with an execute permission bit set (Unix). Windows has no such
+    /// bit (programs are recognized by extension), so the default and the Windows answer is
+    /// `false`. Never follows a final symlink.
+    fn is_executable(&self, path: &Path) -> bool {
+        let _ = path;
+        false
+    }
 }
 
 /// Display name for a path's last component, falling back to the whole path for roots.
@@ -226,6 +237,7 @@ mod tests {
             kind: EntryKind::File,
             size: 1,
             modified: None,
+            created: None,
             hidden: false,
         };
         assert_eq!(e.extension().as_deref(), Some("jpg"));

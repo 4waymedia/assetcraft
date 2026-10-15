@@ -78,7 +78,25 @@ impl Services for RealFs {
         home_dir()
     }
 
+    fn is_executable(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            false
+        }
+    }
+
     fn known_folder(&self, which: KnownFolder) -> Option<PathBuf> {
+        // Windows: ask the shell (SHGetKnownFolderPath), which knows where the user or OneDrive
+        // redirected the folder. Elsewhere, and if that fails, guess below the home folder.
+        if let Some(path) = os_known_folder(which).filter(|p| p.is_dir()) {
+            return Some(path);
+        }
         let home = home_dir()?;
         let names: &[&str] = match which {
             KnownFolder::Home => return Some(home),
@@ -88,52 +106,71 @@ impl Services for RealFs {
             KnownFolder::Pictures => &["Pictures"],
             KnownFolder::Videos => &["Videos", "Movies"],
         };
-        // Windows may redirect Desktop/Documents/Pictures into OneDrive; check there second.
-        // (The exact location needs the Known Folder API, which is planned for later.)
+        // The guess: `<home>\<Name>`, then OneDrive's usual redirect `<home>\OneDrive\<Name>`.
         let bases = [home.clone(), home.join("OneDrive")];
         bases.iter().flat_map(|base| names.iter().map(move |n| base.join(n))).find(|p| p.is_dir())
     }
 }
 
+/// The folder's real location from the Windows Known Folder API (through the `known-folders`
+/// crate, which owns the `unsafe` FFI; this workspace forbids it). Home stays `%USERPROFILE%`.
+#[cfg(windows)]
+fn os_known_folder(which: KnownFolder) -> Option<PathBuf> {
+    use known_folders::{KnownFolder as Id, get_known_folder_path};
+    let id = match which {
+        KnownFolder::Home => return None,
+        KnownFolder::Desktop => Id::Desktop,
+        KnownFolder::Documents => Id::Documents,
+        KnownFolder::Downloads => Id::Downloads,
+        KnownFolder::Pictures => Id::Pictures,
+        KnownFolder::Videos => Id::Videos,
+    };
+    get_known_folder_path(id)
+}
+
+#[cfg(not(windows))]
+fn os_known_folder(_which: KnownFolder) -> Option<PathBuf> {
+    None
+}
+
 fn to_entry(name: String, path: PathBuf, meta: &Metadata) -> Entry {
     let ft = meta.file_type();
-    let kind = if ft.is_symlink() || is_reparse_point(meta) {
+    let kind = classify(ft.is_symlink(), ft.is_dir(), ft.is_file(), file_attributes(meta));
+    let size = if kind == EntryKind::File { meta.len() } else { 0 };
+    let hidden = name.starts_with('.') || file_attributes(meta) & FILE_ATTRIBUTE_HIDDEN != 0;
+    Entry { name, path, kind, size, modified: meta.modified().ok(), created: meta.created().ok(), hidden }
+}
+
+/// Windows `FILE_ATTRIBUTE_HIDDEN`.
+const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+
+/// Entry kind from the file type flags. `attributes` (Windows file attributes, 0 elsewhere) are
+/// deliberately *not* consulted: a reparse point is not necessarily a link. OneDrive
+/// Files-On-Demand placeholders and redirected Pictures/Desktop folders are reparse points
+/// that behave like ordinary files and folders, while real symlinks and junctions are already
+/// reported by `FileType::is_symlink()` on Windows (name-surrogate reparse tags).
+fn classify(is_symlink: bool, is_dir: bool, is_file: bool, attributes: u32) -> EntryKind {
+    let _ = attributes;
+    if is_symlink {
         EntryKind::Symlink
-    } else if ft.is_dir() {
+    } else if is_dir {
         EntryKind::Dir
-    } else if ft.is_file() {
+    } else if is_file {
         EntryKind::File
     } else {
         EntryKind::Other
-    };
-    let size = if kind == EntryKind::File { meta.len() } else { 0 };
-    let hidden = name.starts_with('.') || has_hidden_attribute(meta);
-    Entry { name, path, kind, size, modified: meta.modified().ok(), hidden }
+    }
 }
 
 #[cfg(windows)]
-fn has_hidden_attribute(meta: &Metadata) -> bool {
+fn file_attributes(meta: &Metadata) -> u32 {
     use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-    meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+    meta.file_attributes()
 }
 
 #[cfg(not(windows))]
-fn has_hidden_attribute(_meta: &Metadata) -> bool {
-    false
-}
-
-/// Junctions and other reparse points are treated like symlinks: shown, never followed.
-#[cfg(windows)]
-fn is_reparse_point(meta: &Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(_meta: &Metadata) -> bool {
-    false
+fn file_attributes(_meta: &Metadata) -> u32 {
+    0
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -175,6 +212,24 @@ mod tests {
     use super::*;
     use crate::{WalkLimits, walk};
 
+    #[cfg(unix)]
+    #[test]
+    fn execute_bit_is_read_without_following_links() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("assetcraft-fs-exec-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (tool, text) = (dir.join("tool.sh"), dir.join("notes.txt"));
+        fs::write(&tool, b"#!/bin/sh\n").unwrap();
+        fs::write(&text, b"hi").unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        let real = RealFs;
+        assert!(real.is_executable(&tool));
+        assert!(!real.is_executable(&text));
+        assert!(!real.is_executable(&dir), "a searchable folder is not a program");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     fn library() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library")
     }
@@ -203,8 +258,8 @@ mod tests {
     #[test]
     fn walk_counts_every_test_file() {
         let summary = walk(&RealFs, &library(), &WalkLimits::default());
-        assert_eq!(summary.files, 24);
-        assert_eq!(summary.dirs, 10); // root + 9 folders
+        assert_eq!(summary.files, 35); // 24 images + PSD, DNG, HEIC, a PDF, 4 videos and 3 models (Stage 1)
+        assert_eq!(summary.dirs, 11); // root + 10 folders
         assert!(!summary.truncated);
     }
 
@@ -234,6 +289,21 @@ mod tests {
         assert!(RealFs.read_head(&library(), 8).is_err());
         assert_eq!(RealFs.read_range(&broken, 8, 3).unwrap(), b"not");
         assert!(RealFs.read_range(&broken, 1_000, 3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reparse_points_are_not_links_unless_the_os_says_symlink() {
+        const REPARSE_POINT: u32 = 0x400;
+        const DIRECTORY: u32 = 0x10;
+        const RECALL_ON_DATA_ACCESS: u32 = 0x40_0000; // OneDrive cloud-only placeholder
+        // A OneDrive-redirected Pictures folder: a directory with the reparse-point attribute.
+        assert_eq!(classify(false, true, false, REPARSE_POINT | DIRECTORY), EntryKind::Dir);
+        // A Files-On-Demand placeholder file.
+        assert_eq!(classify(false, false, true, REPARSE_POINT | RECALL_ON_DATA_ACCESS), EntryKind::File);
+        // Symlinks and junctions (std reports both through is_symlink) stay links.
+        assert_eq!(classify(true, false, false, REPARSE_POINT), EntryKind::Symlink);
+        assert_eq!(classify(true, true, false, REPARSE_POINT | DIRECTORY), EntryKind::Symlink);
+        assert_eq!(classify(false, false, false, 0), EntryKind::Other);
     }
 
     #[test]

@@ -16,12 +16,45 @@ publish = false
 assetcraft-fs = { path = "crates/fs" }
 assetcraft-probe = { path = "crates/probe" }
 assetcraft-thumbs = { path = "crates/thumbs" }
+assetcraft-watch = { path = "crates/watch" }
 assetcraft-engine = { path = "crates/engine" }
 assetcraft-ui-egui = { path = "crates/ui-egui" }
+assetcraft-mesh = { path = "crates/mesh" }
 # external
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
+png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+siphasher = "1"
+# Windows Known Folder API wrapper (MIT OR Apache-2.0, artichoke/known-folders-rs); fs only.
+known-folders = "1.4"
+# Folder watching (CC0-1.0). Default features keep FSEvents on macOS.
+notify = "8.2"
+# UI (L6 and apps only; see xtask/src/layers.rs). craft-ui pinned to the rev FilmCraft/PhotoCraft use.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+egui = { version = "0.36", default-features = false, features = ["default_fonts"] }
+eframe = { version = "0.36", default-features = false }
+# Stage 1 decoders from the sibling apps (MIT OR Apache-2.0), pinned by commit.
+# PSD/PSB composite: PhotoCraft 0.8.2 (deps: thiserror, flate2).
+photocraft-psd = { git = "https://github.com/storytold/photocraft", rev = "d43db3e153c76aefce9b32cef9099e458eaf17a8" }
+# Camera raw embedded previews and orientation: LightCraft 0.7.1 (no JPEG XL: default features off).
+lightcraft-raw = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49", default-features = false }
+lightcraft-meta = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49" }
+# HEIF/HEIC: LightCraft 0.7.1 over heic-rs (pure Rust). Optional (`heif` feature of thumbs).
+lightcraft-heif = { git = "https://github.com/storytold/lightcraft", rev = "701f78ea2e586d4748705f10fdf5c4181dc1fd49" }
+# PDF first-page thumbnails (L2 thumbs). PdfCraft's renderer (hayro + vello_cpu, no UI crates),
+# MIT OR Apache-2.0, pinned to the PdfCraft 0.7.1 release.
+pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+
+# PdfCraft renders through vendored, patched hayro/lopdf (hostile-file fixes: nesting caps,
+# allocation caps, hang fixes; see PdfCraft vendor/README.md). A git dependency doesn't carry its
+# workspace's [patch] table, so the same vendored copies are patched in here from the same rev.
+[patch.crates-io]
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "7163ba3dee8becfff6871c9a65d0d8314314742b" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

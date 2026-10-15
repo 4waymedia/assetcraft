@@ -38,6 +38,7 @@ command, never crash, read before write, clean room, optional AI. Read it before
 ## Verify
 
 ```powershell
-cargo xtask ci        # fmt, clippy, tests, layers (once scaffolded in Stage 0)
+cargo xtask ci        # fmt, clippy, tests (default + opt-in `heic` feature), layers, deny (skipped without cargo-deny)
+cargo xtask deny      # optional: licence + source checks from deny.toml (cargo install cargo-deny --locked)
 ```
 Test against `test_data/library`. Every edge case there must load or fail gracefully.

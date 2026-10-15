@@ -101,6 +101,7 @@ mod tests {
             kind,
             size,
             modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)),
+            created: None,
             hidden: false,
         }
     }

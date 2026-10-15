@@ -58,6 +58,7 @@ assetcraft/
 | 1     | Every format, fast           | Disk thumbnail cache; PSD, raw, PDF, video, 3D thumbnails; folder watching |
 | 2     | Organize                     | XMP ratings, labels, keywords; culling mode; batch rename; near-duplicates |
 | 3     | Structure and find           | Catalog op log, collections, smart collections, search, version stacks, entities |
+| 3.5   | Develop (Camera Raw style)   | Ctrl+R opens the selection in an embedded raw editor built on LightCraft's develop crates; edits saved as Camera Raw–compatible XMP |
 | 4     | Plan: storyline A + B        | Manual blocks, animatic preview, OTIO export into FilmCraft          |
 | 5     | Plan: AI + generation, C + D | Provider preferences (Local, API, ArtCraft); AI storyline; directives |
 | 6     | Execute                      | Recipes, any-CLI step, hot folders; storyline E + F (templates, FilmCraft assembly) |
@@ -164,6 +165,56 @@ only.
   - a smart collection survives a restart
   - search returns results in under 200 ms on 10,000 items
 
+### Stage 3.5: Develop (Camera Raw style)
+
+Bridge's Ctrl+R opens Camera Raw hosted inside Bridge. AssetCraft does the same with
+LightCraft's engine pieces, so photos can be developed without leaving the browser and without
+importing them into a LightCraft catalog.
+
+- **Scope:** AssetCraft's first pixel-affecting feature. It stays non-destructive: originals are
+  never touched; settings live in XMP sidecars (`crs:` namespace, the same ones LightCraft and
+  Camera Raw read).
+- **Goal it serves:** cull in Stage 2, find in Stage 3, then develop the picks in one place.
+- **Immediate area of improvement:** today a raw can only be developed by importing it into
+  LightCraft's catalog first.
+
+**Features**
+- **Ctrl+R** (`develop.open {paths}`, also File → Open in Develop…) opens the selected images
+  in a Develop window: a filmstrip of the selection, a large preview, before/after, a
+  histogram, and panels built from `lightcraft-develop`'s `CONTROLS` table (Light, Tone Curve,
+  Color, Color Mixer, Grading, Effects, Detail, Optics, Geometry/Crop).
+- **Multi-image:** edit one and Sync the chosen groups to the rest, or edit all selected at once
+  (Camera Raw's "select all" mode). Copy/paste settings, presets (`lightcraft-develop` presets).
+- **Done / Cancel / Reset**, undo per image. Done writes each sidecar atomically, merging into an
+  existing sidecar without disturbing other tools' fields (Stage 2's XMP rules).
+- **Browser integration:** edited files get a badge; thumbnails and Preview render *with* the
+  develop settings (renderer version bump); Metadata shows the settings summary.
+- **Hand-off:** "Open in LightCraft" stays available through Open In for library work
+  (albums, faces, masks, export presets beyond what's built here).
+- **Formats:** camera raw, DNG, JPEG, TIFF, PNG (and HEIC when opted in). PSD stays in
+  PhotoCraft.
+
+**Building blocks (reuse before build)**
+| Need                     | From                                                  | Notes |
+|--------------------------|-------------------------------------------------------|-------|
+| Edit model, control specs, presets | `lightcraft-develop` (L1, serde)            | Panels are generated from the spec table |
+| Rendering                | `lightcraft-pipeline` (CPU reference); `lightcraft-gpu` (wgpu) later | CPU first, GPU when the preview needs it |
+| Raw decode + demosaic    | `lightcraft-raw` (already a Stage 1 dependency)       | Full decode here, not just the embedded preview |
+| `crs:` XMP read/write and merge | LightCraft `crates/engine/src/{crs.rs, sidecar.rs}` | **Opportunity (owner: LightCraft / Paul):** move these into a small crate (e.g. `lightcraft-crs`) so AssetCraft doesn't pull in `lightcraft-engine` and its catalog |
+
+**Steps**
+1. Ctrl+R command and Develop window shell; open one image, render with default settings.
+2. Control panels from `CONTROLS`; live preview off the UI thread (latest-wins, like the 3D preview).
+3. `crs:` sidecar read/write through the shared crate; Done/Cancel/undo.
+4. Multi-image: filmstrip, sync, copy/paste, presets.
+5. Browser integration: badge, developed thumbnails/preview, metadata.
+6. GPU path if CPU previews are too slow on Paul's machine; exit test.
+
+**Exit**
+- Select 5 raws, Ctrl+R, adjust exposure on one, sync to all, Done: five sidecars written, thumbnails update.
+- Open the same files in LightCraft: the edits show up identically. Remove the sidecars: the originals are unchanged.
+- Cancel writes nothing; a damaged raw shows an error in the filmstrip and nothing crashes.
+
 ### Stages 4 to 7
 - **4 and 5:** Storyline Builder slices A–D. See
   [storyline-builder.md](storyline-builder.md) §10–11.
@@ -186,6 +237,7 @@ only.
 | Entities                        | 3     | M    |
 | Folder schema checker           | 3     | M    |
 | Review states + pinned notes    | 3     | M    |
+| Develop window (Ctrl+R)         | 3.5   | L    |
 | Animatic playback               | 4     | M    |
 | Provider preferences            | 5     | M    |
 | Recipes + any-CLI step          | 6     | L    |
@@ -202,4 +254,5 @@ only.
 | Repo                                         | Decided: this repo, renamed to `assetcraft`           | Done      |
 | Study VectorCraft and EffectCraft            | Yes, before Stage 1 (SVG/AI and motion thumbnails)    | Stage 1   |
 | Sibling crates: git dependencies or CLIs     | CLIs first; depend on small standalone crates when stable | Stage 1 |
+| `crs:` sidecar code as a small LightCraft crate | Ask LightCraft (or carry a fork) before Stage 3.5 | Stage 3.5 |
 | ArtCraft-account provider terms              | Ask the ArtCraft team before building it              | Stage 5   |

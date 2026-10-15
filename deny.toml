@@ -1,0 +1,55 @@
+# cargo-deny configuration (https://embarkstudios.github.io/cargo-deny/).
+# Run with `cargo xtask deny` (skipped with a message when cargo-deny isn't installed) or
+# `cargo deny check licenses`. Part of `cargo xtask ci`.
+#
+# AGENTS.md rule 6: no GPL, LGPL or AGPL dependencies. Only the permissive licences below are
+# accepted; anything else (including every GPL family licence) fails the check.
+
+[graph]
+# Every platform the desktop app ships on, so Windows- and macOS-only crates are checked too.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+all-features = true
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+# (Unicode-DFS-2016 and MPL-2.0 are not needed by any dependency today; add them only with a
+# note naming the crate.)
+exceptions = [
+    # egui's fallback fonts (Ubuntu-Light, Hack, Noto Emoji, emoji-icon-font) ship in this crate;
+    # font licences, not code licences. Recorded in NOTICE.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+]
+
+[licenses.private]
+# The workspace's own crates (publish = false) are MIT OR Apache-2.0 and need no check.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The sibling Crafting Apps, pinned by commit in Cargo.toml.
+allow-org = { github = ["storytold"] }

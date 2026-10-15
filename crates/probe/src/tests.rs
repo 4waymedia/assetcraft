@@ -32,12 +32,20 @@ const LIBRARY: &[Expected] = &[
     ("environments/ruins_vertical.png", Format::Png, Some((1080, 1920))),
     ("environments/snow_clearing_plate.jpg", Format::Jpeg, Some((1920, 1080))),
     ("environments/soul_light_forest.jpg", Format::Jpeg, Some((1920, 1080))),
+    ("environments/clearing_raw_orient6.dng", Format::CameraRaw, None),
+    ("environments/lantern_dusk.heic", Format::Heif, None),
     ("palettes/reapers_palette.bmp", Format::Bmp, Some((600, 120))),
+    ("palettes/reapers_palette_board.psd", Format::Psd, Some((320, 200))),
     ("props/scythe_transparent.png", Format::Png, Some((512, 512))),
     ("props/soul_orb_small.gif", Format::Gif, Some((256, 256))),
     ("storyboard/shot_010_intro.tiff", Format::Tiff, Some((1200, 800))),
     ("storyboard/shot_020_sketch.png", Format::Png, Some((1280, 720))),
     ("storyboard/shot_030_sketch.png", Format::Png, Some((1280, 720))),
+    ("environments/location_breakdown.pdf", Format::Pdf, None),
+    ("environments/snow_clearing_flythrough.mp4", Format::Mp4, None),
+    ("environments/snow_clearing_flythrough.mov", Format::QuickTime, None),
+    ("environments/soul_light_loop.webm", Format::Matroska, None),
+    ("environments/frozen_lake_pan.avi", Format::Avi, None),
 ];
 
 #[test]
@@ -230,12 +238,73 @@ fn text_formats_need_text_and_the_right_extension() {
 }
 
 #[test]
-fn categories_and_stage0_thumbnails() {
+fn categories_and_aspect() {
     assert_eq!(Format::Psd.category(), Category::Image);
     assert_eq!(Format::Mp4.category(), Category::Video);
     assert_eq!(Format::Glb.category(), Category::Model3d);
-    assert!(Format::Tiff.thumbnail_in_stage0());
-    assert!(!Format::Psd.thumbnail_in_stage0());
     assert_eq!(Dimensions { width: 1920, height: 1080 }.aspect().map(|a| (a * 100.0).round()), Some(178.0));
     assert_eq!(Dimensions { width: 1, height: 0 }.aspect(), None);
+}
+
+/// A real JPEG with `segments` maximum-size APP2 segments (65,535 bytes each, like a big ICC
+/// profile or XMP packet) inserted right after SOI, pushing the SOF marker far into the file.
+fn jpeg_with_big_app_segments(segments: usize) -> Vec<u8> {
+    let jpg = std::fs::read(library().join("edge-cases/TINY_ICON.JPG")).unwrap();
+    let mut out = jpg[..2].to_vec();
+    for _ in 0..segments {
+        out.extend([0xFF, 0xE2, 0xFF, 0xFF]);
+        out.extend(std::iter::repeat_n(0x42, 65_533));
+    }
+    out.extend(&jpg[2..]);
+    out
+}
+
+#[test]
+fn jpeg_sof_behind_more_than_head_bytes_of_metadata_is_found() {
+    let big = jpeg_with_big_app_segments(5); // ~320 KiB of APP2 > HEAD_BYTES
+    assert!(big.len() > HEAD_BYTES + 60_000);
+    let fs = FakeFs::new().file_with("/icc.jpg", big.clone());
+    let p = probe(&fs, Path::new("/icc.jpg")).unwrap();
+    assert_eq!((p.format, p.dimensions, p.status), (Format::Jpeg, d(64, 64), Status::Ok));
+    assert!(!p.is_unreadable());
+    // Truncated after the metadata (no SOF anywhere): damaged, not a panic or a hang.
+    let fs = FakeFs::new().file_with("/cut.jpg", big[..HEAD_BYTES + 70_000].to_vec());
+    assert_eq!(probe(&fs, Path::new("/cut.jpg")).unwrap().status, Status::Damaged);
+}
+
+#[test]
+fn jpeg_segment_hopping_is_bounded() {
+    // 300 segments (~19 MiB) is past both the hop and the offset cap: give up as damaged.
+    let fs = FakeFs::new().file_with("/huge.jpg", jpeg_with_big_app_segments(300));
+    let p = probe(&fs, Path::new("/huge.jpg")).unwrap();
+    assert_eq!((p.dimensions, p.status), (None, Status::Damaged));
+}
+
+#[test]
+fn camera_raw_magic_is_sniffed_without_the_extension() {
+    let mut cr3 = vec![0, 0, 0, 24];
+    cr3.extend(b"ftypcrx ");
+    assert_eq!(probe_bytes(&cr3, None), (Format::CameraRaw, None, Status::Ok));
+    for magic in
+        [&b"FUJIFILMCCD-RAW 0201"[..], b"IIRO\x08\0\0\0", b"IIRS\x08\0\0\0", b"MMOR\0\0\0\x08", b"IIU\0\x08\0\0\0"]
+    {
+        assert_eq!(probe_bytes(magic, None).0, Format::CameraRaw, "{magic:?}");
+    }
+    assert_eq!(probe_bytes(b"II*\0\x10\0\0\0CR\x02\0", None).0, Format::CameraRaw, "CR2");
+    for ext in ["cr3", "raf", "rw2", "dng", "orf"] {
+        assert_eq!(Format::from_extension(ext), Some(Format::CameraRaw), "{ext}");
+    }
+}
+
+#[test]
+fn library_models_probe_as_3d() {
+    for (rel, format) in [
+        ("props/models/soul_orb_icosphere.glb", Format::Glb),
+        ("props/models/scythe_ring.gltf", Format::Gltf),
+        ("props/models/tombstone.obj", Format::Obj),
+    ] {
+        let p = probe(&RealFs, &library().join(rel)).unwrap();
+        assert_eq!((p.format, p.status, p.category()), (format, Status::Ok, Category::Model3d), "{rel}");
+        assert_eq!(p.dimensions, None, "{rel}");
+    }
 }

@@ -1,10 +1,10 @@
 //! The command registry. Each command has a stable id, a label and menu for the UI, an optional
 //! shortcut, a one-line parameter description, and a handler.
 
-use crate::prefs::{THUMB_SIZE_RANGE, ViewMode};
+use crate::prefs::{THUMB_SIZE_RANGE, ThemeMode, ViewMode, panels_json_ok};
 use crate::select::ClickMode;
 use crate::sort::SortKey;
-use crate::{CmdError, CmdResult, Location, Session};
+use crate::{CmdError, CmdResult, Location, Session, clean_user_path, same_path};
 use assetcraft_fs::{EntryKind, KnownFolder};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -39,8 +39,11 @@ macro_rules! cmd {
 
 static COMMANDS: &[CommandSpec] = &[
     // Navigate
-    cmd!("nav.open", "Open Folder", "Go", None, "{path}", nav_open),
-    cmd!("nav.computer", "Computer", "Go", None, "{}", |s, _| s.go(Location::Computer)),
+    cmd!("nav.open", "Open Folder", "Go", None, "{path} (quotes trimmed; made absolute; `C:` means `C:\\`)", nav_open),
+    cmd!("nav.computer", "Computer", "Go", None, "{} (also rescans drives and known folders)", |s, _| {
+        s.rescan_places();
+        s.go(Location::Computer)
+    }),
     cmd!(
         "nav.known",
         "Go to Known Folder",
@@ -52,14 +55,41 @@ static COMMANDS: &[CommandSpec] = &[
     cmd!("nav.back", "Back", "Go", Some("Alt+Left"), "{}", nav_back),
     cmd!("nav.forward", "Forward", "Go", Some("Alt+Right"), "{}", nav_forward),
     cmd!("nav.up", "Up", "Go", Some("Alt+Up"), "{}", nav_up),
-    cmd!("nav.refresh", "Refresh", "View", Some("F5"), "{}", |s, _| s.refresh()),
-    cmd!("nav.favorite.add", "Add to Favorites", "Go", None, "{path?} (default: current folder)", fav_add),
+    cmd!("nav.refresh", "Refresh", "View", Some("F5"), "{} (also rescans drives and known folders)", |s, _| s
+        .refresh()),
+    cmd!(
+        "nav.changed",
+        "Apply Folder Changes",
+        "View",
+        None,
+        "{paths: [path]} | {rescan: true} (from the folder watcher; keeps selection)",
+        |s, p| s.apply_changes(p)
+    ),
+    cmd!("nav.favorite.add", "Add to Favorites", "File", None, "{path?} (default: current folder)", fav_add),
     cmd!("nav.favorite.remove", "Remove from Favorites", "Go", None, "{path}", fav_remove),
     // View
     cmd!("view.mode", "View As", "View", None, "{mode: grid|list}", view_mode),
     cmd!("view.thumbSize", "Thumbnail Size", "View", None, "{px: 48..512}", view_thumb_size),
     cmd!("view.sort", "Sort By", "View", None, "{by: name|date|size|type, ascending?: bool}", view_sort),
     cmd!("view.hidden", "Show Hidden Files", "View", Some("Ctrl+H"), "{show: bool}", view_hidden),
+    cmd!("view.theme", "Theme", "View", None, "{mode: system|dark|light}", view_theme),
+    cmd!(
+        "formats.heic",
+        "HEIC / HEIF thumbnails (HEVC)",
+        "View",
+        None,
+        "{enabled: bool} (off by default; needs a build with --features heic)",
+        formats_heic
+    ),
+    cmd!("view.preview", "Full-Window Preview", "View", Some("Space"), "{open?: bool} (default: toggle)", view_preview),
+    cmd!(
+        "view.panels",
+        "Panel Layout",
+        "View",
+        None,
+        "{layout: object | null} (UI-owned, saved in prefs)",
+        view_panels
+    ),
     // Select
     cmd!("select.click", "Click Item", "Edit", None, "{path, mode?: replace|toggle|range}", select_click),
     cmd!("select.set", "Select Items", "Edit", None, "{paths: [path]}", select_set),
@@ -73,12 +103,52 @@ static COMMANDS: &[CommandSpec] = &[
     }),
     cmd!("select.move", "Move Selection", "Edit", Some("Arrows"), "{delta: int, extend?: bool}", select_move),
     // File
-    cmd!("file.open", "Open", "File", Some("Enter"), "{path?} (default: focused item); folders navigate", file_open),
+    cmd!(
+        "file.open",
+        "Open",
+        "File",
+        Some("Enter"),
+        "{path?} (default: focused item); folders navigate; programs are revealed, not run",
+        file_open
+    ),
+    cmd!(
+        "file.run",
+        "Run…",
+        "File",
+        Some("Shift+Enter"),
+        "{path?} (default: focused item); runs programs too",
+        file_run
+    ),
+    cmd!(
+        "file.openIn",
+        "Open In",
+        "File",
+        None,
+        "{app: photocraft|lightcraft|filmcraft|pdfcraft|designcraft|wordcraft, paths?: [path]} (default: selection)",
+        file_open_in
+    ),
     cmd!("file.reveal", "Reveal in Explorer", "File", None, "{path?} (default: focused item)", file_reveal),
     cmd!("item.probe", "File Info", "File", None, "{path}", item_probe),
+    // Cache
+    cmd!(
+        "cache.clear",
+        "Clear Thumbnail Cache",
+        "View",
+        None,
+        "{} (deletes the disk cache in the background)",
+        cache_clear
+    ),
     // App
     cmd!("app.state", "State", "Help", None, "{}", |s, _| Ok(state_json(s))),
     cmd!("app.commands", "Commands", "Help", None, "{}", |_, _| Ok(commands_json())),
+    cmd!(
+        "app.openInTargets",
+        "Open In Targets",
+        "Help",
+        None,
+        "{paths?: [path]} (default: selection) → apps that open all of them, installed or not",
+        open_in_targets
+    ),
 ];
 
 /// Every command, in menu order.
@@ -122,7 +192,21 @@ fn target_path(s: &Session, params: &Value, fallback_to_folder: bool) -> Result<
 // ---- handlers ----------------------------------------------------------------------------
 
 fn nav_open(s: &mut Session, p: &Value) -> CmdResult {
-    let path = PathBuf::from(need_str(p, "path")?);
+    let raw = need_str(p, "path")?;
+    let cleaned = clean_user_path(raw, cfg!(windows));
+    if cleaned.is_empty() {
+        return Err(CmdError::BadParams("`path` is empty".into()));
+    }
+    // Relative paths resolve against the process's working directory, once, here, so the
+    // session never holds a relative folder. Paths that already start at a root are kept as
+    // typed: on Windows `\Users` (root of the current drive) is valid, and `std::path::absolute`
+    // would turn it, and every Unix-style test path, into `C:\Users`.
+    let cleaned = PathBuf::from(cleaned);
+    let path = if cleaned.has_root() {
+        cleaned
+    } else {
+        std::path::absolute(&cleaned).map_err(|e| CmdError::BadParams(format!("bad path `{raw}`: {e}")))?
+    };
     s.go(Location::Folder(path))
 }
 
@@ -189,16 +273,16 @@ fn fav_add(s: &mut Session, p: &Value) -> CmdResult {
     if entry.kind != EntryKind::Dir {
         return Err(CmdError::BadParams("favorites are folders".into()));
     }
-    if !s.favorites.contains(&path) {
+    if !s.favorites.iter().any(|f| same_path(f, &path)) {
         s.favorites.push(path);
     }
-    Ok(json!({ "favorites": s.favorites }))
+    Ok(json!({ "favorites": lossy_all(&s.favorites) }))
 }
 
 fn fav_remove(s: &mut Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(need_str(p, "path")?);
-    s.favorites.retain(|f| *f != path);
-    Ok(json!({ "favorites": s.favorites }))
+    s.favorites.retain(|f| !same_path(f, &path));
+    Ok(json!({ "favorites": lossy_all(&s.favorites) }))
 }
 
 fn view_mode(s: &mut Session, p: &Value) -> CmdResult {
@@ -231,6 +315,49 @@ fn view_hidden(s: &mut Session, p: &Value) -> CmdResult {
     s.refresh()
 }
 
+fn view_theme(s: &mut Session, p: &Value) -> CmdResult {
+    let mode = need_str(p, "mode")?;
+    s.view.theme = ThemeMode::parse(mode).ok_or_else(|| CmdError::BadParams(format!("unknown theme `{mode}`")))?;
+    Ok(json!({ "view": s.view }))
+}
+
+/// The message shown when HEIC is asked for in a build without the decoder.
+pub const NO_HEIC_BUILD: &str = "this build has no HEIC support; rebuild with --features heic";
+
+fn formats_heic(s: &mut Session, p: &Value) -> CmdResult {
+    let enabled = need_bool(p, "enabled")?;
+    if enabled && !assetcraft_thumbs::HEIC_BUILT {
+        return Err(CmdError::Unavailable(NO_HEIC_BUILD.into()));
+    }
+    s.formats.heic = enabled;
+    Ok(formats_json(s))
+}
+
+fn formats_json(s: &Session) -> Value {
+    json!({ "heic": s.formats.heic, "heic_built": assetcraft_thumbs::HEIC_BUILT, "heic_active": s.decode_options().heic })
+}
+
+fn view_preview(s: &mut Session, p: &Value) -> CmdResult {
+    let open = p.get("open").and_then(Value::as_bool).unwrap_or(!s.preview_open);
+    if open && s.selection.focus().is_none() {
+        return Err(CmdError::Unavailable("nothing focused to preview".into()));
+    }
+    s.preview_open = open;
+    Ok(json!({ "preview": s.preview_open, "focus": s.selection.focus() }))
+}
+
+fn view_panels(s: &mut Session, p: &Value) -> CmdResult {
+    let layout = p.get("layout").ok_or_else(|| CmdError::BadParams("need `layout` (object or null)".into()))?;
+    if layout.is_null() {
+        s.panels = None;
+    } else if panels_json_ok(layout) {
+        s.panels = Some(layout.clone());
+    } else {
+        return Err(CmdError::BadParams("`layout` must be an object under 64 KiB".into()));
+    }
+    Ok(json!({ "panels": s.panels }))
+}
+
 fn select_click(s: &mut Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(need_str(p, "path")?);
     let mode = match str_param(p, "mode").unwrap_or("replace") {
@@ -261,30 +388,130 @@ fn select_move(s: &mut Session, p: &Value) -> CmdResult {
         p.get("delta").and_then(Value::as_i64).ok_or_else(|| CmdError::BadParams("need `delta` (integer)".into()))?;
     let extend = p.get("extend").and_then(Value::as_bool).unwrap_or(false);
     s.selection.move_focus(delta, extend, &s.item_paths);
+    // The full-window preview follows the focus; it closes if nothing is focused.
+    s.preview_open &= s.selection.focus().is_some();
     Ok(selection_json(s))
 }
 
+/// Enter / double-click / File → Open. Programs, scripts and shortcuts are shown in the file
+/// manager instead of run (Paul's decision, 2026-10-13); `file.run` runs them.
 fn file_open(s: &mut Session, p: &Value) -> CmdResult {
     let path = target_path(s, p, false)?;
+    if s.is_program(&path) {
+        s.launcher.reveal(&path).map_err(CmdError::Unavailable)?;
+        let name = assetcraft_fs::display_name(&path);
+        return Ok(json!({
+            "revealed": lossy(&path),
+            "program": true,
+            "message": format!("Revealed {name} (programs aren't run on Enter; use Shift+Enter)"),
+        }));
+    }
+    file_run(s, p)
+}
+
+/// Shift+Enter / File → Run…: open anything in its default app, programs included.
+fn file_run(s: &mut Session, p: &Value) -> CmdResult {
+    let path = target_path(s, p, false)?;
     let entry = s.services.entry(&path)?;
-    if entry.kind == EntryKind::Dir {
+    if entry.kind == EntryKind::Dir && !s.is_program(&path) {
         return s.go(Location::Folder(path));
     }
     s.launcher.open(&path).map_err(CmdError::Unavailable)?;
-    Ok(json!({ "opened": path }))
+    Ok(json!({ "opened": lossy(&path) }))
+}
+
+/// `paths` param, or the selection.
+fn paths_param(s: &Session, params: &Value) -> Result<Vec<PathBuf>, CmdError> {
+    match params.get("paths") {
+        None => Ok(s.selected_paths()),
+        Some(list) => list
+            .as_array()
+            .ok_or_else(|| CmdError::BadParams("`paths` must be a list of strings".into()))?
+            .iter()
+            .map(|v| v.as_str().map(PathBuf::from).ok_or_else(|| CmdError::BadParams("`paths` must be strings".into())))
+            .collect(),
+    }
+}
+
+/// File → Open In ▸ <app>: hand the files to an installed sibling app.
+fn file_open_in(s: &mut Session, p: &Value) -> CmdResult {
+    use crate::open_in::{MAX_OPEN_IN_CHARS, MAX_OPEN_IN_FILES};
+    let id = need_str(p, "app")?;
+    let app = crate::find_app(id).ok_or_else(|| CmdError::BadParams(format!("unknown app `{id}`")))?;
+    let paths = paths_param(s, p)?;
+    if paths.is_empty() {
+        return Err(CmdError::BadParams("nothing selected to open".into()));
+    }
+    if paths.len() > MAX_OPEN_IN_FILES {
+        return Err(CmdError::Unavailable(format!("{} opens at most {MAX_OPEN_IN_FILES} files at once", app.label)));
+    }
+    let mut chars = 0;
+    for path in &paths {
+        // Most siblings read their arguments with `std::env::args()`, which stops on
+        // non-Unicode text, and a relative path would resolve against their working folder.
+        let text = path.to_str().ok_or_else(|| CmdError::BadParams(format!("not valid Unicode: {}", lossy(path))))?;
+        // `has_root`, not `is_absolute`: listing paths always have one, and a rooted path can
+        // never start with `-`, so no sibling mistakes it for an option.
+        if !path.has_root() {
+            return Err(CmdError::BadParams(format!("not a full path: {text}")));
+        }
+        chars += text.len() + 3;
+        let entry = s.services.entry(path)?;
+        let ok = match entry.kind {
+            EntryKind::File => app.opens_extension(path),
+            EntryKind::Dir => app.folders,
+            _ => false,
+        };
+        if !ok {
+            return Err(CmdError::BadParams(format!("{} doesn't open {}", app.label, entry.name)));
+        }
+    }
+    if chars > MAX_OPEN_IN_CHARS {
+        return Err(CmdError::Unavailable("too many files for one command line; select fewer".into()));
+    }
+    let program = s.app_program(app.id).map(Path::to_path_buf).ok_or_else(|| {
+        CmdError::Unavailable(format!(
+            "{} isn't installed (or set {} to its program, then press F5)",
+            app.label,
+            app.env_var()
+        ))
+    })?;
+    s.launcher.spawn(&program, &app.argv(&paths)).map_err(CmdError::Unavailable)?;
+    let n = paths.len();
+    let what = if n == 1 {
+        paths.first().map(|p| assetcraft_fs::display_name(p)).unwrap_or_default()
+    } else {
+        format!("{n} items")
+    };
+    Ok(json!({
+        "app": app.id,
+        "program": lossy(&program),
+        "opened": lossy_all(&paths),
+        "message": format!("Opened {what} in {}", app.label),
+    }))
+}
+
+fn open_in_targets(s: &mut Session, p: &Value) -> CmdResult {
+    let paths = paths_param(s, p)?;
+    Ok(Value::Array(
+        s.open_in_targets(&paths)
+            .iter()
+            .map(|t| json!({ "app": t.app.id, "label": t.app.label, "installed": t.installed(), "program": t.program.as_deref().map(lossy) }))
+            .collect(),
+    ))
 }
 
 fn file_reveal(s: &mut Session, p: &Value) -> CmdResult {
     let path = target_path(s, p, true)?;
     s.launcher.reveal(&path).map_err(CmdError::Unavailable)?;
-    Ok(json!({ "revealed": path }))
+    Ok(json!({ "revealed": lossy(&path) }))
 }
 
 fn item_probe(s: &mut Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(need_str(p, "path")?);
     let probe = s.probe(&path)?;
     Ok(json!({
-        "path": probe.path,
+        "path": lossy(&probe.path),
         "name": probe.name,
         "format": probe.format.label(),
         "category": format!("{:?}", probe.category()),
@@ -292,10 +519,26 @@ fn item_probe(s: &mut Session, p: &Value) -> CmdResult {
         "height": probe.dimensions.map(|d| d.height),
         "size": probe.size,
         "modified": probe.modified.and_then(unix_secs),
+        "created": probe.created.and_then(unix_secs),
         "status": format!("{:?}", probe.status),
         "unreadable": probe.is_unreadable(),
         "extension_mismatch": probe.extension_mismatch(),
     }))
+}
+
+fn cache_clear(s: &mut Session, _: &Value) -> CmdResult {
+    let cache = s.thumb_cache.as_ref().ok_or_else(|| CmdError::Unavailable("no thumbnail cache".into()))?;
+    if !cache.clear_in_background() {
+        return Err(CmdError::Unavailable("the thumbnail cache is busy; try again in a moment".into()));
+    }
+    Ok(json!({ "clearing": lossy(cache.dir()) }))
+}
+
+fn cache_json(s: &Session) -> Value {
+    match &s.thumb_cache {
+        None => Value::Null,
+        Some(c) => json!({ "dir": lossy(c.dir()), "bytes": c.size_known(), "budget": c.budget(), "busy": c.is_busy() }),
+    }
 }
 
 // ---- JSON views --------------------------------------------------------------------------
@@ -304,13 +547,23 @@ fn unix_secs(t: std::time::SystemTime) -> Option<u64> {
     t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs())
 }
 
+/// Paths in command results. `json!` would panic serializing a non-UTF-8 `Path`, and file
+/// names on disk are hostile input, so results carry lossy strings instead.
+fn lossy(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn lossy_all(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|p| lossy(p)).collect()
+}
+
 fn selection_json(s: &Session) -> Value {
-    json!({ "selected": s.selected_paths(), "focus": s.selection.focus() })
+    json!({ "selected": lossy_all(&s.selected_paths()), "focus": s.selection.focus().map(lossy) })
 }
 
 pub(crate) fn state_json(s: &Session) -> Value {
     json!({
-        "location": s.location.path(),
+        "location": s.location.path().map(lossy),
         "label": s.location.label(),
         "can_back": s.can_back(),
         "can_forward": s.can_forward(),
@@ -318,15 +571,20 @@ pub(crate) fn state_json(s: &Session) -> Value {
         "truncated": s.truncated,
         "skipped": s.skipped,
         "view": s.view,
-        "favorites": s.favorites,
-        "selected": s.selected_paths(),
-        "focus": s.selection.focus(),
+        "favorites": lossy_all(&s.favorites),
+        "selected": lossy_all(&s.selected_paths()),
+        "focus": s.selection.focus().map(lossy),
+        "preview": s.preview_open,
+        "thumb_cache": cache_json(s),
+        "formats": formats_json(s),
+        "apps": s.installed_apps().iter().map(|(id, p)| json!({ "app": id, "program": lossy(p) })).collect::<Vec<_>>(),
         "items": s.items.iter().map(|e| json!({
             "name": e.name,
-            "path": e.path,
+            "path": lossy(&e.path),
             "kind": format!("{:?}", e.kind),
             "size": e.size,
             "modified": e.modified.and_then(unix_secs),
+            "created": e.created.and_then(unix_secs),
         })).collect::<Vec<_>>(),
     })
 }

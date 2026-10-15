@@ -19,6 +19,8 @@ pub enum Class {
 pub const TABLE: &[(&str, Class)] = &[
     ("fs", Class::Layer(0)),
     ("probe", Class::Layer(1)),
+    ("watch", Class::Layer(1)),
+    ("mesh", Class::Layer(1)),
     ("thumbs", Class::Layer(2)),
     // L3 (planned): boards, interchange. L4 (planned): bridge.
     ("engine", Class::Layer(5)),

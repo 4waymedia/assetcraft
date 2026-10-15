@@ -10,17 +10,56 @@ DesignCraft, WordCraft).
 - **Immediate area of improvement:** the Crafting Apps have no Bridge. Each app opens its own
   files, and nothing sits above them to find, group, plan and hand off work.
 
-**Status:** Stage 0 (Navigator) in progress. See [STATUS.md](STATUS.md).
+**Status:** Stage 1 (Every format, fast) done, pending a Windows check. See [STATUS.md](STATUS.md).
 
 ## Build (Windows, PowerShell)
 
 ```powershell
 Set-Location F:\Script-Projects\assetcraft
-cargo xtask ci                     # fmt, clippy, tests, layers
+cargo xtask ci                     # fmt, clippy, tests (default + heic), layers, deny
+cargo run -p assetcraft --release -- "F:\Script-Projects\assetcraft\test_data\library"
 cargo run -p assetcraft-cli -- --help
 ```
 
 Needs Rust 1.95 or later (`rustup update stable`).
+
+## Optional formats
+
+### HEIC / HEIF (off by default)
+
+HEIC photos (iPhone default) use the HEVC codec, which may be patent-encumbered in some
+countries. Like LightCraft and PhotoCraft, AssetCraft leaves it out unless you opt in, in two
+steps:
+
+1. **Build with the `heic` feature.** Without it the decoder (`lightcraft-heif` over
+   `heic-rs`) isn't compiled at all.
+   ```powershell
+   Set-Location F:\Script-Projects\assetcraft
+   cargo run -p assetcraft --release --features heic
+   ```
+2. **Turn it on in the app:** View → Formats → **HEIC / HEIF thumbnails (HEVC)**. The choice is
+   saved in your preferences (`formats.heic`) and thumbnails re-render straight away.
+
+Until both are done, HEIC files show a type icon. In a build without the feature the menu
+item is greyed, and its tooltip says to rebuild with `--features heic`. The switch is the
+`formats.heic {"enabled": true}` command, so the menu, keys and future automation share it.
+
+The CLI doesn't read the app's preferences; pass `--heic` per call instead:
+
+```powershell
+Set-Location F:\Script-Projects\assetcraft
+cargo build -p assetcraft-cli --release --features heic
+.\target\release\assetcraft-cli.exe thumb photo.heic --size 256 --out photo.png --heic
+```
+
+For anything you distribute, decide on HEVC licensing first; builds without the feature
+contain no HEVC code.
+
+### Video poster frames
+
+Video thumbnails (MP4, MOV, MKV/WebM, AVI) come from FilmCraft's `filmcraft-cli`, run as a
+separate program. Put it on `PATH` or set `ASSETCRAFT_FILMCRAFT_CLI` to its full path, then
+restart AssetCraft. Without it, videos show a type icon.
 
 ## What it will do
 

@@ -1,19 +1,26 @@
-//! The pool's job queue: highest priority first, newest first within a priority, one entry per
+//! The pools' job queue: highest priority first, newest first within a priority, one entry per
 //! key (re-requesting a key moves it to the front of its priority).
 
 use crate::ThumbKey;
 use std::collections::{BTreeMap, HashMap};
+use std::hash::Hash;
 
-#[derive(Debug, Default)]
-pub(crate) struct Queue {
-    order: BTreeMap<(u8, u64), ThumbKey>,
-    index: HashMap<ThumbKey, (u8, u64)>,
+#[derive(Debug)]
+pub(crate) struct Queue<K = ThumbKey> {
+    order: BTreeMap<(u8, u64), K>,
+    index: HashMap<K, (u8, u64)>,
     seq: u64,
 }
 
-impl Queue {
+impl<K> Default for Queue<K> {
+    fn default() -> Self {
+        Self { order: BTreeMap::new(), index: HashMap::new(), seq: 0 }
+    }
+}
+
+impl<K: Clone + Eq + Hash> Queue<K> {
     /// Add or re-prioritize `key`.
-    pub(crate) fn push(&mut self, key: ThumbKey, priority: u8) {
+    pub(crate) fn push(&mut self, key: K, priority: u8) {
         if let Some(old) = self.index.remove(&key) {
             self.order.remove(&old);
         }
@@ -24,20 +31,20 @@ impl Queue {
     }
 
     /// Take the most urgent key.
-    pub(crate) fn pop(&mut self) -> Option<ThumbKey> {
+    pub(crate) fn pop(&mut self) -> Option<K> {
         let (_, key) = self.order.pop_last()?;
         self.index.remove(&key);
         Some(key)
     }
 
     /// Keep only keys for which `keep` returns true.
-    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&ThumbKey) -> bool) {
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
         self.order.retain(|_, key| keep(key));
         self.index.retain(|key, _| keep(key));
     }
 
     #[cfg(test)]
-    pub(crate) fn contains(&self, key: &ThumbKey) -> bool {
+    pub(crate) fn contains(&self, key: &K) -> bool {
         self.index.contains_key(key)
     }
 
@@ -56,7 +63,7 @@ mod tests {
 
     #[test]
     fn priority_then_newest_first() {
-        let mut q = Queue::default();
+        let mut q: Queue = Queue::default();
         q.push(k("a"), 1);
         q.push(k("b"), 5);
         q.push(k("c"), 1);
@@ -67,7 +74,7 @@ mod tests {
 
     #[test]
     fn re_request_moves_to_front_and_dedupes() {
-        let mut q = Queue::default();
+        let mut q: Queue = Queue::default();
         q.push(k("a"), 1);
         q.push(k("b"), 1);
         q.push(k("a"), 1);
@@ -79,7 +86,7 @@ mod tests {
 
     #[test]
     fn retain_drops_scrolled_away_rows() {
-        let mut q = Queue::default();
+        let mut q: Queue = Queue::default();
         for name in ["a", "b", "c"] {
             q.push(k(name), 1);
         }

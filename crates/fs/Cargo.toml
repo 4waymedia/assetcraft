@@ -13,3 +13,8 @@ workspace = true
 
 [dependencies]
 
+# Windows Known Folder API (SHGetKnownFolderPath) for Desktop/Documents/Downloads/Pictures/Videos
+# when they are redirected (OneDrive). MIT OR Apache-2.0; depends only on windows-sys.
+[target.'cfg(windows)'.dependencies]
+known-folders = { workspace = true }
+

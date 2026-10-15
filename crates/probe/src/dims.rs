@@ -84,32 +84,76 @@ fn webp(b: &[u8]) -> Option<Dimensions> {
 
 /// Scan JPEG segments for a start-of-frame marker (SOF0..SOF15 except DHT, JPG, DAC).
 fn jpeg(b: &[u8]) -> Option<Dimensions> {
-    let mut i = 2usize;
+    match jpeg_scan(b, 2) {
+        JpegScan::Found(d) => Some(d),
+        JpegScan::Stop | JpegScan::NeedMore(_) => None,
+    }
+}
+
+/// Where a JPEG segment scan over a buffer ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JpegScan {
+    /// A start-of-frame marker with these dimensions.
+    Found(Dimensions),
+    /// End of image, start of scan or a malformed segment before any SOF: give up.
+    Stop,
+    /// The buffer ran out. Resume at this offset (relative to the buffer start, possibly past
+    /// its end), where the next marker search begins.
+    NeedMore(usize),
+}
+
+/// Scan JPEG segments in `b` starting at `start` (2 skips SOI; 0 resumes mid-file at a
+/// segment boundary). Bounds-checked: running off the end returns [`JpegScan::NeedMore`].
+pub(crate) fn jpeg_scan(b: &[u8], start: usize) -> JpegScan {
+    let mut i = start;
     loop {
-        // Find the next marker, skipping fill bytes.
-        while *b.get(i)? != 0xFF {
-            i += 1;
-        }
-        while *b.get(i)? == 0xFF {
-            i += 1;
-        }
-        let marker = *b.get(i)?;
-        i += 1;
-        match marker {
-            0xD8 | 0x01 | 0xD0..=0xD7 => continue, // standalone markers
-            0xD9 | 0xDA => return None,            // end of image / start of scan before any SOF
-            0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
-                return dims(u32::from(be16(b, i + 5)?), u32::from(be16(b, i + 3)?));
-            }
-            _ => {
-                let len = usize::from(be16(b, i)?);
-                if len < 2 {
-                    return None;
-                }
-                i = i.checked_add(len)?;
-            }
+        match jpeg_step(b, i) {
+            Ok(Step::Next(next)) if next < b.len() => i = next,
+            // A segment length jumped to (or past) the end: resume exactly there.
+            Ok(Step::Next(next)) => return JpegScan::NeedMore(next),
+            Ok(Step::Done(found)) => return found,
+            // Ran out inside this marker: resume at its start with more bytes.
+            Err(()) => return JpegScan::NeedMore(i),
         }
     }
+}
+
+enum Step {
+    /// Continue at this offset.
+    Next(usize),
+    /// The scan is over.
+    Done(JpegScan),
+}
+
+/// Read one marker starting the search at `i`. `Err` means the bytes ran out.
+fn jpeg_step(b: &[u8], i: usize) -> Result<Step, ()> {
+    let byte = |at: usize| b.get(at).copied().ok_or(());
+    let mut at = i;
+    // Find the next marker, skipping fill bytes.
+    while byte(at)? != 0xFF {
+        at += 1;
+    }
+    while byte(at)? == 0xFF {
+        at += 1;
+    }
+    let marker = byte(at)?;
+    at += 1;
+    Ok(match marker {
+        0xD8 | 0x01 | 0xD0..=0xD7 => Step::Next(at), // standalone markers
+        0xD9 | 0xDA => Step::Done(JpegScan::Stop),   // EOI / SOS before any SOF
+        0xC0..=0xCF if !matches!(marker, 0xC4 | 0xC8 | 0xCC) => {
+            let width = be16(b, at + 5).ok_or(())?;
+            let height = be16(b, at + 3).ok_or(())?;
+            Step::Done(dims(u32::from(width), u32::from(height)).map_or(JpegScan::Stop, JpegScan::Found))
+        }
+        _ => {
+            let len = usize::from(be16(b, at).ok_or(())?);
+            match at.checked_add(len) {
+                Some(next) if len >= 2 => Step::Next(next),
+                _ => Step::Done(JpegScan::Stop),
+            }
+        }
+    })
 }
 
 /// Byte order and first-IFD offset of a TIFF header.

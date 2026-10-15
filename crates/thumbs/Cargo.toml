@@ -14,4 +14,21 @@ workspace = true
 [dependencies]
 assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }
+assetcraft-mesh = { workspace = true }
 image = { workspace = true }
+pdfcraft-render = { workspace = true }
+png = { workspace = true }
+serde_json = { workspace = true }
+siphasher = { workspace = true }
+photocraft-psd = { workspace = true }
+lightcraft-raw = { workspace = true }
+lightcraft-meta = { workspace = true }
+lightcraft-heif = { workspace = true, optional = true }
+
+[features]
+default = []
+# HEIF/HEIC thumbnails (HEVC via lightcraft-heif / heic-rs, pure Rust). Off by default: HEVC is
+# patent-encumbered in some countries, and LightCraft and PhotoCraft leave it out of their
+# releases too (Paul's decision, 2026-10-14). Opt in with `--features heic`; even then decoding
+# stays off until the user turns on `formats.heic` (see `DecodeOptions`).
+heic = ["dep:lightcraft-heif"]

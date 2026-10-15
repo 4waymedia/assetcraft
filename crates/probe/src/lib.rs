@@ -27,6 +27,14 @@ pub const HEAD_BYTES: usize = 256 * 1024;
 /// How many bytes the second, targeted TIFF read takes (512 IFD entries).
 const TIFF_IFD_BYTES: usize = 2 + 512 * 12 + 4;
 
+/// JPEGs whose APPn segments (large XMP or ICC profiles) push the SOF marker past
+/// [`HEAD_BYTES`] are followed with small targeted reads: at most this many …
+const JPEG_MAX_HOPS: usize = 64;
+/// … never starting past this offset …
+const JPEG_MAX_OFFSET: u64 = 16 * 1024 * 1024;
+/// … each this many bytes (a marker, its length and an SOF payload fit easily).
+const JPEG_WINDOW: usize = 64;
+
 /// Pixel dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Dimensions {
@@ -71,6 +79,8 @@ pub struct Probe {
     pub size: u64,
     /// Last modification time.
     pub modified: Option<SystemTime>,
+    /// Creation time, when the OS reports one.
+    pub created: Option<SystemTime>,
     /// Header status.
     pub status: Status,
 }
@@ -115,6 +125,16 @@ pub fn probe(services: &dyn Services, path: &Path) -> Result<Probe, FsError> {
         dimensions = Some(found);
         status = Status::Ok;
     }
+    // Big metadata segments can push a JPEG's SOF past the head: keep hopping segments.
+    if format == Format::Jpeg
+        && dimensions.is_none()
+        && (head.len() as u64) < entry.size
+        && let dims::JpegScan::NeedMore(resume) = dims::jpeg_scan(&head, 2)
+        && let Some(found) = jpeg_beyond_head(services, path, resume as u64)
+    {
+        dimensions = Some(found);
+        status = Status::Ok;
+    }
     Ok(Probe {
         path: entry.path,
         name: entry.name,
@@ -123,8 +143,26 @@ pub fn probe(services: &dyn Services, path: &Path) -> Result<Probe, FsError> {
         dimensions,
         size: entry.size,
         modified: entry.modified,
+        created: entry.created,
         status,
     })
+}
+
+/// Follow JPEG segments from `offset` with bounded reads (see [`JPEG_MAX_HOPS`]).
+fn jpeg_beyond_head(services: &dyn Services, path: &Path, mut offset: u64) -> Option<Dimensions> {
+    for _ in 0..JPEG_MAX_HOPS {
+        if offset > JPEG_MAX_OFFSET {
+            return None;
+        }
+        let window = services.read_range(path, offset, JPEG_WINDOW).ok()?;
+        match dims::jpeg_scan(&window, 0) {
+            dims::JpegScan::Found(d) if d.width > 0 && d.height > 0 => return Some(d),
+            // No progress (end of file, or a run of fill bytes longer than the window): stop.
+            dims::JpegScan::Found(_) | dims::JpegScan::Stop | dims::JpegScan::NeedMore(0) => return None,
+            dims::JpegScan::NeedMore(n) => offset = offset.checked_add(n as u64)?,
+        }
+    }
+    None
 }
 
 /// Sniff a format and read dimensions from the first bytes of a file.
