@@ -32,7 +32,7 @@ action), then `docs/assetcraft-plan.md`. Sibling patterns with file references a
 | L0    | `fs`              | File-system access behind a `Services` trait (real and fake) |
 | L1    | `probe`, `watch`, `mesh` | Type sniffing, dimensions, file times; folder watcher; 3D mesh parse + CPU raster |
 | L2    | `thumbs`          | Decode, downscale, worker pool, caches                      |
-| L3    | (planned) `boards`, `interchange` | Storyline model, OTIO and DesignCraft output |
+| L3    | `storyboard`, (planned) `interchange` | Storyboard model, Re-cut, Quick fill; OTIO and DesignCraft output |
 | L4    | (planned) `bridge` | Sessions with the sibling apps                             |
 | L5    | `engine`          | Session, command registry, navigation state                 |
 | L6    | `ui-egui`, (planned) `mcp` | Drawing, docking, MCP server                       |

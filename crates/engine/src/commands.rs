@@ -1,6 +1,7 @@
-//! The command registry. Each command has a stable id, a label and menu for the UI, an optional
-//! shortcut, a one-line parameter description, and a handler.
+//! The command registry. Each command has a stable id, its effects, a label and menu for the
+//! UI, an optional shortcut, a one-line parameter description, and a handler.
 
+use crate::effect::Effects;
 use crate::prefs::{THUMB_SIZE_RANGE, ThemeMode, ViewMode, panels_json_ok};
 use crate::select::ClickMode;
 use crate::sort::SortKey;
@@ -13,6 +14,9 @@ use std::path::{Path, PathBuf};
 pub struct CommandSpec {
     /// Stable id, e.g. `"nav.back"`.
     pub id: &'static str,
+    /// What it touches (suite command effects, PipelineCraft spec §6.4); remote doors and MCP
+    /// hints read it.
+    pub effects: Effects,
     /// Menu label.
     pub label: &'static str,
     /// Menu it lives in.
@@ -27,24 +31,44 @@ pub struct CommandSpec {
 
 impl std::fmt::Debug for CommandSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CommandSpec").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("CommandSpec")
+            .field("id", &self.id)
+            .field("effects", &self.effects.classes)
+            .finish_non_exhaustive()
     }
 }
 
 macro_rules! cmd {
-    ($id:literal, $label:literal, $menu:literal, $shortcut:expr, $params:literal, $run:expr) => {
-        CommandSpec { id: $id, label: $label, menu: $menu, shortcut: $shortcut, params: $params, run: $run }
+    ($effects:ident, $id:literal, $label:literal, $menu:literal, $shortcut:expr, $params:literal, $run:expr) => {
+        CommandSpec {
+            id: $id,
+            effects: Effects::$effects,
+            label: $label,
+            menu: $menu,
+            shortcut: $shortcut,
+            params: $params,
+            run: $run,
+        }
     };
 }
 
 static COMMANDS: &[CommandSpec] = &[
     // Navigate
-    cmd!("nav.open", "Open Folder", "Go", None, "{path} (quotes trimmed; made absolute; `C:` means `C:\\`)", nav_open),
-    cmd!("nav.computer", "Computer", "Go", None, "{} (also rescans drives and known folders)", |s, _| {
+    cmd!(
+        APP,
+        "nav.open",
+        "Open Folder",
+        "Go",
+        None,
+        "{path} (quotes trimmed; made absolute; `C:` means `C:\\`)",
+        nav_open
+    ),
+    cmd!(APP, "nav.computer", "Computer", "Go", None, "{} (also rescans drives and known folders)", |s, _| {
         s.rescan_places();
         s.go(Location::Computer)
     }),
     cmd!(
+        APP,
         "nav.known",
         "Go to Known Folder",
         "Go",
@@ -52,12 +76,13 @@ static COMMANDS: &[CommandSpec] = &[
         "{folder: home|desktop|documents|downloads|pictures|videos}",
         nav_known
     ),
-    cmd!("nav.back", "Back", "Go", Some("Alt+Left"), "{}", nav_back),
-    cmd!("nav.forward", "Forward", "Go", Some("Alt+Right"), "{}", nav_forward),
-    cmd!("nav.up", "Up", "Go", Some("Alt+Up"), "{}", nav_up),
-    cmd!("nav.refresh", "Refresh", "View", Some("F5"), "{} (also rescans drives and known folders)", |s, _| s
+    cmd!(APP_STEP, "nav.back", "Back", "Go", Some("Alt+Left"), "{}", nav_back),
+    cmd!(APP_STEP, "nav.forward", "Forward", "Go", Some("Alt+Right"), "{}", nav_forward),
+    cmd!(APP_STEP, "nav.up", "Up", "Go", Some("Alt+Up"), "{}", nav_up),
+    cmd!(APP, "nav.refresh", "Refresh", "View", Some("F5"), "{} (also rescans drives and known folders)", |s, _| s
         .refresh()),
     cmd!(
+        APP,
         "nav.changed",
         "Apply Folder Changes",
         "View",
@@ -65,15 +90,16 @@ static COMMANDS: &[CommandSpec] = &[
         "{paths: [path]} | {rescan: true} (from the folder watcher; keeps selection)",
         |s, p| s.apply_changes(p)
     ),
-    cmd!("nav.favorite.add", "Add to Favorites", "File", None, "{path?} (default: current folder)", fav_add),
-    cmd!("nav.favorite.remove", "Remove from Favorites", "Go", None, "{path}", fav_remove),
+    cmd!(APP, "nav.favorite.add", "Add to Favorites", "File", None, "{path?} (default: current folder)", fav_add),
+    cmd!(APP, "nav.favorite.remove", "Remove from Favorites", "Go", None, "{path}", fav_remove),
     // View
-    cmd!("view.mode", "View As", "View", None, "{mode: grid|list}", view_mode),
-    cmd!("view.thumbSize", "Thumbnail Size", "View", None, "{px: 48..512}", view_thumb_size),
-    cmd!("view.sort", "Sort By", "View", None, "{by: name|date|size|type, ascending?: bool}", view_sort),
-    cmd!("view.hidden", "Show Hidden Files", "View", Some("Ctrl+H"), "{show: bool}", view_hidden),
-    cmd!("view.theme", "Theme", "View", None, "{mode: system|dark|light}", view_theme),
+    cmd!(APP, "view.mode", "View As", "View", None, "{mode: grid|list}", view_mode),
+    cmd!(APP, "view.thumbSize", "Thumbnail Size", "View", None, "{px: 48..512}", view_thumb_size),
+    cmd!(APP, "view.sort", "Sort By", "View", None, "{by: name|date|size|type, ascending?: bool}", view_sort),
+    cmd!(APP, "view.hidden", "Show Hidden Files", "View", Some("Ctrl+H"), "{show: bool}", view_hidden),
+    cmd!(APP, "view.theme", "Theme", "View", None, "{mode: system|dark|light}", view_theme),
     cmd!(
+        APP,
         "formats.heic",
         "HEIC / HEIF thumbnails (HEVC)",
         "View",
@@ -81,8 +107,17 @@ static COMMANDS: &[CommandSpec] = &[
         "{enabled: bool} (off by default; needs a build with --features heic)",
         formats_heic
     ),
-    cmd!("view.preview", "Full-Window Preview", "View", Some("Space"), "{open?: bool} (default: toggle)", view_preview),
     cmd!(
+        APP_STEP,
+        "view.preview",
+        "Full-Window Preview",
+        "View",
+        Some("Space"),
+        "{open?: bool} (default: toggle)",
+        view_preview
+    ),
+    cmd!(
+        APP,
         "view.panels",
         "Panel Layout",
         "View",
@@ -91,19 +126,20 @@ static COMMANDS: &[CommandSpec] = &[
         view_panels
     ),
     // Select
-    cmd!("select.click", "Click Item", "Edit", None, "{path, mode?: replace|toggle|range}", select_click),
-    cmd!("select.set", "Select Items", "Edit", None, "{paths: [path]}", select_set),
-    cmd!("select.all", "Select All", "Edit", Some("Ctrl+A"), "{}", |s, _| {
+    cmd!(APP_STEP, "select.click", "Click Item", "Edit", None, "{path, mode?: replace|toggle|range}", select_click),
+    cmd!(APP, "select.set", "Select Items", "Edit", None, "{paths: [path]}", select_set),
+    cmd!(APP, "select.all", "Select All", "Edit", Some("Ctrl+A"), "{}", |s, _| {
         s.selection.all(&s.item_paths);
         Ok(selection_json(s))
     }),
-    cmd!("select.none", "Deselect All", "Edit", Some("Ctrl+Shift+A"), "{}", |s, _| {
+    cmd!(APP, "select.none", "Deselect All", "Edit", Some("Ctrl+Shift+A"), "{}", |s, _| {
         s.selection.clear();
         Ok(selection_json(s))
     }),
-    cmd!("select.move", "Move Selection", "Edit", Some("Arrows"), "{delta: int, extend?: bool}", select_move),
+    cmd!(APP_STEP, "select.move", "Move Selection", "Edit", Some("Arrows"), "{delta: int, extend?: bool}", select_move),
     // File
     cmd!(
+        LAUNCH,
         "file.open",
         "Open",
         "File",
@@ -112,6 +148,7 @@ static COMMANDS: &[CommandSpec] = &[
         file_open
     ),
     cmd!(
+        RUN,
         "file.run",
         "Run…",
         "File",
@@ -120,6 +157,7 @@ static COMMANDS: &[CommandSpec] = &[
         file_run
     ),
     cmd!(
+        LAUNCH,
         "file.openIn",
         "Open In",
         "File",
@@ -127,10 +165,11 @@ static COMMANDS: &[CommandSpec] = &[
         "{app: photocraft|lightcraft|filmcraft|pdfcraft|designcraft|wordcraft, paths?: [path]} (default: selection)",
         file_open_in
     ),
-    cmd!("file.reveal", "Reveal in Explorer", "File", None, "{path?} (default: focused item)", file_reveal),
-    cmd!("item.probe", "File Info", "File", None, "{path}", item_probe),
+    cmd!(LAUNCH, "file.reveal", "Reveal in Explorer", "File", None, "{path?} (default: focused item)", file_reveal),
+    cmd!(READ, "item.probe", "File Info", "File", None, "{path}", item_probe),
     // Cache
     cmd!(
+        APP,
         "cache.clear",
         "Clear Thumbnail Cache",
         "View",
@@ -139,9 +178,10 @@ static COMMANDS: &[CommandSpec] = &[
         cache_clear
     ),
     // App
-    cmd!("app.state", "State", "Help", None, "{}", |s, _| Ok(state_json(s))),
-    cmd!("app.commands", "Commands", "Help", None, "{}", |_, _| Ok(commands_json())),
+    cmd!(READ, "app.state", "State", "Help", None, "{}", |s, _| Ok(state_json(s))),
+    cmd!(READ, "app.commands", "Commands", "Help", None, "{}", |_, _| Ok(commands_json())),
     cmd!(
+        READ,
         "app.openInTargets",
         "Open In Targets",
         "Help",
@@ -594,7 +634,7 @@ fn commands_json() -> Value {
         COMMANDS
             .iter()
             .map(
-                |c| json!({ "id": c.id, "label": c.label, "menu": c.menu, "shortcut": c.shortcut, "params": c.params }),
+                |c| json!({ "id": c.id, "effects": c.effects.to_json(), "label": c.label, "menu": c.menu, "shortcut": c.shortcut, "params": c.params }),
             )
             .collect(),
     )

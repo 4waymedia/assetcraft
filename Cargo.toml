@@ -20,6 +20,7 @@ assetcraft-watch = { path = "crates/watch" }
 assetcraft-engine = { path = "crates/engine" }
 assetcraft-ui-egui = { path = "crates/ui-egui" }
 assetcraft-mesh = { path = "crates/mesh" }
+assetcraft-storyboard = { path = "crates/storyboard" }
 # external
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
 png = "0.18"

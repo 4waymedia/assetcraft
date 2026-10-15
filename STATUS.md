@@ -2,15 +2,39 @@
 
 _Last updated: 2026-10-15_
 
-**Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md, README.md and docs/assetcraft-api.md paths updated; the older paths further down are history.
+**Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
-## Next: Stage 1.5 (API), proposed 2026-10-14
+## Current: Stage 4 Storyboard mode (Paul, 2026-10-15), step 1 done
 
-**2026-10-15:** `cargo xtask ci` passes on Windows (Stage 1 + sibling bumps D1, after `cargo clean`). Stage 1 is committed (`3ad8e0e`). The manual app checks under "Next action (Paul, Windows)" below are still open and can run alongside Stage 1.5.
+Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/storyboard-mode-handoff.md](docs/design/storyboard-mode-handoff.md) (Claude Design handoff, copied verbatim; prototypes stay in Paul's Downloads).
 
-Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). First step: `Effect` on every `CommandSpec` (engine only, no new crate).
+**Decision (Paul, 2026-10-15): implement the Storyboard mode design now**, ahead of Stages 2 and 3 and the rest of 1.5. Build: none of them is needed for storyboard steps 1–6. Runtime: storyboards live in memory until plan decision D3 (saving). CI: unchanged gate.
 
-## Current: AssetCraft Stage 1 (Every format, fast), steps 1–8 done; Paul to check on Windows
+- [x] 1. `crates/storyboard` (new, L3, deps `serde`, `serde_json` only; `xtask/src/layers.rs` row added, AGENTS.md layer table updated): `model.rs` (Storyboard, Clip, Scene, Track, Story, TextClip, ShotType with the design's codes/colours, Transition), `time.rs` (`Ticks` at FilmCraft's 254,016,000,000/s, `Bpm` 20–400, beat ↔ ticks, `m:ss.s` timecode), `recut.rs` (handoff's Re-cut rule, title cards locked by default, `RecutReport::fits`), `fill.rs` (Quick fill `next_empty`, `place` with REPLACING target, title cards refused), `validate.rs` (`Storyboard::from_json` caps bytes, counts, string lengths, durations, unique ids, scene refs, ascending beat grid and song sections; refuses newer `version`; `deny_unknown_fields`). 10 tests in `crates/storyboard/src/tests.rs`, including the handoff's 24-clip / 5-title-card sample and hostile documents
+  - **Deviations from the handoff (by design):** clip index is the Vec position (not stored); durations are ticks with beats derived; a scene's title is its title card's text. Revisit: none planned
+- [ ] 2. Engine commands, in memory, with undo (see plan step 2). Every new `storyboard.*` command declares its effects (the `cmd!` macro now requires it): edits are `write-app-state`; nothing is `write-user-file` until plan D3
+- [ ] 3–10. See plan
+
+**Decisions waiting (Paul):** storyboard plan D1 vocabulary (Clip replaces block) and D3 saving storyboard documents before Stage 2. Details and recommendations in the plan. (Plan IDs; not the D1 finding row below.)
+
+## Stage 1.5 (API): step 1 done, rest after Storyboard
+
+Plan: the Stage 1.5 section of [docs/assetcraft-plan.md](docs/assetcraft-plan.md), adopted 2026-10-15 from PipelineCraft spec §16.7. The 2026-10-14 draft is in [docs/archive/assetcraft-api.md](docs/archive/assetcraft-api.md).
+
+**Decision (Paul, 2026-10-15): command effects follow PipelineCraft D8-B, plus `file.run` refused on every remote door.** Four classes (`read`, `write-app-state`, `write-user-file`, `external-network`), flags `destructive` / `undoable` / `idempotent`, derived `confirm`. Programs started for the user are `write-app-state` + `confirm` with a note (spec A4-F4: no `external-process` class yet).
+
+- [x] 1. Effects on every `CommandSpec` (`crates/engine/src/effect.rs`: `EffectClass`, `Effects` with presets `READ`, `APP`, `APP_STEP`, `LAUNCH`, `RUN`; `cmd!` takes the preset first, so a command can't be added without one). `app.commands` / `commands --json` carry `effects {classes, destructive, undoable, idempotent, confirm, source: "declared", remoteAllowed, note?}`; the `commands` table has an EFFECTS column. Result: 4 `read`, 28 `write-app-state`, of which 4 `confirm` (`file.open`, `file.openIn`, `file.reveal`, `file.run`) and 1 `destructive` + local-only (`file.run`). `undoable` is `false` everywhere (no undo before Stage 2). 3 new tests in `effect.rs` (exact safety sets, well-formed effects, JSON shape) and the CLI test checks `--json` against the registry
+  - **Deviations from §16.7 step 1:** `enabled` / `disabledReason` move to step 2 (the step that emits the full shape); one `cmd!` form with named presets instead of a separate `query!` macro
+- [ ] 2. Full `CommandInfo` shape with `enabled`, `disabledReason`; `assetcraft-cli describe <id>`
+- [ ] 3–8. See plan
+
+**Verified (Linux, Rust 1.97, 2026-10-15):** `cargo xtask ci` passes with step 1 alone: fmt, clippy `-D warnings`, 249 tests (plus 1 ignored), `heic` run, layers ok (10 crates). With the storyboard step 1 patch applied on top (all but its STATUS hunk, merged here by hand): `cargo xtask ci` passes, 259 tests (plus 1 ignored), `heic` run, layers ok (11 crates). Paul to run Windows CI on the combined tree.
+
+**Opportunity (owner: Paul, in the PipelineCraft repo):** record D8 as decided (B + AssetCraft's `remoteAllowed`) in `pipelinecraft/docs/spec/15-decisions.md`, and consider `remoteAllowed` (or a hub-side per-app deny list) as a suite field, since the hub's MCP door should honour it too.
+
+**Next action (Paul, Windows):** run `cargo xtask ci`, expect `layers ok (11 crates)` and `all checks passed`, then commit (blocks in the chat). The manual Stage 1 app checks below are still open and can run alongside.
+
+## Stage 1 (Every format, fast): done; Windows CI passes (2026-10-15); manual app checks open
 
 ### Stage 1 checklist (numbered from the plan's Stage 1 bullets)
 

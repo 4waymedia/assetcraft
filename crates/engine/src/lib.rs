@@ -6,6 +6,7 @@
 //! Commands are listed in [`commands`]; `assetcraft-cli commands` prints them.
 
 mod commands;
+pub mod effect;
 pub mod launch;
 pub mod open_in;
 pub mod paths;
@@ -16,6 +17,7 @@ mod watching;
 
 pub use assetcraft_thumbs::DiskCache;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
+pub use effect::{EffectClass, Effects};
 pub use launch::{
     LaunchAction, Launcher, PROGRAM_EXTENSIONS, RecordingLauncher, SystemLauncher, explorer_command_line,
     has_program_extension,

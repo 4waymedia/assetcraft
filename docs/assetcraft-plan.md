@@ -56,11 +56,11 @@ assetcraft/
 |-------|------------------------------|----------------------------------------------------------------------|
 | 0     | Navigator                    | Bridge-style read-only file browser for common image formats         |
 | 1     | Every format, fast           | Disk thumbnail cache; PSD, raw, PDF, video, 3D thumbnails; folder watching |
-| 1.5   | API                          | Command effects + remote policy; `serve` (stdio JSON lines); MCP (compact); live `--control` channel. See [assetcraft-api.md](assetcraft-api.md) |
+| 1.5   | API: control, MCP, effects   | Command effects on every command; `--control` channel with a manifest; `assetcraft-cli serve` and `mcp`; thumbnails and asset refs as commands |
 | 2     | Organize                     | XMP ratings, labels, keywords; culling mode; batch rename; near-duplicates |
 | 3     | Structure and find           | Catalog op log, collections, smart collections, search, version stacks, entities |
 | 3.5   | Develop (Camera Raw style)   | Ctrl+R opens the selection in an embedded raw editor built on LightCraft's develop crates; edits saved as Camera Raw–compatible XMP |
-| 4     | Plan: storyline A + B        | Manual blocks, animatic preview, OTIO export into FilmCraft          |
+| 4     | Plan: Storyboard mode        | Clips, scenes, track; Shot map, Quick fill, Re-cut, animatic; OTIO into FilmCraft. See [storyboard-plan.md](storyboard-plan.md) |
 | 5     | Plan: AI + generation, C + D | Provider preferences (Local, API, ArtCraft); AI storyline; directives |
 | 6     | Execute                      | Recipes, any-CLI step, hot folders; storyline E + F (templates, FilmCraft assembly) |
 | 7     | Connect and offer            | Lineage graph, "used in", shot coverage; packaging; pitch to the ArtCraft team |
@@ -147,6 +147,96 @@ only.
 - **Exit:** a mixed folder shows correct thumbnails for every type, and a file copied in
   appears without a refresh.
 
+### Stage 1.5: API (control channel, MCP, command effects)
+
+_Text from the PipelineCraft spec (`pipelinecraft/docs/spec/13-14-16-engineering-upstream-stages.md`
+§16.7, draft v0, 2026-10-15), adopted by Paul on 2026-10-15 with decision D8-B. It supersedes
+[archive/assetcraft-api.md](archive/assetcraft-api.md)._
+
+Everything AssetCraft can do becomes reachable from outside its window, the way the sibling apps
+are, and every command says what it touches. PipelineCraft (working name), "Open In v2" and
+Stage 6 recipes all build on this. No new user-facing features, and still no writes to user files.
+
+- **Scope:** command effects and `enabled` on every command; `assetcraft-cli commands --json` in the
+  full suite shape; an opt-in loopback control channel (`--control`) with a token and a manifest
+  file; `assetcraft-cli serve` (headless control) and `assetcraft-cli mcp`; `thumb.render` and
+  `asset.ref` as commands.
+- **Goal it serves:** AssetCraft becomes the first app that declares command effects natively and
+  publishes where it listens, so it is the reference for the hub contract and for the small upstream
+  PRs (manifest file, effects field).
+- **Immediate area of improvement:** today AssetCraft can only be driven through `assetcraft-cli exec`
+  (one process per call), its catalog has no `enabled` or effects, and nothing outside it can ask for
+  a thumbnail or an asset's identity.
+
+**Decision (Paul, 2026-10-15): D8-B plus one AssetCraft rule.** Four classes (`read`,
+`write-app-state`, `write-user-file`, `external-network`) plus `destructive` / `undoable` /
+`idempotent` flags and a derived `confirm`. Programs started for the user (`file.open`,
+`file.openIn`, `file.reveal`, `file.run`) are `write-app-state` + `confirm` with a note, until the
+suite adds an `external-process` class. AssetCraft also marks `file.run` `remoteAllowed: false`:
+it is refused on every remote door (`serve`, MCP, `--control`), whatever the grants.
+
+**Features**
+- **Command effects:** each `CommandSpec` declares classes (`read`, `write-app-state`,
+  `write-user-file`, `external-network`) plus `destructive` / `undoable` / `idempotent` flags
+  (PipelineCraft spec §6.4). `app.commands` lists them with `enabled` and `disabledReason`.
+- **Control channel:** `assetcraft --control <port|0> [--control-token-file F]`, loopback only,
+  JSON lines `{id, method, params}` → `{id, ok, result|error}`, methods `engine.execute
+  {command, params}` and `engine.commands`, `auth {token}` as the first frame. The real bound port
+  is logged, a failed bind exits non-zero, and a manifest is written to
+  `%LOCALAPPDATA%\CraftApps\run\assetcraft-<pid>.json` (removed on exit).
+- **Headless:** `assetcraft-cli serve --control <port|0>` runs the same server over a headless
+  `Session`; `assetcraft-cli mcp` serves the suite MCP tool set over stdio.
+- **Hostile input:** request-only line guard, 4 MiB line cap, 4 KiB before auth, 16 connections,
+  per-request deadline (VectorCraft's server is the model).
+
+**Commands** (new)
+- `thumb.render {path, maxSide?, out?}`: PNG thumbnail through the existing pipeline. Without `out`
+  it returns base64 PNG (≤ 1 MiB); with `out` it writes a **new** file only, never overwrites
+  (the CLI `thumb` rule).
+- `asset.ref {path}` → `{path, size, mtime, q1}` (PipelineCraft spec §7.1, BLAKE3 `q1`).
+- `app.commands` gains `effects`, `enabled`, `disabledReason`.
+
+**CLI**
+- `assetcraft-cli commands --json` (full shape) and `assetcraft-cli describe <id>`
+- `assetcraft-cli serve --control <port|0> [--control-token-file F]`
+- `assetcraft-cli mcp`
+
+**Building blocks (reuse before build)**
+| Need                                    | From                                                                     | Notes                                                       |
+|-----------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------------------|
+| Guarded NDJSON server, deadlines        | VectorCraft `apps/vectorcraft/src/control_server.rs` (Copy)              | Into `crates/craft-control-server` (L1, no UI); NOTICE line |
+| Token handshake                         | PhotoCraft `crates/automation/src/security.rs` (Copy)                    | Same frame as PhotoCraft; NOTICE line                       |
+| Manifest write (stage + rename)         | PdfCraft control file, `apps/pdfcraft/src/main.rs` (Copy pattern)        | Adds `app`, `app_version`, `codec`, `protocol`              |
+| Envelope, `CommandInfo`, manifest types | New `crates/craft-control-proto` (L0)                                    | Shared with PipelineCraft from day one                      |
+| MCP tool names                          | Suite convention `command_list` / `command_run` / `command_batch` (Call) | Hand-written JSON-RPC, no tokio                             |
+
+**Steps**
+1. `CommandSpec` gains `effects` and `enabled`; every existing command declares them (`cmd!` and a
+   `query!` form for reads); `file.openIn` and `file.run` are `write-app-state` with
+   `confirm: true` until the spec decides on an `external-process` class.
+   **Done 2026-10-15 for `effects`** (`crates/engine/src/effect.rs`); `enabled` moves to step 2,
+   which emits it; one `cmd!` form with named presets (`READ`, `APP`, `APP_STEP`, `LAUNCH`, `RUN`)
+   instead of a separate `query!` macro.
+2. `app.commands` and `assetcraft-cli commands --json` emit the full shape; `describe <id>`.
+3. `crates/craft-control-proto` (L0) and `crates/craft-control-server` (L1); `TABLE` rows and the
+   island rule; server thread → UI thread over a channel, like the siblings.
+4. `assetcraft --control` and `assetcraft-cli serve`: token, manifest, real port, exit on bind failure.
+5. `assetcraft-cli mcp` with the suite tool set; tool hints from command effects.
+6. `thumb.render` and `asset.ref` commands (`blake3`, `pure` feature).
+7. Optional: add EffectCraft, VectorCraft and SoundCraft to the Open In catalog.
+8. Tests: fake client over a real socket; hostile frames; manifest written and removed;
+   `engine.commands` equals `commands --json`; exit test.
+
+**Exit**
+- `engine.commands` over `--control` equals `assetcraft-cli commands --json` (same ids, effects and
+  `enabled`).
+- A PowerShell `TcpClient` script authenticates, runs `nav.open` and `app.state`, and a second
+  script without the token is refused; an HTTP request line closes the connection.
+- The manifest appears in `%LOCALAPPDATA%\CraftApps\run\` while the app runs and is gone after a
+  normal exit.
+- `assetcraft-cli mcp` lists its tools in Claude Code, and read-only tools are marked read-only.
+- `cargo xtask ci` passes, and nothing writes to user files except a new `thumb.render` `out` file.
+
 ### Stage 2: Organize
 - XMP sidecar ratings, labels and keywords via `lightcraft-meta`, merged without disturbing
   other tools' fields. They round-trip with LightCraft.
@@ -217,8 +307,9 @@ importing them into a LightCraft catalog.
 - Cancel writes nothing; a damaged raw shows an error in the filmstrip and nothing crashes.
 
 ### Stages 4 to 7
-- **4 and 5:** Storyline Builder slices A–D. See
-  [storyline-builder.md](storyline-builder.md) §10–11.
+- **4:** Storyboard mode, from the design handoff: [storyboard-plan.md](storyboard-plan.md)
+  (storyline slices A and B, in the handoff's vocabulary).
+- **5:** Storyline Builder slices C–D. See [storyline-builder.md](storyline-builder.md) §10–11.
 - **6:** Recipes (multi-app pipelines with dry run and resume), any-CLI steps (trellis.cpp,
   ffmpeg, Blender headless), hot folders, and storyline slices E–F.
 - **7:** Lineage graph, "used in" across FilmCraft and DesignCraft projects, shot coverage,

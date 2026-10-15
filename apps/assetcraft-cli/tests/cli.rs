@@ -243,10 +243,14 @@ fn commands_json_lists_every_engine_command() {
     let cmds = json_of(&["commands", "--json"]);
     assert_eq!(cmds.as_array().unwrap().len(), assetcraft_engine::commands().len());
     assert!(cmds.as_array().unwrap().iter().any(|c| c["id"] == "item.probe"));
+    for (c, spec) in cmds.as_array().unwrap().iter().zip(assetcraft_engine::commands()) {
+        assert_eq!(c["effects"], spec.effects.to_json(), "{}", spec.id);
+    }
     let table = ok(&["commands"]);
     for c in assetcraft_engine::commands() {
         assert!(table.contains(c.id), "{}", c.id);
     }
+    assert!(table.contains("EFFECTS") && table.contains("local-only"));
 }
 
 #[test]

@@ -79,7 +79,6 @@ AI is optional. Each capability uses a provider chosen in Preferences: **Local**
 | Doc                                                        | What it covers                                        |
 |------------------------------------------------------------|-------------------------------------------------------|
 | [docs/assetcraft-plan.md](docs/assetcraft-plan.md)         | Stages 0–7, Stage 0 in detail, feature backlog        |
-| [docs/assetcraft-api.md](docs/assetcraft-api.md)           | Stage 1.5 API: serve, MCP, live control, command effects |
 | [docs/storyline-builder.md](docs/storyline-builder.md)     | Plan mode spec, slices A–F, provider design           |
 | [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) | What we learned from each sibling app, with file refs |
 | [test_data/README.md](test_data/README.md)                 | The generated test library                            |

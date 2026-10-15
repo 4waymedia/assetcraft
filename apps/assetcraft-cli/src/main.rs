@@ -98,7 +98,7 @@ USAGE:
     assetcraft-cli commands [--json]
 
 OPTIONS:
-    --json           Print the app.commands JSON (id, label, menu, shortcut, params)
+    --json           Print the app.commands JSON (id, effects, label, menu, shortcut, params)
     -h, --help       Print help
 ";
 
@@ -486,11 +486,34 @@ fn list_commands(p: &Parsed, help: &'static str) -> Outcome {
     }
     let rows: Vec<Vec<String>> = commands()
         .iter()
-        .map(|c| vec![c.id.into(), c.menu.into(), c.shortcut.unwrap_or("-").into(), c.params.into()])
+        .map(|c| {
+            vec![
+                c.id.into(),
+                effects_cell(&c.effects),
+                c.menu.into(),
+                c.shortcut.unwrap_or("-").into(),
+                c.params.into(),
+            ]
+        })
         .collect();
-    let mut out = table(&["ID", "MENU", "SHORTCUT", "PARAMS"], &[Align::Left; 4], &rows);
+    let mut out = table(&["ID", "EFFECTS", "MENU", "SHORTCUT", "PARAMS"], &[Align::Left; 5], &rows);
     out.push_str(&format!("{} commands. Run one with: assetcraft-cli exec <id> '<json-params>'\n", rows.len()));
     Ok(out)
+}
+
+/// `write-app-state +confirm` style summary for the human table.
+fn effects_cell(e: &assetcraft_engine::Effects) -> String {
+    let mut out = e.classes.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(",");
+    if e.destructive {
+        out.push_str(" +destructive");
+    }
+    if e.confirm() {
+        out.push_str(" +confirm");
+    }
+    if !e.allowed_remotely() {
+        out.push_str(" local-only");
+    }
+    out
 }
 
 fn exec(p: &Parsed, help: &'static str) -> Outcome {
