@@ -2,6 +2,10 @@
 
 _Last updated: 2026-10-14_
 
+## Next: Stage 1.5 (API), proposed 2026-10-14
+
+Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). Starts after Stage 1 is committed and passes on Windows. First step: `Effect` on every `CommandSpec` (engine only, no new crate).
+
 ## Current: AssetCraft Stage 1 (Every format, fast), steps 1–8 done; Paul to check on Windows
 
 ### Stage 1 checklist (numbered from the plan's Stage 1 bullets)

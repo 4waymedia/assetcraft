@@ -56,6 +56,7 @@ assetcraft/
 |-------|------------------------------|----------------------------------------------------------------------|
 | 0     | Navigator                    | Bridge-style read-only file browser for common image formats         |
 | 1     | Every format, fast           | Disk thumbnail cache; PSD, raw, PDF, video, 3D thumbnails; folder watching |
+| 1.5   | API                          | Command effects + remote policy; `serve` (stdio JSON lines); MCP (compact); live `--control` channel. See [assetcraft-api.md](assetcraft-api.md) |
 | 2     | Organize                     | XMP ratings, labels, keywords; culling mode; batch rename; near-duplicates |
 | 3     | Structure and find           | Catalog op log, collections, smart collections, search, version stacks, entities |
 | 3.5   | Develop (Camera Raw style)   | Ctrl+R opens the selection in an embedded raw editor built on LightCraft's develop crates; edits saved as Camera Raw–compatible XMP |
