@@ -173,10 +173,17 @@ fn missing_tool_is_a_typed_error_shown_as_a_type_icon() {
     assert_eq!(poster_frame(&gone, Path::new("/v/clip.mp4"), 128), Err(ThumbError::ToolMissing("filmcraft-cli")));
 }
 
+/// A video path that is already absolute on this platform, so `poster_frame` passes it through
+/// unchanged (`/v/…` has no drive letter on Windows and would gain the current one).
+#[cfg(windows)]
+const QUOTED_CLIP: &str = r#"C:\v\my clip "1".mov"#;
+#[cfg(not(windows))]
+const QUOTED_CLIP: &str = "/v/my clip \"1\".mov";
+
 #[test]
 fn poster_frame_runs_the_tool_once_and_decodes_its_png() {
     let fake = Fake::new(Act::Write(png_bytes(1920, 1080)));
-    let t = poster_frame(&fake, Path::new("/v/my clip \"1\".mov"), 256).unwrap();
+    let t = poster_frame(&fake, Path::new(QUOTED_CLIP), 256).unwrap();
     assert_eq!((t.width, t.height, t.source_width, t.source_height), (256, 144, 1920, 1080));
     let calls = fake.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -188,7 +195,7 @@ fn poster_frame_runs_the_tool_once_and_decodes_its_png() {
     let ids: Vec<serde_json::Value> = script.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let names: Vec<&str> = ids.iter().filter_map(|v| v["id"].as_str()).collect();
     assert_eq!(names, ["file.import", "project.selectAll", "source.open", "file.exportFrame"]);
-    assert_eq!(ids[0]["params"]["paths"][0], "/v/my clip \"1\".mov", "quotes survive as JSON");
+    assert_eq!(ids[0]["params"]["paths"][0], QUOTED_CLIP, "quotes survive as JSON");
     assert_eq!(ids[3]["params"]["time"], 254_016_000_000i64, "one second in");
     assert_eq!(ids[3]["params"]["target"], "source");
     // The private temp folder is gone afterwards.

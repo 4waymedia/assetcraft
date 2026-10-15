@@ -15,9 +15,9 @@ DesignCraft, WordCraft).
 ## Build (Windows, PowerShell)
 
 ```powershell
-Set-Location F:\Script-Projects\assetcraft
+Set-Location F:\Script-Projects\ArtCrafting\assetcraft
 cargo xtask ci                     # fmt, clippy, tests (default + heic), layers, deny
-cargo run -p assetcraft --release -- "F:\Script-Projects\assetcraft\test_data\library"
+cargo run -p assetcraft --release -- "F:\Script-Projects\ArtCrafting\assetcraft\test_data\library"
 cargo run -p assetcraft-cli -- --help
 ```
 
@@ -34,7 +34,7 @@ steps:
 1. **Build with the `heic` feature.** Without it the decoder (`lightcraft-heif` over
    `heic-rs`) isn't compiled at all.
    ```powershell
-   Set-Location F:\Script-Projects\assetcraft
+   Set-Location F:\Script-Projects\ArtCrafting\assetcraft
    cargo run -p assetcraft --release --features heic
    ```
 2. **Turn it on in the app:** View → Formats → **HEIC / HEIF thumbnails (HEVC)**. The choice is
@@ -47,7 +47,7 @@ item is greyed, and its tooltip says to rebuild with `--features heic`. The swit
 The CLI doesn't read the app's preferences; pass `--heic` per call instead:
 
 ```powershell
-Set-Location F:\Script-Projects\assetcraft
+Set-Location F:\Script-Projects\ArtCrafting\assetcraft
 cargo build -p assetcraft-cli --release --features heic
 .\target\release\assetcraft-cli.exe thumb photo.heic --size 256 --out photo.png --heic
 ```

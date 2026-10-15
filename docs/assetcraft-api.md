@@ -101,7 +101,7 @@ Claude Desktop config (Windows) once built:
 
 ```json
 { "mcpServers": { "assetcraft": {
-    "command": "F:\\Script-Projects\\assetcraft\\target\\release\\assetcraft-cli.exe",
+    "command": "F:\\Script-Projects\\ArtCrafting\\assetcraft\\target\\release\\assetcraft-cli.exe",
     "args": ["mcp", "--root", "F:\\Art\\Reapers"] } } }
 ```
 

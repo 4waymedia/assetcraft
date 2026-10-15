@@ -2,6 +2,8 @@
 
 _Last updated: 2026-10-14_
 
+**Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md, README.md and docs/assetcraft-api.md paths updated; the older paths further down are history.
+
 ## Next: Stage 1.5 (API), proposed 2026-10-14
 
 Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). Starts after Stage 1 is committed and passes on Windows. First step: `Effect` on every `CommandSpec` (engine only, no new crate).
@@ -57,6 +59,7 @@ Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). Starts after Stage 1 is 
 | L6 | `crates/thumbs/src/model.rs`                                 | Every folder between the model and an external `.bin` must be a real folder (`services.entry`, links not followed); doc updated                                                         | fixed  |
 | L7 | `crates/thumbs/src/disk.rs`                                  | The disk-cache key of a `.gltf` covers the `.gltf` only: editing just its external `.bin` keeps the old thumbnail until the `.gltf` changes or the cache is cleared. Known limitation (owner: Claude, fix with the `.mtl` work) | logged |
 | L8 | `crates/engine/src/open_in.rs`                               | `ASSETCRAFT_<APP>_EXE` and `PATH` entries must be full paths (`X:\…`, `X:/…`, `\\server\…` on Windows; rooted elsewhere), checked textually so Windows rules are tested everywhere | fixed  |
+| W1 | `crates/thumbs/src/pdf_video_tests.rs`                       | Windows `cargo xtask ci` (2026-10-14): `poster_frame` makes `/v/…` absolute (`F:\v\…`), so the test's expected path only matched on Unix. Test now uses a per-platform absolute `QUOTED_CLIP`; decoder unchanged | fixed, Paul to re-run |
 
 Test note: tests use the real `PATH`, so a `filmcraft-cli` on Paul's PATH is exercised by the thumbnail pool and exit tests (videos then show `Image` instead of `TypeIcon`; both are accepted).
 

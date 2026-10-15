@@ -15,7 +15,7 @@ and executes. It's a sibling of the storytold Crafting Apps.
 - **Never run git write commands** (commit, push, rebase, merge, checkout of changed files).
   Paul runs all git himself, so hand over a PowerShell block instead:
   ```powershell
-  Set-Location F:\Script-Projects\AssetCraft
+  Set-Location F:\Script-Projects\ArtCrafting\assetcraft
   git add -A
   git commit -m "Stage N: <what changed>"
   git push
