@@ -1,12 +1,14 @@
 # STATUS
 
-_Last updated: 2026-10-14_
+_Last updated: 2026-10-15_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md, README.md and docs/assetcraft-api.md paths updated; the older paths further down are history.
 
 ## Next: Stage 1.5 (API), proposed 2026-10-14
 
-Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). Starts after Stage 1 is committed and passes on Windows. First step: `Effect` on every `CommandSpec` (engine only, no new crate).
+**2026-10-15:** `cargo xtask ci` passes on Windows (Stage 1 + sibling bumps D1, after `cargo clean`). Stage 1 is committed (`3ad8e0e`). The manual app checks under "Next action (Paul, Windows)" below are still open and can run alongside Stage 1.5.
+
+Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). First step: `Effect` on every `CommandSpec` (engine only, no new crate).
 
 ## Current: AssetCraft Stage 1 (Every format, fast), steps 1–8 done; Paul to check on Windows
 
@@ -59,8 +61,9 @@ Spec: [docs/assetcraft-api.md](docs/assetcraft-api.md). Starts after Stage 1 is 
 | L6 | `crates/thumbs/src/model.rs`                                 | Every folder between the model and an external `.bin` must be a real folder (`services.entry`, links not followed); doc updated                                                         | fixed  |
 | L7 | `crates/thumbs/src/disk.rs`                                  | The disk-cache key of a `.gltf` covers the `.gltf` only: editing just its external `.bin` keeps the old thumbnail until the `.gltf` changes or the cache is cleared. Known limitation (owner: Claude, fix with the `.mtl` work) | logged |
 | L8 | `crates/engine/src/open_in.rs`                               | `ASSETCRAFT_<APP>_EXE` and `PATH` entries must be full paths (`X:\…`, `X:/…`, `\\server\…` on Windows; rooted elsewhere), checked textually so Windows rules are tested everywhere | fixed  |
-| W1 | `crates/thumbs/src/pdf_video_tests.rs`                       | Windows `cargo xtask ci` (2026-10-14): `poster_frame` makes `/v/…` absolute (`F:\v\…`), so the test's expected path only matched on Unix. Test now uses a per-platform absolute `QUOTED_CLIP`; decoder unchanged | fixed, Paul to re-run |
-| D1 | `Cargo.toml`, `Cargo.lock`, `NOTICE`                          | Sibling decoders moved to their latest releases (2026-10-14): PhotoCraft 0.8.2 → 0.9.0 (`c699e3c`), LightCraft 0.7.1 → 0.8.0 (`16dbb90`, heic-rs 0.1.1 → 0.1.4), PdfCraft 0.7.1 → 0.8.0 (`9931329`, `[patch]` set unchanged). Upstream changes are additive only; no AssetCraft code changed. `cargo xtask ci` passes on Linux (246 tests + heic run). `quick-xml` is still 0.38 in LightCraft 0.8.0, so the RUSTSEC-2026-0194/-0195 opportunity stays open (owner: LightCraft) | fixed, Paul to run Windows CI |
+| W1 | `crates/thumbs/src/pdf_video_tests.rs`                       | Windows `cargo xtask ci` (2026-10-14): `poster_frame` makes `/v/…` absolute (`F:\v\…`), so the test's expected path only matched on Unix. Test now uses a per-platform absolute `QUOTED_CLIP`; decoder unchanged | fixed, passes on Windows |
+| D1 | `Cargo.toml`, `Cargo.lock`, `NOTICE`                          | Sibling decoders moved to their latest releases (2026-10-14): PhotoCraft 0.8.2 → 0.9.0 (`c699e3c`), LightCraft 0.7.1 → 0.8.0 (`16dbb90`, heic-rs 0.1.1 → 0.1.4), PdfCraft 0.7.1 → 0.8.0 (`9931329`, `[patch]` set unchanged). Upstream changes are additive only; no AssetCraft code changed. `cargo xtask ci` passes on Linux (246 tests + heic run). `quick-xml` is still 0.38 in LightCraft 0.8.0, so the RUSTSEC-2026-0194/-0195 opportunity stays open (owner: LightCraft) | fixed, passes on Windows |
+| W2 | `crates/*/src/**` tests (`env!("CARGO_MANIFEST_DIR")`)      | After the move to `ArtCrafting\assetcraft`, Cargo kept the old `assetcraft-fs` test build (fingerprints are workspace-relative), so its baked-in path pointed at the old folder and 6 tests failed. Fixed with `cargo clean` (2026-10-15). Opportunity: read `CARGO_MANIFEST_DIR` at run time (`std::env::var`) in tests, so a moved repo needs no clean (owner: Claude, only if more moves are planned) | fixed, passes on Windows |
 
 Test note: tests use the real `PATH`, so a `filmcraft-cli` on Paul's PATH is exercised by the thumbnail pool and exit tests (videos then show `Image` instead of `TypeIcon`; both are accepted).
 
