@@ -205,7 +205,7 @@ Notes:
 |------|------------------------------------------------------------------------------------------------------------|--------|
 | PR1  | Preset mechanics: `storyboard.presets` (READ), `storyboard.new {format, preset}`, `storyboard.applyPreset` (EDIT, one undo step), apply = replace structure, keep name/track/Story, time to track | built and tested in the sandbox, not handed over (its in-code catalog is the design's placeholder list) |
 | PR2  | Preset file format + loader + validation (schema above) in `crates/storyboard`; catalog read from `presets/`; Style › Preset menu in the toolbar | next |
-| PR3  | Track audio (plan step 8, pulled forward): decode + playback in Watch your Cut on an audio clock, track relink by `fileHint` | after PR2 |
+| PR3  | Track analysis and playback: spec [track-analysis.md](track-analysis.md), phases A1–A7 (A6 drafts the preset files, A7 is PR4) | spec written; A1 next |
 | PR4  | The 20 preset files, drafted from Paul's songs                                                             | after the songs arrive |
 
 ## Opportunities
