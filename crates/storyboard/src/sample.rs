@@ -102,6 +102,7 @@ pub fn sample() -> Storyboard {
         duration: Ticks::from_secs(SAMPLE_SECONDS).unwrap_or(Ticks::ZERO),
         beat_grid: Vec::new(),
         song_sections: Vec::new(),
+        edit: None,
     });
     board
 }

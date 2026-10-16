@@ -1,6 +1,6 @@
 # Track analysis and Shape to music
 
-_2026-10-15 · Stage 4 (Storyboard mode) · spec v1.1: decisions AD1–AD4 made; Fit to length prototyped_
+_2026-10-15 · Stage 4 (Storyboard mode) · spec v1.4: G1, A1 and playback (PR3, pulled forward from A3) built; A2 next_
 
 - **Scope:** analyse a Track once, so the music's timing (beats, bars, sections, hits, energy) is
   stored as data, then use that data to propose timeline edits: cut points, clip lengths, scene
@@ -401,13 +401,83 @@ assetcraft-cli preset draft <file> --style Trailer --seconds 60 [--clips 22] # p
 - **Pacing controls:** profile picker, a cut-density slider (scales shot ranges), an accent-intensity
   slider (scales accent weights).
 
+## 9a. Built first: G1, generate a storyboard from a cue map (Paul, 2026-10-15)
+
+Paul's priority after hearing the Fit to length previews: generate the storyboard clips from the
+audio now. G1 does that end to end with the analysis bridged, so nothing here is thrown away when
+A1–A4 land; they replace only the bridge.
+
+| Part                         | Where                                                         | Notes                                                                                   |
+|------------------------------|---------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| Cue map v1 (§5, times in source frames) | `crates/storyboard/src/cuemap.rs`                   | `CueMap::from_json` (8 MiB cap, counts, order, ranges, bare file name), `timeline(fit)` maps beats, bars, sections and hits across a splice |
+| Generator (§6, from scratch) | `crates/storyboard/src/generate.rs`                           | Scenes from sections (merge < 4 bars, split long ones at 16-bar phrases), title cards per profile, shot length by section energy, cuts moved onto hits, shot types by position and energy; total = the fitted track exactly; reasons in each clip's notes |
+| Commands                     | `crates/engine/src/generate_cmd.rs`                           | `storyboard.generate {cueMap, pacing?, seconds?, fit?, name?}` (EDIT, one undo step; undo also restores `generatedFrom`), `storyboard.cueMaps` (READ, names only) |
+| UI                           | File → New Storyboard from Track ▸ track ▸ length; empty-state buttons; Pacing and Length pickers in the mode bar regenerate |
+| Bridge analyser              | `tools/cuemap.py` (dev only, librosa 0.11, ISC)               | Writes `<track>.cuemap.json` beside the audio, with the track's credit from `copyright-claims.md`; replaced by A1–A4 |
+| Dev aid                      | `cargo run -p assetcraft-storyboard --example gen -- <cuemap> <pacing> [seconds]` | Prints the clip list with reasons                                          |
+
+**Pacing profiles as built (AD4):**
+
+| Profile    | Shot length (bars, by energy) | Shortest shot          | Title cards              | End card | Cuts on hits | Long sections split at |
+|------------|-------------------------------|------------------------|--------------------------|----------|--------------|------------------------|
+| Calm       | 8 → 4                         | 8 beats or 3.0 s       | opening                  | no       | no           | 32 bars                |
+| Cinematic  | 4 → 2                         | 4 beats or 1.5 s       | opening                  | yes      | yes          | 32 bars                |
+| Energetic  | 2 → ½                         | 2 beats or 0.6 s       | opening                  | yes      | yes          | 16 bars                |
+| Trailer    | 4 → ½, shortening as the Cut goes on | 2 beats or 0.9 s | every scene             | yes      | yes          | 16 bars                |
+
+**Verified on Paul's 24 cue maps:** all 480 combinations (24 tracks × 4 profiles × full/30/60/90/120 s)
+generate a valid storyboard whose clips add up to the fitted track; at Trailer 1:00 every track lands
+within ±1.1 s of 1:00, with 12–48 clips.
+
+**Tuning opportunities (owner: Claude, after Paul has tried it):** T1 clip counts at fast tempos
+(Fall in Love: 48 clips at 1:00) → a per-profile cap on clips per minute; T2 sections from the bridge
+are coarse on repetitive tracks (Vanguard's 23–138 s) → the 16-bar split covers it until A4; T3 shot
+types are a fixed pattern → later from the assets (Stage 3 entities).
+
+## 9b. Built: A1, track decoding (2026-10-15)
+
+| Piece                 | Where                                                     | Notes                                                                                         |
+|-----------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| Decode                | `crates/audio` (`assetcraft-audio`, L1) over `soundcraft-audio-io` (storytold/soundcraft `3a28a65`) | Bytes through `assetcraft-fs`; header checked against the limits before decoding, again after; non-finite samples → silence |
+| Limits                | `MAX_SECONDS` 1200, `MAX_CHANNELS` 8, 8–384 kHz, `MAX_FILE_BYTES` 512 MiB | §3                                                                                             |
+| Views                 | `Audio::mono`, `peaks` (SoundCraft's `Peaks`), `summary`, `stereo_at` | Mono is the channel mean; playback takes the front pair                                         |
+| Command               | `track.summary {path}` (READ)                               | Full path required (`has_root`)                                                                 |
+| CLI                   | `assetcraft-cli analyze <audio>... [--json]`                | One line per file; failures listed, exit 1 if any                                               |
+| Licences              | `deny.toml`: MPL-2.0 for the 16 `symphonia*` crates only (AD1); NOTICE row | `cargo deny check licenses sources bans`: ok                                              |
+
+**Corpus check (Paul's 26 MP3s, release build):** all decode; lengths match the bridge (The Flow of
+Time 2:27.0 at 48 kHz, Vanguard 3:54.5, Titan 2:14.3); 12.7 s for all 26.
+
+**Deviation:** resampling to 22,050 Hz and the fingerprint move to A2, where the analysis first uses
+them; A1 ships only what playback and the summary need.
+
+## 9c. Built: playback, the track under Watch your Cut (PR3, 2026-10-15)
+
+Paul (2026-10-15): "The play preview works! But there was no music." Pulled forward from A3; the
+Tracks lane and corrections stay in A3.
+
+| Piece              | Where                                                         | What it does                                                                                     |
+|--------------------|---------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| Audio edit on the board | `assetcraft_storyboard::TrackEdit` on `Track.edit` (`sampleRate`, `segments`, `crossfadeFrames`, `fadeOut`, `lengthFrames`) | `storyboard.generate` stores the chosen fit, so a board plays (and later exports) without its cue map; validated on load (1–16 segments, fade inside the edit) |
+| Program            | `assetcraft_audio::program` (`Edit`, `Program`)                 | Track through its edit: segments back to back, equal-power crossfade centred on each splice, quarter-sine fade-out, silence after; rendered at the device rate with linear interpolation; mono / stereo / multichannel devices |
+| Player trait       | `assetcraft_audio::{Player, SilentPlayer, RecordingPlayer}`     | What the engine drives; the CLI and tests never open a device                                    |
+| Device             | `crates/playback` (`assetcraft-playback`, L2, `cpal` 0.16)      | Default output device, opened on the first ▶ on its own thread; callback renders the program; position = frames handed over − reported output latency |
+| Engine             | `crates/engine/src/audio_out.rs`                              | Background decode (prefetched once the app sets a player), `storyboard.play` starts the music at the playhead, pause / seek / new / generate / undo / redo stop it, `poll_audio` brings it in when a decode finishes mid-play or the edit changes, `audio_clock`; `transport.audio` in `storyboard.state` (`none`, `idle`, `loading`, `ready`, `playing`, `failed: …`) |
+| Window             | `strip_view::playhead`                                        | Follows the audio clock while the music plays, else egui's clock                                 |
+| Dev check          | `cargo run -p assetcraft-playback --release --example play -- <file> [from] [secs]` | Hear a file and watch the clock                                                                  |
+
+Verified here: all unit tests; the device path ran end to end against ALSA's null device (no
+sound card in the sandbox). **Paul to verify by ear on Windows:** generate from a cue map, ▶, and
+the music starts with the first clip; the 60 s Vanguard edit crossfades at 0:35.8 and ends on the
+song's own ending.
+
 ## 10. Implementation phases (small steps, each its own patch)
 
 | Phase | Delivers                                                                                                      | Draft phase | Visible result for Paul                                         |
 |-------|---------------------------------------------------------------------------------------------------------------|-------------|-----------------------------------------------------------------|
-| A1    | `assetcraft-audio`: decode via `soundcraft-audio-io`, limits, mono, resample, peaks, fingerprint; `assetcraft-cli analyze --summary` prints duration, rate, peak, RMS | 1           | CLI summary of each of the 26 tracks                             |
+| A1    | `assetcraft-audio`: decode via `soundcraft-audio-io`, limits, mono, peaks; `track.summary`; `assetcraft-cli analyze --summary` prints duration, rate, peak, RMS. **Built 2026-10-15** (resample and fingerprint move to A2, their first user) | 1           | CLI summary of each of the 26 tracks: all 26 decode, ~0.5 s each (release) |
 | A2    | `assetcraft-analysis`: curves (RMS, bands, flux, centroid, flatness), onsets, tempo + candidates, DP beat tracker, pulse clarity, free-time flag; cache; `--json` | 1           | BPM and beat grid per track, compared with the librosa oracle    |
-| A3    | Track on the storyboard, Tracks lane with waveform and beat grid, playback on the audio clock (PR3), corrections → overrides | 3           | See and hear the grid in AssetCraft; fix tempo and downbeat      |
+| A3    | Track on the storyboard, Tracks lane with waveform and beat grid, playback on the audio clock (PR3, **built early, §9c**), corrections → overrides | 3           | See and hear the grid in AssetCraft; fix tempo and downbeat      |
 | A4    | Downbeats, meter, phrases, sections with labels, builds, drops, swells                                         | 4           | Sections and drops drawn on the lane                              |
 | A5    | **Fit to length** (§6.5): fade, edit-to-ending and button endings, start trim, audio edit on the Track, playback and `fit --render` | 2 | Every track at 30/60/90/120 s, judged by ear |
 | A6    | Edit planner (§6.1–6.4, 6.6), pacing profiles, Shape to music dialog (1e), Re-cut on the cue map              | 2           | Proposed cuts with reasons; accept/reject rows                    |

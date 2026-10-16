@@ -263,4 +263,77 @@ fn screenshot() {
     if let Some(done) = done {
         save(&out.with_file_name(format!("{stem}-fill-done.png")), done);
     }
+
+    // Optional: a storyboard generated from a real cue map (`AC_CUEMAP=/abs/x.cuemap.json`),
+    // Trailer pacing at 60 s, auto-filled from the open folder, in the Strip view and the Shot map.
+    if let Some(cue) = std::env::var_os("AC_CUEMAP") {
+        let seconds = std::env::var("AC_SECONDS").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(60);
+        let pacing = std::env::var("AC_PACING").unwrap_or_else(|_| "trailer".into());
+        nav.run(
+            "storyboard.generate",
+            json!({ "cueMap": cue.to_string_lossy(), "pacing": pacing, "seconds": seconds }),
+        );
+        nav.run("storyboard.autofill", json!({}));
+        for (view, suffix) in [("strip", "generated-strip"), ("map", "generated-map")] {
+            nav.run("storyboard.view", json!({ "view": view }));
+            let mut shot = None;
+            for _ in 0..12 {
+                t += 0.05;
+                shot = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+                nav.wait_thumbs(Duration::from_millis(50));
+            }
+            if let Some(shot) = shot {
+                save(&out.with_file_name(format!("{stem}-{suffix}.png")), shot);
+            }
+        }
+    }
+
+    // Optional: text clips (`AC_TEXT=1`). The sample, auto-filled; title 1 switched to a
+    // Cinematic overlay, title 2 a Paper card with a typewriter. Shot map, Strip with the overlay
+    // selected, and the Viewer paused 0.25 s into title 2 (mid-animation).
+    if std::env::var_os("AC_TEXT").is_some() {
+        nav.run("storyboard.new", json!({ "sample": true }));
+        nav.run("storyboard.autofill", json!({}));
+        let titles: Vec<u32> = nav
+            .session()
+            .storyboard()
+            .map(|b| b.clips.iter().filter(|c| c.text_kind().is_some()).map(|c| c.id.0).collect())
+            .unwrap_or_default();
+        if let [first, second, ..] = titles[..] {
+            nav.run("storyboard.text.kind", json!({ "clip": first, "kind": "overlay" }));
+            nav.run("storyboard.text.style", json!({ "clip": first, "theme": "cinematic" }));
+            nav.run("storyboard.autofill", json!({}));
+            nav.run("storyboard.text.style", json!({ "clip": second, "theme": "paper", "animation": "typewriter" }));
+            let second_start = nav
+                .session()
+                .storyboard()
+                .and_then(|b| b.index_of(assetcraft_storyboard::ClipId(second)).map(|i| b.starts()[i]))
+                .map(|s| s.as_secs_f64())
+                .unwrap_or(0.0);
+            let shots: [(&str, &str, u32, Option<f64>); 4] = [
+                ("map", "text-map", second, None),
+                ("strip", "text-overlay", first, None),
+                ("strip", "text-card-mid", second, Some(second_start + 0.5)),
+                ("strip", "text-card-rest", second, Some(second_start + 2.0)),
+            ];
+            for (view, suffix, clip, at) in shots {
+                nav.run("storyboard.view", json!({ "view": view }));
+                nav.run("storyboard.select", json!({ "clip": clip }));
+                if let Some(at) = at {
+                    nav.run("storyboard.pause", json!({ "at": at }));
+                } else {
+                    nav.run("storyboard.pause", json!({ "at": 0.0 }));
+                }
+                let mut shot = None;
+                for _ in 0..12 {
+                    t += 0.05;
+                    shot = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+                    nav.wait_thumbs(Duration::from_millis(50));
+                }
+                if let Some(shot) = shot {
+                    save(&out.with_file_name(format!("{stem}-{suffix}.png")), shot);
+                }
+            }
+        }
+    }
 }

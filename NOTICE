@@ -36,6 +36,17 @@ Dependencies from sibling apps
   MIT OR Apache-2.0 (the vendored crates keep their upstream MIT / Apache-2.0 licences). Used as
   a git dependency; no code copied. Built without craft-fonts (CRAFT_FONTS_DIR unset), so no font
   files are embedded.
+- soundcraft-audio-io (track decoding and waveform peaks in crates/audio): storytold/soundcraft
+  crates/audio-io, rev 3a28a657692c1b98b28c276d8f61df9471074f0f (release 0.7.0), MIT OR
+  Apache-2.0. Used as a git dependency; no code copied. It decodes compressed formats with
+  symphonia 0.5 (pdeljanov/Symphonia, MPL-2.0; decision AD1 in docs/track-analysis.md): used
+  unmodified as crates.io dependencies, source available at https://github.com/pdeljanov/Symphonia.
+- crates/playback/src/lib.rs: opening the default output device with its default config, one
+  stream per sample format (f32 / i16 / i32 / u16), and errors that set a flag instead of
+  raising, follow SoundCraft crates/playback/src/lib.rs (open_device, build_output;
+  storytold/soundcraft rev 3a28a657692c1b98b28c276d8f61df9471074f0f, MIT OR Apache-2.0). Written
+  fresh; no code copied. Audio output is cpal 0.16 (RustAudio/cpal, Apache-2.0), as a crates.io
+  dependency, linked by the desktop app only.
 - filmcraft-cli (video poster frames, crates/thumbs/src/decoders/video.rs): storytold/filmcraft,
   MIT OR Apache-2.0. Not linked or bundled: run as a separate process when the user has it
   installed.

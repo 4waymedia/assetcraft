@@ -13,6 +13,9 @@ use crate::time::Ticks;
 /// Current document format version.
 pub const FORMAT_VERSION: u32 = 1;
 
+/// Most segments in a track edit.
+const MAX_EDIT_SEGMENTS: usize = 16;
+
 /// Bounds for a loaded document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
@@ -148,6 +151,12 @@ impl Storyboard {
             if c.shot_type == ShotType::Ttl && !c.asset_ids.is_empty() {
                 return Err(BoardError::Invalid(format!("title card #{} has assets", c.id.0)));
             }
+            if c.shot_type == ShotType::Ttl && c.overlay.is_some() {
+                return Err(BoardError::Invalid(format!("title card #{} also has an overlay", c.id.0)));
+            }
+            if let Some(o) = &c.overlay {
+                text("overlay", o, l)?;
+            }
             if c.duration > l.max_duration {
                 return Err(BoardError::Limit(format!("clip #{} is longer than the limit", c.id.0)));
             }
@@ -196,6 +205,30 @@ impl Storyboard {
                     return Err(BoardError::Invalid(format!("song section {:?} is out of order", s.name)));
                 }
                 prev_end = s.end;
+            }
+            if let Some(e) = &track.edit {
+                let bad = |m: &str| Err(BoardError::Invalid(format!("track edit: {m}")));
+                if !(1_000..=1_000_000).contains(&e.sample_rate) {
+                    return bad("sample rate out of range");
+                }
+                if e.segments.is_empty() || e.segments.len() > MAX_EDIT_SEGMENTS {
+                    return bad("needs 1 to 16 segments");
+                }
+                if e.segments.iter().any(|[a, b]| a >= b) {
+                    return bad("a segment ends before it starts");
+                }
+                let sum = e.segments.iter().fold(0u64, |acc, [a, b]| acc.saturating_add(b - a));
+                if e.length_frames == 0 || e.length_frames > sum {
+                    return bad("length is longer than its segments");
+                }
+                if e.length_frames as f64 / f64::from(e.sample_rate) > l.max_duration.as_secs_f64() {
+                    return Err(BoardError::Limit("the track edit is longer than the limit".into()));
+                }
+                if e.fade_out
+                    .is_some_and(|[start, frames]| start.checked_add(frames).is_none_or(|end| end > e.length_frames))
+                {
+                    return bad("the fade ends after the track");
+                }
             }
         }
 

@@ -1,0 +1,152 @@
+use super::*;
+use assetcraft_fs::FakeFs;
+use assetcraft_storyboard::Ticks;
+use serde_json::json;
+use std::time::Duration;
+
+/// A 16-bit mono WAV at 8 kHz: `secs` seconds of a quiet square wave.
+fn wav(secs: u32) -> Vec<u8> {
+    let rate = 8_000u32;
+    let frames = rate * secs;
+    let data = frames * 2;
+    let mut b = Vec::new();
+    for part in [&b"RIFF"[..], &(36 + data).to_le_bytes(), b"WAVEfmt ", &16u32.to_le_bytes()] {
+        b.extend_from_slice(part);
+    }
+    for v in [1u16, 1] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 2).to_le_bytes());
+    for v in [2u16, 16] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data.to_le_bytes());
+    for i in 0..frames {
+        let s: i16 = if (i / 40) % 2 == 0 { 2000 } else { -2000 };
+        b.extend_from_slice(&s.to_le_bytes());
+    }
+    b
+}
+
+/// A cue map for `track.wav`: 120 BPM at 8 kHz, 32 bars (64 s), one section, a 10 s fade fit.
+fn cue_map() -> String {
+    let rate = 8_000u64;
+    let beat = rate / 2;
+    let beats: Vec<u64> = (0..128).map(|i| i * beat).collect();
+    let bars: Vec<u64> = (0..32).map(|i| i * 4 * beat).collect();
+    json!({
+        "version": 1,
+        "analyzer": "test",
+        "track": { "file": "track.wav", "title": "Test", "artist": "Me", "license": "CC0-1.0", "credit": "" },
+        "sampleRate": rate,
+        "durationFrames": 64 * rate,
+        "bpm": 120.0,
+        "beatsPerBar": 4,
+        "pulseClarity": 0.9,
+        "beats": beats,
+        "downbeats": bars,
+        "sections": [{ "start": 0, "end": 64 * rate, "label": "Song", "energy": 0.5 }],
+        "hits": [],
+        "fits": { "30": { "chosen": "fade", "fade": {
+            "mode": "fade", "lengthFrames": 10 * rate, "segments": [[0, 10 * rate]], "crossfadeFrames": 0,
+            "fadeOut": { "start": 8 * rate, "frames": 2 * rate }, "reasons": [], "changes": "Cut to 0:10 with a fade out"
+        }, "edit": null } }
+    })
+    .to_string()
+}
+
+fn music(name: &str) -> String {
+    std::path::Path::new("/music").join(name).to_string_lossy().into_owned()
+}
+
+fn session(player: Arc<RecordingPlayer>, with_track: bool) -> Session {
+    let mut fs = FakeFs::new()
+        .known(KnownFolder::Home, "/home/paul")
+        .file_with(music("track.cuemap.json"), cue_map().into_bytes());
+    if with_track {
+        fs = fs.file_with(music("track.wav"), wav(64));
+    }
+    let mut s = Session::new(Arc::new(fs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    s.set_player(player);
+    s
+}
+
+fn run(s: &mut Session, id: &str, params: Value) -> Value {
+    s.execute(id, &params).unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+#[test]
+fn play_starts_the_fitted_track_at_the_playhead_and_pause_stops_it() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
+    // The window's first frame starts the decode (a real player was given).
+    s.poll_audio(Ticks::ZERO);
+    assert!(s.wait_track_audio(Duration::from_secs(10)));
+    assert_eq!(s.audio_status(), "ready");
+    let r = run(&mut s, "storyboard.play", json!({ "from": 2.0 }));
+    assert_eq!(r["audio"], "playing");
+    assert!(r.get("message").is_none());
+    // 10 s fade fit: the program is the edit, not the 32 s file.
+    assert_eq!(player.log(), ["play 10.0s from 2.0"]);
+    assert_eq!(s.audio_clock(), Ticks::from_secs_f64(2.0));
+    // Frames keep the same program playing; no restarts.
+    s.poll_audio(Ticks::from_secs_f64(2.5).unwrap_or(Ticks::ZERO));
+    assert_eq!(player.log().len(), 1);
+    run(&mut s, "storyboard.pause", json!({ "at": 3.0 }));
+    assert_eq!(player.log(), ["play 10.0s from 2.0", "stop"]);
+    assert_eq!(s.audio_clock(), None);
+    assert_eq!(run(&mut s, "storyboard.state", json!({}))["transport"]["audio"], "ready");
+}
+
+#[test]
+fn a_cut_that_plays_before_the_decode_finishes_brings_the_music_in_later() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json") }));
+    // No poll yet, so play starts the decode itself.
+    let r = run(&mut s, "storyboard.play", json!({}));
+    let started_now = player.log().len() == 1;
+    if !started_now {
+        assert_eq!(r["message"], "Loading the track…");
+        assert!(s.wait_track_audio(Duration::from_secs(10)));
+        s.poll_audio(Ticks::from_secs_f64(1.5).unwrap_or(Ticks::ZERO));
+        assert_eq!(player.log(), ["play 64.0s from 1.5"], "music joins at the playhead");
+    }
+    // Undo (back to no board) stops it; the poll after that has nothing to play.
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(player.log().last().map(String::as_str), Some("stop"));
+    s.poll_audio(Ticks::ZERO);
+    assert_eq!(s.audio_status(), "none");
+}
+
+#[test]
+fn a_missing_track_plays_silent_and_says_why() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), false);
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json") }));
+    s.poll_audio(Ticks::ZERO);
+    assert!(s.wait_track_audio(Duration::from_secs(10)));
+    let r = run(&mut s, "storyboard.play", json!({}));
+    assert!(r["message"].as_str().unwrap_or_default().starts_with("Playing without music"), "{r}");
+    assert!(r["audio"].as_str().unwrap_or_default().starts_with("failed:"), "{r}");
+    assert!(player.log().is_empty());
+    assert!(s.transport().playing, "the Cut still plays");
+}
+
+#[test]
+fn without_a_player_the_session_never_decodes() {
+    let fs = FakeFs::new()
+        .known(KnownFolder::Home, "/home/paul")
+        .file_with(music("track.cuemap.json"), cue_map().into_bytes());
+    let mut s = Session::new(Arc::new(fs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json") }));
+    s.poll_audio(Ticks::ZERO);
+    assert_eq!(s.audio_status(), "idle");
+    // The sample board has a stand-in track with no file: nothing to play.
+    run(&mut s, "storyboard.new", json!({ "sample": true }));
+    assert_eq!(s.audio_status(), "none");
+    assert_eq!(run(&mut s, "storyboard.play", json!({}))["audio"], "none");
+}

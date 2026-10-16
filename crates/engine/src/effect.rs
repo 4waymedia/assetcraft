@@ -151,7 +151,15 @@ mod tests {
         assert_eq!(ids(Effects::confirm), BTreeSet::from(["file.open", "file.openIn", "file.reveal", "file.run"]));
         assert_eq!(
             ids(Effects::read_only),
-            BTreeSet::from(["app.commands", "app.openInTargets", "app.state", "item.probe", "storyboard.state"])
+            BTreeSet::from([
+                "app.commands",
+                "app.openInTargets",
+                "app.state",
+                "item.probe",
+                "storyboard.cueMaps",
+                "storyboard.state",
+                "track.summary"
+            ])
         );
         assert!(
             ids(|e| e.classes.iter().any(|c| matches!(c, EffectClass::WriteUserFile | EffectClass::ExternalNetwork)))

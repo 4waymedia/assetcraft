@@ -8,9 +8,10 @@
 //!   else the next empty clip. The engine then selects the next empty clip, so clicks run on in
 //!   order. Timeline controls: `n / N filled`, Undo, Auto-fill rest, Clear. When every clip is
 //!   filled the Viewer offers ▶ Watch your Cut.
-//! - **Playback:** `storyboard.play` / `.pause {at}` / `.seek` record the transport; while it
-//!   plays, the playhead advances on egui's clock from the recorded start ([`SbUi`]), the Viewer
-//!   shows the clip under it, and reaching the end runs `storyboard.pause {at: total}`.
+//! - **Playback:** `storyboard.play` / `.pause {at}` / `.seek` record the transport and start or
+//!   stop the track's music; while it plays, the playhead follows the audio clock (or egui's
+//!   clock from the recorded start, [`SbUi`], when there is no music), the Viewer shows the clip
+//!   under it, and reaching the end runs `storyboard.pause {at: total}`.
 //! - **Re-cut:** clip widths animate over 0.4 s to their new lengths, and the result shows as a
 //!   toast over the timeline for 3.8 s.
 //!
@@ -43,7 +44,6 @@ const RULER_H: f32 = 20.0;
 const MARKER_H: f32 = 18.0;
 const CONTROLS_H: f32 = 30.0;
 const TIMELINE_H: f32 = RULER_H + MARKER_H + STRIP_H + 24.0;
-const TITLE_FILL: Color32 = Color32::from_rgb(0x4a, 0x18, 0x20);
 const NEXT_FILL: Color32 = Color32::from_rgb(0x1f, 0x33, 0x50);
 /// Re-cut width animation and toast time (design 4a).
 const RECUT_ANIM_SECS: f32 = 0.4;
@@ -62,19 +62,30 @@ pub(crate) struct SbUi {
     pub(crate) toast: Option<(String, Option<f64>)>,
 }
 
-/// Where the playhead is now. While playing it runs on egui's clock from the recorded start,
-/// and reaching the end of the Cut pauses there.
+/// Where the playhead is now. While the track plays it is the audio clock (so pictures follow
+/// the music); otherwise, or until the music comes in, it runs on egui's clock from the recorded
+/// start. Reaching the end of the Cut pauses there. Also keeps the engine's track audio in step
+/// (`Session::poll_audio`).
 pub(crate) fn playhead(nav: &mut Navigator, ctx: &egui::Context) -> Ticks {
     let transport = nav.session.transport();
     let total = nav.session.storyboard().map(Storyboard::total).unwrap_or(Ticks::ZERO);
     if !transport.playing {
         nav.state.storyboard.play_started = None;
-        return transport.position.min(total);
+        let at = transport.position.min(total);
+        nav.session.poll_audio(at);
+        return at;
     }
     let now = ctx.input(|i| i.time);
     let started = *nav.state.storyboard.play_started.get_or_insert(now);
     let elapsed = Ticks::from_secs_f64((now - started).max(0.0)).unwrap_or(Ticks::ZERO);
-    let at = transport.position.checked_add(elapsed).unwrap_or(total);
+    let mut at = transport.position.checked_add(elapsed).unwrap_or(total);
+    nav.session.poll_audio(at.min(total));
+    if let Some(clock) = nav.session.audio_clock() {
+        // Follow the music, and keep the window's clock aligned in case the music stops.
+        at = clock;
+        let since = (clock.as_secs_f64() - transport.position.as_secs_f64()).max(0.0);
+        nav.state.storyboard.play_started = Some(now - since);
+    }
     if at >= total {
         nav.run("storyboard.pause", json!({ "at": total.as_secs_f64() }));
         return total;
@@ -321,7 +332,9 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     let paused_mid = !playing && at > Ticks::ZERO && at < board.total();
     if playing || paused_mid {
         if let Some(clip) = board.clip_at(at).cloned() {
-            show_clip(nav, ui, frame, &clip, index, w);
+            let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
+            let elapsed = at.as_secs_f64() - start.as_secs_f64();
+            show_clip(nav, ui, frame, &clip, index, elapsed);
         }
         return;
     }
@@ -340,7 +353,7 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
                 Color32::GRAY,
             );
         }
-        Some(clip) => show_clip(nav, ui, frame, clip, index, w),
+        Some(clip) => show_clip(nav, ui, frame, clip, index, f64::INFINITY),
     }
     // Dropping on the Viewer places into the selected clip.
     if let Some(clip) = selected.filter(|c| c.shot_type.accepts_assets()) {
@@ -353,13 +366,11 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     }
 }
 
-/// A clip as the Cut shows it: title text, hero frame, or "No shot assigned".
-fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: &Index, w: f32) {
+/// A clip as the Cut shows it, `elapsed` seconds in (`f64::INFINITY` = at rest): a Card, or the
+/// hero frame (or "No shot assigned") with any Overlay text on top.
+fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: &Index, elapsed: f64) {
     if clip.shot_type == ShotType::Ttl {
-        let font = FontId::proportional((w / 22.0).clamp(14.0, 40.0));
-        let galley = ui.painter().layout(clip.description.clone(), font, Color32::WHITE, frame.width() * 0.8);
-        let pos = frame.center() - galley.size() / 2.0;
-        ui.painter().galley(pos, galley, Color32::WHITE);
+        crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
         return;
     }
     match clip.asset_ids.first() {
@@ -388,6 +399,7 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
             );
         }
     }
+    crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
 }
 
 /// Quick fill Viewer: the target clip's brief in a dashed frame, or "All n clips filled" with
@@ -502,6 +514,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let playing = nav.session.transport().playing;
     let mut select: Option<ClipId> = None;
     let mut drop: Option<(ClipId, String)> = None;
+    let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let ctx = ui.ctx().clone();
     egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
         let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H), Sense::hover());
@@ -530,7 +543,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
         let mut prev_scene = None;
         let spans = clip_spans(board, left, Some(&ctx));
         for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
-            if prev_scene != Some(clip.scene_id) && clip.shot_type == ShotType::Ttl {
+            if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
                 let title = board.scene_title(clip.scene_id).unwrap_or_default();
                 painter.text(pos2(x, marker_y), Align2::LEFT_TOP, "§", FontId::monospace(11.0), SCENE_RED);
                 let clip_rect = Rect::from_min_size(pos2(x + 10.0, area.top() + RULER_H), vec2(240.0, MARKER_H));
@@ -556,6 +569,14 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             if response.on_hover_text(tip).clicked() {
                 select = Some(id);
             }
+            if let Some(to) = crate::text_view::kind_chip(
+                ui,
+                Rect::from_min_max(rect.min + vec2(0.0, 4.0), rect.max),
+                clip,
+                strip_clip_id(id).with("kind"),
+            ) {
+                switch = Some((clip.clone(), to));
+            }
         }
         let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
         painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(2.0, SELECT));
@@ -563,7 +584,9 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
         }
     });
-    if let Some((clip, asset)) = drop {
+    if let Some((clip, to)) = switch {
+        crate::text_view::switch_kind(nav, &clip, to);
+    } else if let Some((clip, asset)) = drop {
         nav.run("storyboard.place", json!({ "asset": asset, "clip": clip.0 }));
     } else if let Some(id) = select {
         nav.run("storyboard.select", json!({ "clip": id.0 }));
@@ -580,7 +603,8 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
         t => t.fill_rgb().map(rgb).unwrap_or(TILE_BORDER),
     };
     let title = clip.shot_type == ShotType::Ttl;
-    painter.rect_filled(body, 0, if title { TITLE_FILL } else { Color32::from_gray(0x22) });
+    let look = clip.text_style.theme.look();
+    painter.rect_filled(body, 0, if title { rgb(look.background) } else { Color32::from_gray(0x22) });
     painter.rect_filled(bar, 0, bar_color);
     let mut drew = false;
     if let Some(hero) = clip.asset_ids.first() {
@@ -591,7 +615,7 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
             drew = true;
         }
     }
-    let text = if title { Color32::WHITE } else { Color32::from_gray(0xdd) };
+    let text = if title { rgb(look.text) } else { Color32::from_gray(0xdd) };
     if !drew && !title {
         let well = Rect::from_min_size(body.min + vec2(4.0, 4.0), vec2(body.width() - 8.0, body.height() - 42.0));
         if well.width() > 20.0 {
@@ -608,8 +632,11 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
     }
     if title {
         let wrap = (body.width() - 10.0).max(10.0);
-        let galley = painter.layout(clip.description.clone(), FontId::proportional(12.0), Color32::WHITE, wrap);
-        painter.galley(body.min + vec2(5.0, 8.0), galley, Color32::WHITE);
+        let galley = painter.layout(clip.description.clone(), FontId::proportional(12.0), text, wrap);
+        painter.galley(body.min + vec2(5.0, 22.0), galley, text);
+    }
+    if let Some(words) = clip.overlay.as_deref() {
+        overlay_band(&painter, body, words);
     }
     let info = pos2(body.left() + 5.0, body.bottom() - 30.0);
     let label = format!("#{number:02} {}", clip.shot_type.code());
@@ -618,6 +645,23 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
     painter.text(info + vec2(0.0, 14.0), Align2::LEFT_TOP, secs, FontId::monospace(10.0), Color32::from_gray(0x8a));
     let border = if title { rgb(0xe5243b) } else { Color32::from_gray(0x3a) };
     painter.rect_stroke(rect, 3, Stroke::new(1.0, border), StrokeKind::Inside);
+}
+
+/// An Overlay's text as a band across the bottom of a thumbnail.
+pub(crate) fn overlay_band(painter: &egui::Painter, rect: Rect, words: &str) {
+    let band = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 46.0), pos2(rect.right(), rect.bottom() - 34.0));
+    if band.width() < 12.0 {
+        return;
+    }
+    painter.rect_filled(band, 0, Color32::from_black_alpha(190));
+    let clipped = painter.with_clip_rect(band.intersect(painter.clip_rect()));
+    clipped.text(
+        band.left_center() + vec2(4.0, 0.0),
+        Align2::LEFT_CENTER,
+        format!("T  {words}"),
+        FontId::proportional(9.0),
+        Color32::WHITE,
+    );
 }
 
 // ---- Toast ---------------------------------------------------------------------------------

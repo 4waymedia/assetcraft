@@ -239,3 +239,78 @@ fn recut_shows_a_toast_not_a_status_message() {
     frame(&ctx, &mut nav, Vec::new(), 4.0);
     assert!(nav.state.storyboard.toast.is_none(), "gone after 3.8 s");
 }
+
+/// A folder with one cue map (32 bars at 120 BPM) for generation tests.
+fn cue_folder() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ac-cue-{}-{}", std::process::id(), line!()));
+    let _ = std::fs::create_dir_all(&dir);
+    let (sr, bar) = (48_000u64, 96_000u64);
+    let sec = |a: u64, b: u64, l: &str, e: f32| json!({"start": a * bar, "end": b * bar, "label": l, "energy": e});
+    let cue = json!({
+        "version": 1, "analyzer": "test",
+        "track": {"file": "song.mp3", "title": "Song", "artist": "Me", "license": "own", "credit": ""},
+        "sampleRate": sr, "durationFrames": 32 * bar, "bpm": 120.0, "beatsPerBar": 4,
+        "beats": (0..128).map(|i| i * sr / 2).collect::<Vec<_>>(),
+        "downbeats": (0..32).map(|i| i * bar).collect::<Vec<_>>(),
+        "sections": [sec(0, 4, "Intro", 0.1), sec(4, 20, "Chorus", 1.0), sec(20, 32, "Outro", 0.3)],
+        "hits": [], "fits": {}
+    });
+    let _ = std::fs::write(dir.join("song.cuemap.json"), cue.to_string());
+    dir
+}
+
+#[test]
+fn file_menu_generates_from_a_cue_map_and_pacing_regenerates() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let dir = cue_folder();
+    assert!(nav.open_folder(&dir));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    let menus = nav.menus();
+    let file = menus.iter().find(|m| m.title == "File").unwrap();
+    let Some(MenuEntry::Sub { entries, .. }) =
+        file.entries.iter().find(|e| matches!(e, MenuEntry::Sub { label, .. } if label == "New Storyboard from Track"))
+    else {
+        panic!("no New Storyboard from Track submenu");
+    };
+    let Some(MenuEntry::Sub { label, entries: lengths }) = entries.first() else { panic!("no track entry") };
+    assert_eq!(label, "song");
+    let full =
+        lengths.iter().find(|e| matches!(e, MenuEntry::Item { label, .. } if label == "Full length")).cloned().unwrap();
+    assert!(nav.activate(&ctx, &full));
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    let trailer = nav.session().storyboard().unwrap().clips.len();
+    assert_eq!(nav.session().storyboard().unwrap().total().timecode(), "1:04.0");
+    assert_eq!(nav.session().generated_from().map(|g| g.pacing.id()), Some("trailer"));
+    // The mode bar's pacing picker regenerates through the same command.
+    let cue = dir.join("song.cuemap.json");
+    nav.run("storyboard.generate", json!({ "cueMap": cue.to_string_lossy(), "pacing": "calm" }));
+    frame(&ctx, &mut nav, Vec::new(), 0.2);
+    assert!(nav.session().storyboard().unwrap().clips.len() < trailer);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn clicking_a_title_cards_kind_chip_switches_it_and_back() {
+    use assetcraft_storyboard::{ClipId, TextKind};
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let kind = |nav: &Navigator| nav.session().storyboard().and_then(|b| b.clip(ClipId(1))).and_then(|c| c.text_kind());
+    assert_eq!(kind(&nav), Some(TextKind::Card));
+    // Tile 1 is centred near (60, 92) and is 112 × 76: its chip sits in the top-right corner.
+    let chip = Pos2::new(60.0 + 56.0 - 30.0, 92.0 - 38.0 + 11.0);
+    click(&ctx, &mut nav, chip, &mut t);
+    assert_eq!(kind(&nav), Some(TextKind::Overlay), "the chip switched clip #01 to an overlay");
+    assert_eq!(nav.session().selected_clip(), Some(ClipId(1)));
+    // The Inspector's TEXT section and the Strip view draw the overlay without trouble.
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.05);
+    nav.run("storyboard.view", json!({ "view": "map" }));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.1);
+    t += 0.1;
+    click(&ctx, &mut nav, chip, &mut t);
+    assert_eq!(kind(&nav), Some(TextKind::Card), "and back");
+}

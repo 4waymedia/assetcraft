@@ -50,6 +50,8 @@ fn main() -> ExitCode {
     if let Some(dir) = prefs_file::thumb_cache_dir() {
         session = session.with_thumb_cache(DiskCache::open(dir, DEFAULT_DISK_BUDGET));
     }
+    // Watch your Cut plays the track on the default output device (opened on the first ▶).
+    session.set_player(Arc::new(assetcraft_playback::DevicePlayer::new()));
     let mut navigator = Navigator::new(session);
     if let Some(folder) = std::env::args_os().nth(1).map(PathBuf::from) {
         navigator.open_folder(&folder);

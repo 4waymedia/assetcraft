@@ -32,6 +32,7 @@ COMMANDS:
     list <dir>                 List a folder the way the navigator shows it
     probe <file>               File type, dimensions, size, times, header status
     thumb <file> --out <png>   Render a thumbnail to a PNG file
+    analyze <audio>...         Track facts: duration, rate, channels, peak, RMS
     commands                   List every engine command
     exec <id> [<json>]         Run one engine command headlessly; prints its JSON result
     help [<COMMAND>]           Help for one command
@@ -91,6 +92,23 @@ OPTIONS:
 Unsupported, unreadable or too-large files print a message on stderr and exit 1.
 ";
 
+const ANALYZE_HELP: &str = "\
+assetcraft-cli analyze: decode audio tracks and print their facts (engine track.summary)
+
+USAGE:
+    assetcraft-cli analyze <audio>... [--summary] [--json]
+
+One line per file: length, sample rate, channels, peak and RMS (dBFS). A file that can't be
+decoded prints its reason and the rest carry on; the exit code is 1 if any failed. Limits: 20
+minutes, 8 channels, 8-384 kHz, 512 MiB. Phase A1 prints the summary only (--summary is the
+default); beats, sections and fits come with later phases.
+
+OPTIONS:
+    --summary        The summary (default)
+    --json           A JSON array of track.summary results ({path, error} for failures)
+    -h, --help       Print help
+";
+
 const COMMANDS_HELP: &str = "\
 assetcraft-cli commands: list every engine command
 
@@ -127,6 +145,7 @@ OPTIONS:
 const LIST_SPEC: Spec = Spec { switches: &["--json", "--desc", "--hidden"], values: &["--sort"] };
 const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
+const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary"], values: &[] };
 const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 
@@ -197,6 +216,7 @@ fn run(argv: &[String]) -> Outcome {
         "list" => with(rest, &LIST_SPEC, LIST_HELP, list),
         "probe" => with(rest, &PROBE_SPEC, PROBE_HELP, probe),
         "thumb" => with(rest, &THUMB_SPEC, THUMB_HELP, thumb),
+        "analyze" => with(rest, &ANALYZE_SPEC, ANALYZE_HELP, analyze),
         "commands" => with(rest, &COMMANDS_SPEC, COMMANDS_HELP, list_commands),
         "exec" => with(rest, &EXEC_SPEC, EXEC_HELP, exec),
         other => Err(unknown_subcommand(other)),
@@ -213,6 +233,7 @@ fn sub_help(name: &str) -> Option<&'static str> {
         "list" => LIST_HELP,
         "probe" => PROBE_HELP,
         "thumb" => THUMB_HELP,
+        "analyze" => ANALYZE_HELP,
         "commands" => COMMANDS_HELP,
         "exec" => EXEC_HELP,
         _ => return None,
@@ -375,6 +396,68 @@ fn probe(p: &Parsed, help: &'static str) -> Outcome {
         ("extension_mismatch", text("extension_mismatch")),
     ];
     Ok(rows.iter().map(|(k, v)| format!("{:<19} {v}\n", format!("{k}:"))).collect())
+}
+
+// ---- analyze -------------------------------------------------------------------------------
+
+/// Most files one `analyze` run takes.
+const MAX_ANALYZE_FILES: usize = 1_000;
+
+fn analyze(p: &Parsed, help: &'static str) -> Outcome {
+    let files = positionals(p, 1, MAX_ANALYZE_FILES, "<audio>", help)?;
+    let mut s = session(None);
+    let mut results = Vec::new();
+    let mut failed = 0;
+    for f in files {
+        let file = absolute(f);
+        let result = match path_str(&file) {
+            Ok(path) => s.execute("track.summary", &json!({ "path": path })),
+            Err(_) => Err(CmdError::BadParams("path is not valid UTF-8".into())),
+        };
+        results.push(match result {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                json!({ "path": file.to_string_lossy(), "error": e.to_string() })
+            }
+        });
+    }
+    let out = if p.has("--json") {
+        pretty(&Value::Array(results.clone()))
+    } else {
+        let mut out = String::new();
+        for r in &results {
+            let name = r["path"]
+                .as_str()
+                .map(Path::new)
+                .and_then(Path::file_name)
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match r.get("error").and_then(Value::as_str) {
+                Some(e) => out.push_str(&format!("{name}: {e}\n")),
+                None => {
+                    let secs = r["seconds"].as_f64().unwrap_or(0.0);
+                    out.push_str(&format!(
+                        "{name}: {}:{:04.1} · {} · {} Hz · {} ch · peak {:.1} dBFS · RMS {:.1} dBFS\n",
+                        (secs / 60.0).floor() as u64,
+                        secs % 60.0,
+                        r["format"].as_str().unwrap_or("?"),
+                        r["rate"],
+                        r["channels"],
+                        r["peakDbfs"].as_f64().unwrap_or(-120.0),
+                        r["rmsDbfs"].as_f64().unwrap_or(-120.0),
+                    ));
+                }
+            }
+        }
+        out
+    };
+    if failed > 0 {
+        // Print what worked, then fail.
+        print_out(&out);
+        return Err(Failure::Failed(format!("{failed} of {} file(s) could not be analysed", results.len())));
+    }
+    Ok(out)
 }
 
 // ---- thumb ---------------------------------------------------------------------------------

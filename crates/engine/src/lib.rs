@@ -5,8 +5,10 @@
 //! getters ([`Session::location`], [`Session::items`], [`Session::selection`] …) and draws it.
 //! Commands are listed in [`commands`]; `assetcraft-cli commands` prints them.
 
+mod audio_out;
 mod commands;
 pub mod effect;
+pub mod generate_cmd;
 pub mod launch;
 pub mod open_in;
 pub mod paths;
@@ -14,11 +16,15 @@ pub mod prefs;
 pub mod select;
 pub mod sort;
 pub mod storyboard;
+mod text_cmd;
+mod track_cmd;
 mod watching;
 
+pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_thumbs::DiskCache;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
 pub use effect::{EffectClass, Effects};
+pub use generate_cmd::{CUEMAP_SUFFIX, GeneratedFrom, LENGTHS, cue_map_label};
 pub use launch::{
     LaunchAction, Launcher, PROGRAM_EXTENSIONS, RecordingLauncher, SystemLauncher, explorer_command_line,
     has_program_extension,
@@ -162,6 +168,8 @@ pub struct Session {
     formats: FormatPrefs,
     /// Storyboard mode: the open storyboard, selected clip, undo (`storyboard.*`).
     boards: storyboard::Boards,
+    /// Track audio for Watch your Cut: player, decode, program (`audio_out`).
+    audio: audio_out::TrackAudio,
 }
 
 impl Session {
@@ -196,6 +204,7 @@ impl Session {
             generation: 0,
             formats: prefs.formats,
             boards: storyboard::Boards::default(),
+            audio: audio_out::TrackAudio::default(),
         };
         session.rescan_places();
         let start = prefs
@@ -580,8 +589,16 @@ fn same_location(a: &Location, b: &Location) -> bool {
 }
 
 #[cfg(test)]
+mod audio_tests;
+#[cfg(test)]
+mod generate_tests;
+#[cfg(test)]
 mod open_in_tests;
 #[cfg(test)]
 mod storyboard_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_tests;
+#[cfg(test)]
+mod track_tests;

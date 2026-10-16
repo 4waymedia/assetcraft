@@ -84,7 +84,12 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
             }
         }
         ui.spacing_mut().item_spacing.x = 12.0;
+        let generated = nav.session.generated_from().is_some();
         match track {
+            Some((bpm, len)) if generated => {
+                ui.label(format!("♪ {tname} · {} BPM · {}", fmt_bpm(bpm), short_time(len)));
+                regenerate_controls(nav, ui);
+            }
             Some((bpm, len)) => {
                 let current = format!("♪ {tname} · {} BPM · {}", fmt_bpm(bpm), short_time(len));
                 egui::ComboBox::from_id_salt("sb-track").selected_text(current).width(240.0).show_ui(ui, |ui| {
@@ -129,10 +134,11 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
 }
 
 fn empty_state(nav: &mut Navigator, ui: &mut Ui) {
+    let maps = nav.session.cue_maps();
     ui.vertical_centered(|ui| {
-        ui.add_space(ui.available_height() * 0.3);
+        ui.add_space(ui.available_height() * 0.2);
         ui.heading("No storyboard yet");
-        ui.weak("Start empty, or open the 24-clip sample from the design.");
+        ui.weak("Start empty, open the 24-clip sample, or build one from a track's cue map.");
         ui.add_space(12.0);
         if ui.button("New storyboard").clicked() {
             nav.run("storyboard.new", json!({}));
@@ -140,7 +146,65 @@ fn empty_state(nav: &mut Navigator, ui: &mut Ui) {
         if ui.button("New from sample").clicked() {
             nav.run("storyboard.new", json!({ "sample": true }));
         }
+        ui.add_space(16.0);
+        if maps.is_empty() {
+            ui.weak("Open a folder with .cuemap.json files in the Organizer to build from a track.");
+            return;
+        }
+        ui.label(
+            RichText::new("FROM A TRACK (Trailer pacing; change it after)")
+                .size(10.0)
+                .color(ui.visuals().weak_text_color()),
+        );
+        for path in &maps {
+            ui.horizontal(|ui| {
+                ui.label(assetcraft_engine::cue_map_label(path));
+                for (secs, label) in LENGTH_CHOICES {
+                    if ui.small_button(label).clicked() {
+                        nav.run("storyboard.generate", json!({ "cueMap": path.to_string_lossy(), "seconds": secs }));
+                    }
+                }
+            });
+        }
     });
+}
+
+/// Lengths offered when generating from a track: seconds (`None` = whole track) and label.
+pub(crate) const LENGTH_CHOICES: [(Option<u32>, &str); 5] =
+    [(None, "Full length"), (Some(30), "0:30"), (Some(60), "1:00"), (Some(90), "1:30"), (Some(120), "2:00")];
+
+fn length_label(secs: Option<u32>) -> &'static str {
+    LENGTH_CHOICES.iter().find(|(s, _)| *s == secs).map_or("Custom", |(_, l)| *l)
+}
+
+/// Pacing and Length pickers for a generated storyboard; changing either regenerates (undoable).
+fn regenerate_controls(nav: &mut Navigator, ui: &mut Ui) {
+    let Some(g) = nav.session.generated_from().cloned() else { return };
+    let cue = g.cue_map.to_string_lossy().into_owned();
+    let mut run: Option<serde_json::Value> = None;
+    egui::ComboBox::from_id_salt("sb-pacing")
+        .selected_text(format!("Pacing: {}", g.pacing.name()))
+        .width(150.0)
+        .show_ui(ui, |ui| {
+            for p in assetcraft_storyboard::Pacing::ALL {
+                if ui.selectable_label(p == g.pacing, p.name()).clicked() && p != g.pacing {
+                    run = Some(json!({ "cueMap": cue, "pacing": p.id(), "seconds": g.seconds }));
+                }
+            }
+        });
+    egui::ComboBox::from_id_salt("sb-length")
+        .selected_text(format!("Length: {}", length_label(g.seconds)))
+        .width(130.0)
+        .show_ui(ui, |ui| {
+            for secs in &g.lengths {
+                if ui.selectable_label(*secs == g.seconds, length_label(*secs)).clicked() && *secs != g.seconds {
+                    run = Some(json!({ "cueMap": cue, "pacing": g.pacing.id(), "seconds": secs }));
+                }
+            }
+        });
+    if let Some(params) = run {
+        nav.run("storyboard.generate", params);
+    }
 }
 
 /// Shot map, page-map style (design 1a).
@@ -152,6 +216,7 @@ fn shot_map(nav: &mut Navigator, ui: &mut Ui) {
     let playing_clip = nav.session.transport().playing.then(|| board.clip_at(at).map(|c| c.id)).flatten();
     let next = assetcraft_storyboard::next_empty(&board);
     let mut clicked: Option<ClipId> = None;
+    let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let width = ui.available_width();
         let per_row = (((width + GAP_X) / (TILE.x + GAP_X)).floor() as usize).max(1);
@@ -184,9 +249,14 @@ fn shot_map(nav: &mut Navigator, ui: &mut Ui) {
             if hover.clicked() {
                 clicked = Some(clip.id);
             }
+            if let Some(to) = crate::text_view::kind_chip(ui, tile, clip, id.with("kind")) {
+                switch = Some((clip.clone(), to));
+            }
         }
     });
-    if let Some(id) = clicked {
+    if let Some((clip, to)) = switch {
+        crate::text_view::switch_kind(nav, &clip, to);
+    } else if let Some(id) = clicked {
         nav.run("storyboard.select", json!({ "clip": id.0 }));
     }
 }
@@ -194,7 +264,10 @@ fn shot_map(nav: &mut Navigator, ui: &mut Ui) {
 fn paint_tile(nav: &mut Navigator, ui: &Ui, tile: Rect, clip: &Clip, _scene_start: bool) {
     let painter = ui.painter();
     let radius = CornerRadius::same(6);
-    match clip.shot_type.fill_rgb() {
+    let card = clip.shot_type == ShotType::Ttl;
+    let look = clip.text_style.theme.look();
+    let fill = if card { Some(look.background) } else { clip.shot_type.fill_rgb() };
+    match fill {
         Some(fill) => {
             painter.rect_filled(tile, radius, rgb(fill));
             painter.rect_stroke(tile, radius, Stroke::new(1.0, TILE_BORDER), StrokeKind::Inside);
@@ -217,7 +290,11 @@ fn paint_tile(nav: &mut Navigator, ui: &Ui, tile: Rect, clip: &Clip, _scene_star
     }
     let painter = ui.painter();
     if !drew_image {
-        let color = if clip.shot_type == ShotType::Cu { CU_TEXT } else { Color32::from_gray(0xe6) };
+        let color = match clip.shot_type {
+            ShotType::Cu => CU_TEXT,
+            ShotType::Ttl => rgb(look.text),
+            _ => Color32::from_gray(0xe6),
+        };
         painter.text(tile.center(), Align2::CENTER_CENTER, clip.shot_type.code(), FontId::proportional(18.0), color);
     } else {
         // Shot code as a small corner chip over the image.
@@ -231,8 +308,27 @@ fn paint_tile(nav: &mut Navigator, ui: &Ui, tile: Rect, clip: &Clip, _scene_star
             Color32::WHITE,
         );
     }
+    if let Some(words) = clip.overlay.as_deref() {
+        let band = Rect::from_min_max(
+            pos2(tile.left() + 1.0, tile.bottom() - 15.0),
+            pos2(tile.right() - 1.0, tile.bottom() - 1.0),
+        );
+        painter.rect_filled(band, 0, Color32::from_black_alpha(190));
+        let clipped = painter.with_clip_rect(band);
+        clipped.text(
+            band.left_center() + vec2(4.0, 0.0),
+            Align2::LEFT_CENTER,
+            format!("T  {words}"),
+            FontId::proportional(9.0),
+            Color32::WHITE,
+        );
+    }
     if clip.sync_to_downbeat {
-        let color = if clip.shot_type == ShotType::Cu { CU_TEXT } else { Color32::WHITE };
+        let color = match clip.shot_type {
+            ShotType::Cu if !drew_image => CU_TEXT,
+            ShotType::Ttl => rgb(look.text),
+            _ => Color32::WHITE,
+        };
         painter.text(tile.min + vec2(6.0, 4.0), Align2::LEFT_TOP, "◆", FontId::proportional(10.0), color);
     }
 }
@@ -249,7 +345,7 @@ fn caption(ui: &Ui, tile: Rect, number: usize, clip: &Clip, scene_start: bool) {
     let w = galley.size().x;
     painter.galley(pos2(x, y), galley, Color32::PLACEHOLDER);
     x += w + 6.0;
-    if scene_start && clip.shot_type == ShotType::Ttl {
+    if scene_start && clip.text_kind().is_some() {
         painter.text(pos2(x, y), Align2::LEFT_TOP, "§", mono.clone(), SCENE_RED);
     }
     let dur = format!("{:.1}s", clip.duration.as_secs_f64());
@@ -261,6 +357,9 @@ fn hover_text(clip: &Clip) -> String {
     if !clip.description.is_empty() {
         t.push('\n');
         t.push_str(&clip.description);
+    }
+    if let Some(words) = clip.overlay.as_deref() {
+        t.push_str(&format!("\nOverlay: {words}"));
     }
     t
 }
@@ -333,9 +432,13 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
             ui.label(RichText::new("◆ Start locked to downbeat").color(AI_TEXT));
         }
         ui.add_space(6.0);
+        if clip.text_kind().is_some() {
+            crate::text_view::inspector_section(nav, ui, &clip);
+            ui.add_space(6.0);
+        }
         section(ui, "SHOT");
         if !clip.shot_type.accepts_assets() {
-            ui.weak("Title cards hold text only.");
+            ui.weak("Title cards hold text only. Switch to Overlay to put the text over a shot.");
         } else if let Some(hero) = clip.asset_ids.first() {
             hero_frame(nav, ui, &hero.0);
             ui.label(RichText::new(assetcraft_fs::display_name(Path::new(&hero.0))).small())
@@ -381,7 +484,7 @@ pub(crate) fn hero_frame(nav: &mut Navigator, ui: &mut Ui, path: &str) {
     }
 }
 
-fn section(ui: &mut Ui, title: &str) {
+pub(crate) fn section(ui: &mut Ui, title: &str) {
     ui.label(RichText::new(title).size(10.0).color(ui.visuals().weak_text_color()));
 }
 

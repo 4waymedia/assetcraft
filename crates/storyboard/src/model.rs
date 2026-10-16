@@ -5,11 +5,12 @@
 //! - a clip's position is its index in [`Storyboard::clips`], not a stored `index` that could
 //!   disagree with it;
 //! - durations are [`Ticks`], and a clip's beat count is derived from the track's [`Bpm`];
-//! - a scene's title is its title card clip's description (the first [`ShotType::Ttl`] clip
-//!   in the scene), not a second copy of the text.
+//! - a scene's title is the text of its first clip with text (its title card's description, or
+//!   the overlay of a title switched to an Overlay), not a second copy of the text.
 
 use serde::{Deserialize, Serialize};
 
+use crate::text::{TextKind, TextStyle};
 use crate::time::{Bpm, Ticks};
 
 /// Stable clip id, unique within a storyboard.
@@ -154,6 +155,13 @@ pub struct Clip {
     /// Free notes.
     #[serde(default)]
     pub notes: String,
+    /// Text drawn over the shot (an Overlay; see [`crate::text`]). A title card's text is its
+    /// description, so a title card never has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,
+    /// How the clip's text looks: theme, animation, overlay position.
+    #[serde(default, skip_serializing_if = "TextStyle::is_default")]
+    pub text_style: TextStyle,
 }
 
 impl Clip {
@@ -171,6 +179,28 @@ impl Clip {
             asset_ids: Vec::new(),
             sync_to_downbeat: false,
             notes: String::new(),
+            overlay: None,
+            text_style: TextStyle::default(),
+        }
+    }
+
+    /// How the clip shows text, if it has any: a title card is a Card, a shot with overlay text
+    /// is an Overlay.
+    pub fn text_kind(&self) -> Option<TextKind> {
+        if self.shot_type == ShotType::Ttl {
+            Some(TextKind::Card)
+        } else if self.overlay.is_some() {
+            Some(TextKind::Overlay)
+        } else {
+            None
+        }
+    }
+
+    /// The clip's text, if it has any.
+    pub fn text(&self) -> Option<&str> {
+        match self.text_kind()? {
+            TextKind::Card => Some(&self.description),
+            TextKind::Overlay => self.overlay.as_deref(),
         }
     }
 
@@ -221,6 +251,30 @@ pub struct Track {
     /// Song sections, ascending and non-overlapping.
     #[serde(default)]
     pub song_sections: Vec<SongSection>,
+    /// How the audio file plays on the Cut when it was fitted to a length (Fit to length,
+    /// `docs/track-analysis.md` §6.5); `None` plays the file from its start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit: Option<TrackEdit>,
+}
+
+/// An audio edit: which parts of the file play, in order, and how they join and end. Frames are
+/// at `sampleRate`, the rate the cue map was measured at; playback rescales them to the decoded
+/// file's rate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrackEdit {
+    /// Rate the frames are counted at.
+    pub sample_rate: u32,
+    /// Source ranges `[start, end)` played back to back.
+    pub segments: Vec<[u64; 2]>,
+    /// Equal-power crossfade centred on each splice, in frames (0 = butt splice).
+    #[serde(default)]
+    pub crossfade_frames: u64,
+    /// Fade to silence `[start, frames]` on the output timeline, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out: Option<[u64; 2]>,
+    /// Length of the edited track in frames.
+    pub length_frames: u64,
 }
 
 /// Named tag grouping assets for one storyboard.
@@ -337,9 +391,10 @@ impl Storyboard {
         None
     }
 
-    /// A scene's title: its first title card's description.
+    /// A scene's title: the text of its first clip with text (a title card, or a shot whose
+    /// title was switched to an overlay).
     pub fn scene_title(&self, scene: SceneId) -> Option<&str> {
-        self.clips.iter().find(|c| c.scene_id == scene && c.shot_type == ShotType::Ttl).map(|c| c.description.as_str())
+        self.clips.iter().filter(|c| c.scene_id == scene).find_map(Clip::text)
     }
 
     /// Number of distinct assets assigned (status bar: "n assets assigned").

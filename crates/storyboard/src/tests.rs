@@ -41,6 +41,7 @@ fn sample() -> Storyboard {
         duration: Ticks::from_secs(60).unwrap(),
         beat_grid: vec![],
         song_sections: vec![],
+        edit: None,
     });
     board
 }
@@ -193,6 +194,13 @@ fn hostile_documents_are_refused() {
     assert!(matches!(edit(&|v| v["track"]["beatGrid"] = serde_json::json!([5, 3])), Err(BoardError::Invalid(_))));
     assert!(matches!(edit(&|v| v["clips"][1]["shotType"] = "XL".into()), Err(BoardError::Parse(_))));
     assert!(matches!(edit(&|v| v["clips"][1]["surprise"] = 1.into()), Err(BoardError::Parse(_))));
+    // A title card can't also carry an overlay; styles must be known ids.
+    assert!(matches!(edit(&|v| v["clips"][0]["overlay"] = "x".into()), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["clips"][1]["overlay"] = "x".repeat(9000).into()), Err(BoardError::Limit(_))));
+    assert!(matches!(
+        edit(&|v| v["clips"][0]["textStyle"] = serde_json::json!({ "theme": "neon" })),
+        Err(BoardError::Parse(_))
+    ));
     assert!(matches!(edit(&|v| v["name"] = "x".repeat(9000).into()), Err(BoardError::Limit(_))));
     let tiny = Limits { max_bytes: 10, ..Limits::default() };
     assert!(matches!(Storyboard::from_json_with(good.as_bytes(), &tiny), Err(BoardError::TooLarge(_))));
@@ -235,4 +243,367 @@ fn auto_fill_prefers_unused_assets_then_repeats() {
     assert_eq!(clear(&mut board), 19);
     assert_eq!(board.fill_progress(), (0, 19));
     assert_eq!(clear(&mut board), 0);
+}
+
+// ---- cue maps and generation -------------------------------------------------------------
+
+mod cue {
+    use crate::cuemap::{CueHit, CueSection, CueTrack, FadeOut, FitChoice};
+    use crate::*;
+    use std::collections::BTreeMap;
+
+    pub const SR: u64 = 48_000;
+    pub const BEAT: u64 = SR / 2; // 120 BPM
+    pub const BAR: u64 = 4 * BEAT;
+
+    /// 64 bars at 120 BPM (128 s): Intro 8, Verse 16, Chorus 16 (drop on its first bar), Verse 16, Outro 8.
+    pub fn map() -> CueMap {
+        let len = 64 * BAR;
+        let sec = |a: u64, b: u64, label: &str, energy: f32| CueSection {
+            start: a * BAR,
+            end: b * BAR,
+            label: label.into(),
+            energy,
+        };
+        let mut fits = BTreeMap::new();
+        fits.insert(
+            "60".into(),
+            FitChoice {
+                chosen: Some(FitMode::Edit),
+                fade: None,
+                edit: Some(Fit {
+                    mode: FitMode::Edit,
+                    length_frames: 30 * BAR,
+                    segments: vec![[0, 22 * BAR], [56 * BAR, 64 * BAR]],
+                    crossfade_frames: BEAT,
+                    fade_out: None,
+                    similarity: Some(0.8),
+                    reasons: vec![],
+                    changes: "Edited to 1:00".into(),
+                }),
+            },
+        );
+        fits.insert(
+            "30".into(),
+            FitChoice {
+                chosen: Some(FitMode::Fade),
+                fade: Some(Fit {
+                    mode: FitMode::Fade,
+                    length_frames: 15 * BAR,
+                    segments: vec![[0, 15 * BAR]],
+                    crossfade_frames: 0,
+                    fade_out: Some(FadeOut { start: 13 * BAR, frames: 2 * BAR }),
+                    similarity: None,
+                    reasons: vec![],
+                    changes: "Cut to 0:30 with a fade out".into(),
+                }),
+                edit: None,
+            },
+        );
+        CueMap {
+            version: 1,
+            analyzer: "test".into(),
+            track: CueTrack {
+                file: "song.wav".into(),
+                title: "Song".into(),
+                artist: "Me".into(),
+                license: "own".into(),
+                credit: String::new(),
+            },
+            sample_rate: SR as u32,
+            duration_frames: len,
+            bpm: 120.0,
+            beats_per_bar: 4,
+            pulse_clarity: 0.8,
+            beats: (0..64 * 4).map(|i| i * BEAT).collect(),
+            downbeats: (0..64).map(|i| i * BAR).collect(),
+            sections: vec![
+                sec(0, 8, "Intro", 0.1),
+                sec(8, 24, "Verse", 0.5),
+                sec(24, 40, "Chorus", 1.0),
+                sec(40, 56, "Verse", 0.5),
+                sec(56, 64, "Outro", 0.3),
+            ],
+            hits: vec![
+                CueHit { frame: 24 * BAR, kind: "drop".into(), strength: 0.9 },
+                CueHit { frame: 30 * BAR + 2 * BEAT, kind: "hit".into(), strength: 0.8 },
+            ],
+            fits,
+        }
+    }
+
+    pub fn opts(pacing: Pacing, seconds: Option<u32>) -> GenerateOptions {
+        GenerateOptions { name: "Test".into(), track_path: "/music/song.wav".into(), pacing, seconds, fit_mode: None }
+    }
+}
+
+#[test]
+fn cue_map_round_trips_and_refuses_hostile_input() {
+    let m = cue::map();
+    let json = serde_json::to_string(&m).unwrap();
+    assert_eq!(CueMap::from_json(json.as_bytes()).unwrap(), m);
+    let edit = |f: &dyn Fn(&mut serde_json::Value)| {
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        f(&mut v);
+        CueMap::from_json(v.to_string().as_bytes())
+    };
+    assert!(matches!(CueMap::from_json(b"[]"), Err(CueMapError::Parse(_))));
+    assert!(matches!(edit(&|v| v["version"] = 2.into()), Err(CueMapError::NewerVersion(2))));
+    assert!(matches!(edit(&|v| v["sampleRate"] = 0.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["bpm"] = 1000.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["durationFrames"] = (48_000u64 * 3600).into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["beats"][1] = 0.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["downbeats"][63] = u64::MAX.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["sections"][1]["start"] = 5.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["sections"][4]["end"] = 1.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["sections"][0]["energy"] = 2.into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["hits"][0]["strength"] = (-1).into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["track"]["file"] = "../x.wav".into()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(
+        edit(&|v| v["fits"]["60"]["edit"]["segments"][1][1] = u64::MAX.into()),
+        Err(CueMapError::Invalid(_))
+    ));
+    assert!(matches!(
+        edit(&|v| v["fits"]["60"]["edit"]["lengthFrames"] = u64::MAX.into()),
+        Err(CueMapError::Invalid(_))
+    ));
+    assert!(matches!(edit(&|v| v["fits"]["sixty"] = v["fits"]["60"].clone()), Err(CueMapError::Invalid(_))));
+    assert!(matches!(edit(&|v| v["surprise"] = 1.into()), Err(CueMapError::Parse(_))));
+    assert!(matches!(CueMap::from_json(&vec![b' '; 9 << 20]), Err(CueMapError::TooLarge(_))));
+}
+
+#[test]
+fn timeline_follows_the_splice() {
+    use cue::*;
+    let m = map();
+    let fit = m.fits["60"].get(None).unwrap();
+    let tl = m.timeline(Some(fit));
+    assert_eq!(tl.length, 30 * BAR);
+    assert_eq!(tl.downbeats.len(), 30);
+    assert_eq!(tl.downbeats[22], 22 * BAR, "the ending's first bar follows the splice");
+    let labels: Vec<&str> = tl.sections.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(labels, ["Intro", "Verse", "Outro"]);
+    assert_eq!((tl.sections[2].start, tl.sections[2].end), (22 * BAR, 30 * BAR));
+    assert!(tl.hits.is_empty(), "the drop at bar 25 was cut out");
+    let whole = m.timeline(None);
+    assert_eq!((whole.length, whole.sections.len(), whole.hits.len()), (64 * BAR, 5, 2));
+}
+
+#[test]
+fn every_profile_and_length_generates_a_valid_board_that_fills_the_track() {
+    use cue::*;
+    let m = map();
+    for pacing in Pacing::ALL {
+        for seconds in [None, Some(30), Some(60), Some(300)] {
+            let (board, r) =
+                generate(&m, &opts(pacing, seconds)).unwrap_or_else(|e| panic!("{pacing:?} {seconds:?}: {e}"));
+            let what = format!("{pacing:?} {seconds:?}");
+            assert!(board.validate(&Limits::default()).is_ok(), "{what}");
+            assert_eq!(board.total(), r.length, "{what}");
+            assert_eq!(board.clips[0].shot_type, ShotType::Ttl, "{what}: opens on a title");
+            assert_eq!(board.clips[0].transition_in, Transition::FadeIn, "{what}");
+            let min = m.ticks(BEAT);
+            assert!(board.clips.iter().all(|c| c.duration >= min), "{what}: no clip under a beat");
+            assert!(
+                r.cuts_on_downbeats * 10 >= (r.clips - 1) * 7,
+                "{what}: most cuts on bars ({}/{})",
+                r.cuts_on_downbeats,
+                r.clips - 1
+            );
+            let track = board.track.as_ref().unwrap();
+            assert_eq!((track.duration, track.id.0.as_str()), (r.length, "/music/song.wav"));
+            assert_eq!(board.format.as_deref(), Some(pacing.name()));
+        }
+    }
+}
+
+#[test]
+fn profiles_differ_the_way_they_say() {
+    use cue::*;
+    let m = map();
+    let n = |p| generate(&m, &opts(p, None)).unwrap().1;
+    let (calm, cine, energetic, trailer) =
+        (n(Pacing::Calm), n(Pacing::Cinematic), n(Pacing::Energetic), n(Pacing::Trailer));
+    assert!(
+        calm.clips < cine.clips && cine.clips < energetic.clips,
+        "{} {} {}",
+        calm.clips,
+        cine.clips,
+        energetic.clips
+    );
+    assert_eq!(calm.title_cards, 1, "Calm: opening title only");
+    assert_eq!(cine.title_cards, 2, "Cinematic: opening + end card");
+    // Title cards take the profile's look.
+    let (board, _) = generate(&m, &opts(Pacing::Trailer, None)).unwrap();
+    for c in board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl) {
+        assert_eq!(c.text_style, Pacing::Trailer.text_style());
+    }
+    assert!(trailer.title_cards >= 6, "Trailer: a title per scene + end card, got {}", trailer.title_cards);
+    // The drop at bar 25: a clip starts exactly there.
+    let (board, _) = generate(&m, &opts(Pacing::Energetic, None)).unwrap();
+    let starts = board.starts();
+    assert!(starts.contains(&m.ticks(24 * BAR)));
+    // The hit between beats in bar 31 moves a cut onto it.
+    assert!(starts.contains(&m.ticks(30 * BAR + 2 * BEAT)), "cut moved onto the hit");
+    // Deterministic.
+    assert_eq!(
+        generate(&m, &opts(Pacing::Trailer, Some(60))).unwrap(),
+        generate(&m, &opts(Pacing::Trailer, Some(60))).unwrap()
+    );
+}
+
+#[test]
+fn a_fade_fit_marks_the_last_clip_and_a_missing_fit_is_reported() {
+    use cue::*;
+    let m = map();
+    let (board, r) = generate(&m, &opts(Pacing::Cinematic, Some(30))).unwrap();
+    assert_eq!(r.length, m.ticks(15 * BAR));
+    assert_eq!(board.clips.last().unwrap().transition_out, Transition::FadeOut);
+    assert_eq!(r.fit_changes.as_deref(), Some("Cut to 0:30 with a fade out"));
+    // The fit travels with the board, so playback can follow it.
+    let edit = board.track.as_ref().and_then(|t| t.edit.clone()).unwrap();
+    assert_eq!((edit.sample_rate, edit.length_frames), (48_000, 15 * BAR));
+    assert!(edit.fade_out.is_some());
+    // The 60 s edit splices: two segments and a crossfade.
+    let (board, _) = generate(&m, &opts(Pacing::Cinematic, Some(60))).unwrap();
+    let edit = board.track.as_ref().and_then(|t| t.edit.clone()).unwrap();
+    assert_eq!((edit.segments.len(), edit.length_frames), (2, 30 * BAR));
+    assert!(edit.crossfade_frames > 0);
+    // Whole track: no edit.
+    let (board, _) = generate(&m, &opts(Pacing::Cinematic, None)).unwrap();
+    assert_eq!(board.track.as_ref().map(|t| t.edit.is_none()), Some(true));
+    // Hostile edits are refused on load.
+    let (good, _) = generate(&m, &opts(Pacing::Cinematic, Some(60))).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&good.to_json().unwrap()).unwrap();
+    let edit = |f: &dyn Fn(&mut serde_json::Value)| {
+        let mut v = json.clone();
+        f(&mut v["track"]["edit"]);
+        Storyboard::from_json(v.to_string().as_bytes())
+    };
+    assert!(edit(&|_| ()).is_ok());
+    assert!(matches!(edit(&|e| e["segments"] = serde_json::json!([])), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|e| e["segments"] = serde_json::json!([[5, 5]])), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|e| e["lengthFrames"] = u64::MAX.into()), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|e| e["sampleRate"] = 0.into()), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|e| e["fadeOut"] = serde_json::json!([u64::MAX, 2])), Err(BoardError::Invalid(_))));
+    assert!(matches!(edit(&|e| e["segments"] = serde_json::json!(vec![[0, 1]; 17])), Err(BoardError::Invalid(_))));
+    match generate(&m, &opts(Pacing::Calm, Some(90))) {
+        Err(GenerateError::NoFit { seconds: 90, available }) => assert_eq!(available, ["30", "60"]),
+        other => panic!("{other:?}"),
+    }
+    // A track with no beat grid still works (even grid at the tempo).
+    let mut free = m.clone();
+    free.beats.clear();
+    free.downbeats.clear();
+    let (board, r) = generate(&free, &opts(Pacing::Trailer, None)).unwrap();
+    assert_eq!(board.total(), r.length);
+}
+
+// ---- Text clips ----------------------------------------------------------------------------
+
+#[test]
+fn a_title_card_switches_to_an_overlay_and_back_without_moving_the_cut() {
+    let mut board = sample();
+    let starts = board.starts();
+    let id = board.clips[0].id;
+    assert_eq!(board.clips[0].text_kind(), Some(TextKind::Card));
+    assert_eq!(board.scene_title(SceneId(1)), Some("Title 1"));
+    assert_eq!(board.fill_progress(), (0, 19));
+
+    let c = set_text_kind(&mut board, id, TextKind::Overlay).unwrap();
+    assert_eq!((c.from, c.to, c.removed_assets, c.changed()), (TextKind::Card, TextKind::Overlay, 0, true));
+    let clip = &board.clips[0];
+    assert_eq!(
+        (clip.shot_type, clip.overlay.as_deref(), clip.text()),
+        (ShotType::Ws, Some("Title 1"), Some("Title 1"))
+    );
+    assert_eq!(board.scene_title(SceneId(1)), Some("Title 1"), "the overlay still names the scene");
+    assert_eq!(board.fill_progress(), (0, 20), "the shot under the title now wants an image");
+    assert_eq!(board.starts(), starts);
+    assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok());
+
+    // Quick fill puts an image under it; switching back drops it, and says so.
+    place(&mut board, AssetId("F:/art/a.png".into()), Some(id)).unwrap();
+    let c = set_text_kind(&mut board, id, TextKind::Card).unwrap();
+    assert_eq!(c.removed_assets, 1);
+    let clip = &board.clips[0];
+    assert_eq!((clip.shot_type, clip.description.as_str(), clip.overlay.as_deref()), (ShotType::Ttl, "Title 1", None));
+    assert!(clip.asset_ids.is_empty());
+    assert_eq!(board.starts(), starts);
+    assert_eq!(board, sample(), "round trip is exact");
+
+    // Same kind: nothing changes.
+    assert!(!set_text_kind(&mut board, id, TextKind::Card).unwrap().changed());
+    assert_eq!(board, sample());
+}
+
+#[test]
+fn text_edits_refuse_clips_without_text() {
+    let mut board = sample();
+    let shot = board.clips[1].id;
+    assert_eq!(board.clips[1].text_kind(), None);
+    assert_eq!(set_text_kind(&mut board, shot, TextKind::Card), Err(TextError::NoText(shot)));
+    assert_eq!(set_text_kind(&mut board, ClipId(999), TextKind::Card), Err(TextError::NoClip(ClipId(999))));
+    assert_eq!(set_text_style(&mut board, shot, Some(TextTheme::Paper), None, None), Err(TextError::NoText(shot)));
+    assert_eq!(board, sample());
+}
+
+#[test]
+fn text_style_edits_and_round_trips() {
+    let mut board = sample();
+    let id = board.clips[0].id;
+    let json = board.to_json().unwrap();
+    assert!(!json.contains("textStyle"), "the default style is left out");
+    assert!(set_text_style(&mut board, id, Some(TextTheme::Cinematic), Some(TextAnimation::Typewriter), None).unwrap());
+    assert!(!set_text_style(&mut board, id, Some(TextTheme::Cinematic), None, None).unwrap(), "no change");
+    set_text_kind(&mut board, id, TextKind::Overlay).unwrap();
+    assert!(set_text_style(&mut board, id, None, None, Some(TextPosition::Top)).unwrap());
+    let style = board.clips[0].text_style;
+    assert_eq!(
+        (style.theme, style.animation, style.position),
+        (TextTheme::Cinematic, TextAnimation::Typewriter, TextPosition::Top)
+    );
+    let json = board.to_json().unwrap();
+    assert!(json.contains("\"theme\": \"cinematic\"") && json.contains("\"position\": \"top\""), "{json}");
+    assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
+    // Ids parse back.
+    for t in TextTheme::ALL {
+        assert_eq!(TextTheme::from_id(t.id()), Some(t));
+    }
+    for a in TextAnimation::ALL {
+        assert_eq!(TextAnimation::from_id(a.id()), Some(a));
+    }
+    for p in TextPosition::ALL {
+        assert_eq!(TextPosition::from_id(p.id()), Some(p));
+    }
+    assert_eq!(TextKind::from_id("card").map(TextKind::other), Some(TextKind::Overlay));
+    assert_eq!(TextTheme::from_id("neon"), None);
+}
+
+#[test]
+fn animations_start_hidden_end_at_rest_and_never_misbehave() {
+    for a in TextAnimation::ALL {
+        let end = a.frame(a.seconds() + 0.01);
+        assert_eq!(end, AnimFrame::REST, "{a:?} ends at rest");
+        assert_eq!(a.frame(f64::NAN), AnimFrame::REST);
+        assert_eq!(a.frame(f64::INFINITY), AnimFrame::REST);
+        let mut last = a.frame(-5.0);
+        for i in 0..=20 {
+            let f = a.frame(a.seconds() * f64::from(i) / 20.0);
+            for v in [f.alpha, f.reveal] {
+                assert!((0.0..=1.0).contains(&v), "{a:?} {f:?}");
+            }
+            assert!(f.alpha >= last.alpha && f.reveal >= last.reveal, "{a:?} only moves forward");
+            assert!(f.offset_y >= 0.0 && f.scale >= 1.0, "{a:?} {f:?}");
+            last = f;
+        }
+    }
+    let fade = TextAnimation::Fade.frame(0.0);
+    assert_eq!(fade.alpha, 0.0);
+    assert!(TextAnimation::Rise.frame(0.0).offset_y > 0.0);
+    assert!(TextAnimation::Zoom.frame(0.0).scale > 1.0);
+    let type_on = TextAnimation::Typewriter.frame(0.6);
+    assert_eq!(type_on.visible_chars(10), 5);
+    assert_eq!(AnimFrame::REST.visible_chars(10), 10);
+    assert_eq!(TextAnimation::Typewriter.frame(0.0).visible_chars(10), 0);
 }

@@ -189,6 +189,33 @@ static COMMANDS: &[CommandSpec] = &[
         "{name?, sample?: bool} (Manual start, or the 24-clip handoff sample); opens Storyboard mode",
         storyboard::sb_new
     ),
+    cmd!(
+        EDIT,
+        "storyboard.generate",
+        "New Storyboard from Track",
+        "File",
+        None,
+        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, name?} (scenes from sections, clips on bars and hits; one undo step)",
+        crate::generate_cmd::sb_generate
+    ),
+    cmd!(
+        READ,
+        "storyboard.cueMaps",
+        "Cue Maps Here",
+        "Help",
+        None,
+        "{} → the .cuemap.json files in the open folder",
+        crate::generate_cmd::sb_cue_maps
+    ),
+    cmd!(
+        READ,
+        "track.summary",
+        "Track Summary",
+        "Help",
+        None,
+        "{path} → {path, format, rate, channels, frames, seconds, peakDbfs, rmsDbfs} (decodes the whole file; ≤ 20 min, ≤ 8 channels, 8–384 kHz)",
+        crate::track_cmd::track_summary
+    ),
     cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip|fill}", storyboard::sb_view),
     cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),
     cmd!(
@@ -199,6 +226,24 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{asset: path, clip?: number} (Quick fill; with `clip`, replaces that clip's shot)",
         storyboard::sb_place
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.text.kind",
+        "Switch Text Clip Type",
+        "Storyboard",
+        None,
+        "{clip: number, kind: card|overlay} (Card: a whole clip with the theme's background; Overlay: text over the shot. Keeps the clip's place and length; one undo step)",
+        crate::text_cmd::sb_text_kind
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.text.style",
+        "Text Clip Style",
+        "Storyboard",
+        None,
+        "{clip: number, theme?: bold|minimal|cinematic|paper, animation?: none|fade|rise|zoom|typewriter, position?: lowerThirdLeft|lowerThirdRight|center|top|bottom}",
+        crate::text_cmd::sb_text_style
     ),
     cmd!(
         EDIT,

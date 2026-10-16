@@ -17,6 +17,7 @@ assetcraft-engine = { workspace = true }
 assetcraft-fs = { workspace = true }
 assetcraft-thumbs = { workspace = true }
 assetcraft-watch = { workspace = true }
+assetcraft-playback = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 egui = { workspace = true }
 

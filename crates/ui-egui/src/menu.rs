@@ -30,14 +30,19 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // Storyboard mode drives these from its mode bar, Shot map and Inspector (and Ctrl+Z / Ctrl+Y).
     "storyboard.select",
     "storyboard.recut",
+    "storyboard.text.kind",
+    "storyboard.text.style",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",
+    "storyboard.cueMaps",
     "storyboard.autofill",
     "storyboard.clear",
     "storyboard.play",
     "storyboard.pause",
     "storyboard.seek",
+    // Track facts for the CLI, MCP and scripts (`assetcraft-cli analyze`); the Tracks view comes with A3.
+    "track.summary",
 ];
 
 /// What a menu item does.
@@ -341,6 +346,30 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 check("Strip", on && view == BoardView::Strip, on, cmd(spec.id, json!({ "view": "strip" }))),
                 check("Quick Fill", on && view == BoardView::Fill, on, cmd(spec.id, json!({ "view": "fill" }))),
             ]
+        }
+        "storyboard.generate" => {
+            let maps = s.cue_maps();
+            let mut entries: Vec<MenuEntry> = maps
+                .iter()
+                .map(|path| {
+                    let lengths = crate::storyboard_view::LENGTH_CHOICES
+                        .iter()
+                        .map(|(secs, label)| {
+                            item(
+                                *label,
+                                None,
+                                true,
+                                cmd(spec.id, json!({ "cueMap": path.to_string_lossy(), "seconds": secs })),
+                            )
+                        })
+                        .collect();
+                    MenuEntry::Sub { label: assetcraft_engine::cue_map_label(path), entries: lengths }
+                })
+                .collect();
+            if entries.is_empty() {
+                entries.push(item("No .cuemap.json files in the open folder", None, false, cmd(spec.id, json!({}))));
+            }
+            vec![MenuEntry::Sub { label: spec.label.into(), entries }]
         }
         "storyboard.new" => vec![
             item("New Storyboard", None, true, cmd(spec.id, json!({}))),

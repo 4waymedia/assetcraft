@@ -21,7 +21,15 @@ assetcraft-engine = { path = "crates/engine" }
 assetcraft-ui-egui = { path = "crates/ui-egui" }
 assetcraft-mesh = { path = "crates/mesh" }
 assetcraft-storyboard = { path = "crates/storyboard" }
+assetcraft-audio = { path = "crates/audio" }
+assetcraft-playback = { path = "crates/playback" }
 # external
+# SoundCraft's audio file I/O (MIT OR Apache-2.0; symphonia inside, MPL-2.0 by decision AD1).
+# Pinned to SoundCraft 0.7.0, the commit docs/track-analysis.md was written against.
+# Audio output (Apache-2.0; RustAudio/cpal), the version SoundCraft 0.7.0 uses. Linked by
+# assetcraft-playback, used by the desktop app only. Linux builds need ALSA headers (libasound2-dev).
+cpal = "0.16"
+soundcraft-audio-io = { git = "https://github.com/storytold/soundcraft", rev = "3a28a657692c1b98b28c276d8f61df9471074f0f" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tiff"] }
 png = "0.18"
 serde = { version = "1", features = ["derive"] }

@@ -64,8 +64,9 @@ impl BoardView {
 /// Watch your Cut: whether the Cut is playing and where it was started or paused.
 ///
 /// The engine records play, pause and seek (every user action is a command); while playing,
-/// the window advances the playhead from `position` with its own clock and reports where it
-/// stopped through `storyboard.pause {at}`.
+/// the window advances the playhead from `position` (on the audio clock while the track plays,
+/// [`Session::audio_clock`], else its own) and reports where it stopped through
+/// `storyboard.pause {at}`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Transport {
     /// Playing now.
@@ -74,30 +75,35 @@ pub struct Transport {
     pub position: Ticks,
 }
 
+/// What an undo step restores: the board, the selected clip, and what the board was generated from.
+pub(crate) type Snapshot = (Option<Storyboard>, Option<ClipId>, Option<crate::generate_cmd::GeneratedFrom>);
+
 /// Storyboard state held by the session.
 #[derive(Debug, Default)]
 pub struct Boards {
-    mode: Mode,
-    view: BoardView,
-    transport: Transport,
-    board: Option<Storyboard>,
-    selected: Option<ClipId>,
-    undo: Vec<(Option<Storyboard>, Option<ClipId>)>,
-    redo: Vec<(Option<Storyboard>, Option<ClipId>)>,
+    pub(crate) mode: Mode,
+    pub(crate) view: BoardView,
+    pub(crate) transport: Transport,
+    pub(crate) board: Option<Storyboard>,
+    pub(crate) selected: Option<ClipId>,
+    pub(crate) undo: Vec<Snapshot>,
+    pub(crate) redo: Vec<Snapshot>,
+    /// What the open storyboard was generated from (`storyboard.generate`).
+    pub(crate) generated: Option<crate::generate_cmd::GeneratedFrom>,
 }
 
 impl Boards {
     /// Record the current state before an edit (clears redo).
-    fn checkpoint(&mut self) {
+    pub(crate) fn checkpoint(&mut self) {
         if self.undo.len() >= MAX_UNDO {
             self.undo.remove(0);
         }
-        self.undo.push((self.board.clone(), self.selected));
+        self.undo.push((self.board.clone(), self.selected, self.generated.clone()));
         self.redo.clear();
     }
 }
 
-fn no_board() -> CmdError {
+pub(crate) fn no_board() -> CmdError {
     CmdError::Unavailable("no storyboard is open (File → New Storyboard)".into())
 }
 
@@ -173,9 +179,11 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     }
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board).or_else(|| board.clips.first().map(|c| c.id));
+    s.boards.generated = None;
     s.boards.board = Some(board);
     s.boards.mode = Mode::Storyboard;
     s.boards.transport = Transport::default();
+    s.audio_stop();
     Ok(state(s))
 }
 
@@ -345,7 +353,12 @@ pub(crate) fn sb_play(s: &mut Session, p: &Value) -> CmdResult {
     // Playing from the end starts over.
     let from = if from >= total { Ticks::ZERO } else { from };
     s.boards.transport = Transport { playing: true, position: from };
-    Ok(transport_json(s))
+    let note = s.audio_start(from);
+    let mut v = transport_json(s);
+    if let (Some(n), Value::Object(m)) = (note, &mut v) {
+        m.insert("message".into(), json!(n));
+    }
+    Ok(v)
 }
 
 pub(crate) fn sb_pause(s: &mut Session, p: &Value) -> CmdResult {
@@ -355,6 +368,7 @@ pub(crate) fn sb_pause(s: &mut Session, p: &Value) -> CmdResult {
         Some(v) => seconds(v, "at")?,
     };
     s.boards.transport = Transport { playing: false, position: at.min(total) };
+    s.audio_stop();
     Ok(transport_json(s))
 }
 
@@ -362,6 +376,7 @@ pub(crate) fn sb_seek(s: &mut Session, p: &Value) -> CmdResult {
     let total = s.boards.board.as_ref().ok_or_else(no_board)?.total();
     let at = seconds(p.get("seconds").unwrap_or(&Value::Null), "seconds")?;
     s.boards.transport = Transport { playing: false, position: at.min(total) };
+    s.audio_stop();
     Ok(transport_json(s))
 }
 
@@ -374,22 +389,39 @@ fn seconds(v: &Value, key: &str) -> Result<Ticks, CmdError> {
 
 fn transport_json(s: &Session) -> Value {
     let t = s.boards.transport;
-    json!({ "playing": t.playing, "position": t.position.as_secs_f64(), "timecode": t.position.timecode() })
+    json!({
+        "playing": t.playing,
+        "position": t.position.as_secs_f64(),
+        "timecode": t.position.timecode(),
+        "audio": s.audio_status(),
+    })
 }
 
 pub(crate) fn sb_undo(s: &mut Session, _: &Value) -> CmdResult {
-    let (board, selected) = s.boards.undo.pop().ok_or_else(|| CmdError::Unavailable("nothing to undo".into()))?;
-    let current = (std::mem::replace(&mut s.boards.board, board), s.boards.selected);
+    let (board, selected, generated) =
+        s.boards.undo.pop().ok_or_else(|| CmdError::Unavailable("nothing to undo".into()))?;
+    let current = (
+        std::mem::replace(&mut s.boards.board, board),
+        s.boards.selected,
+        std::mem::replace(&mut s.boards.generated, generated),
+    );
     s.boards.redo.push(current);
     s.boards.selected = selected;
+    s.audio_stop();
     Ok(state(s))
 }
 
 pub(crate) fn sb_redo(s: &mut Session, _: &Value) -> CmdResult {
-    let (board, selected) = s.boards.redo.pop().ok_or_else(|| CmdError::Unavailable("nothing to redo".into()))?;
-    let current = (std::mem::replace(&mut s.boards.board, board), s.boards.selected);
+    let (board, selected, generated) =
+        s.boards.redo.pop().ok_or_else(|| CmdError::Unavailable("nothing to redo".into()))?;
+    let current = (
+        std::mem::replace(&mut s.boards.board, board),
+        s.boards.selected,
+        std::mem::replace(&mut s.boards.generated, generated),
+    );
     s.boards.undo.push(current);
     s.boards.selected = selected;
+    s.audio_stop();
     Ok(state(s))
 }
 
@@ -415,6 +447,7 @@ pub(crate) fn state(s: &Session) -> Value {
         "mode": b.mode.as_str(),
         "view": b.view.as_str(),
         "transport": transport_json(s),
+        "generatedFrom": crate::generate_cmd::generated_json(s),
         "board": b.board.as_ref().and_then(|board| serde_json::to_value(board).ok()),
         "summary": summary,
         "selected": b.selected.map(|c| c.0),
@@ -423,7 +456,7 @@ pub(crate) fn state(s: &Session) -> Value {
     })
 }
 
-fn clip_id(v: &Value) -> Result<ClipId, CmdError> {
+pub(crate) fn clip_id(v: &Value) -> Result<ClipId, CmdError> {
     v.as_u64()
         .and_then(|n| u32::try_from(n).ok())
         .map(ClipId)

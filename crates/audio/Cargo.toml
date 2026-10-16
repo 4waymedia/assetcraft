@@ -1,0 +1,20 @@
+[package]
+name = "assetcraft-audio"
+description = "Track audio for Storyboard mode: decode (via soundcraft-audio-io), limits, mono mixdown, waveform peaks, summary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+assetcraft-fs = { workspace = true }
+soundcraft-audio-io = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

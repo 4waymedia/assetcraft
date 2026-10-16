@@ -19,7 +19,12 @@ Set-Location F:\Script-Projects\ArtCrafting\assetcraft
 cargo xtask ci                     # fmt, clippy, tests (default + heic), layers, deny
 cargo run -p assetcraft --release -- "F:\Script-Projects\ArtCrafting\assetcraft\test_data\library"
 cargo run -p assetcraft-cli -- --help
+cargo run -p assetcraft-cli -- analyze "F:\Script-Projects\ArtCrafting\_dev-data\assetcraft\preset-tracks\vanguard-by-scott-buckley.mp3"
+cargo run -p assetcraft-playback --release --example play -- "<an .mp3>" 30 10   # hear 10 s from 0:30
 ```
+
+Watch your Cut plays the storyboard's track on the default output device (cpal). Windows and macOS
+need nothing extra; Linux builds need the ALSA headers (`sudo apt install libasound2-dev`).
 
 Needs Rust 1.95 or later (`rustup update stable`).
 
