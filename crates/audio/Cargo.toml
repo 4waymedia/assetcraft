@@ -1,6 +1,6 @@
 [package]
 name = "assetcraft-audio"
-description = "Track audio for Storyboard mode: decode (via soundcraft-audio-io), limits, mono mixdown, waveform peaks, summary."
+description = "Track audio for Storyboard mode: decode (via soundcraft-audio-io), limits, mono mixdown, the 22,050 Hz analysis signal, waveform peaks, summary."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

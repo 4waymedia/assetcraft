@@ -1,6 +1,6 @@
 # Track analysis and Shape to music
 
-_2026-10-15 · Stage 4 (Storyboard mode) · spec v1.4: G1, A1 and playback (PR3, pulled forward from A3) built; A2 next_
+_2026-10-16 · Stage 4 (Storyboard mode) · spec v1.5: G1, A1, playback (PR3) and A2a built; A2b next_
 
 - **Scope:** analyse a Track once, so the music's timing (beats, bars, sections, hits, energy) is
   stored as data, then use that data to propose timeline edits: cut points, clip lengths, scene
@@ -477,6 +477,10 @@ song's own ending.
 |-------|---------------------------------------------------------------------------------------------------------------|-------------|-----------------------------------------------------------------|
 | A1    | `assetcraft-audio`: decode via `soundcraft-audio-io`, limits, mono, peaks; `track.summary`; `assetcraft-cli analyze --summary` prints duration, rate, peak, RMS. **Built 2026-10-15** (resample and fingerprint move to A2, their first user) | 1           | CLI summary of each of the 26 tracks: all 26 decode, ~0.5 s each (release) |
 | A2    | `assetcraft-analysis`: curves (RMS, bands, flux, centroid, flatness), onsets, tempo + candidates, DP beat tracker, pulse clarity, free-time flag; cache; `--json` | 1           | BPM and beat grid per track, compared with the librosa oracle    |
+| A2a   | **Built 2026-10-16.** `assetcraft-analysis` (L2): curves every 512 samples (23.2 ms, centred frames): RMS, 4 band energies, onset strength (SoundCraft's log-band flux as a curve), centroid, flatness; `Audio::analysis_signal` (mono at 22,050 Hz). **Deviation:** a 65-tap anti-alias filter + linear interpolation instead of SoundCraft's sinc resampler (3.5 s → 0.33 s for 4 min; analysis reads ≤ 8 kHz); `soundcraft-dsp` comes in at A2c for `detect_transients` | 1 | `--example curves`: Vanguard 3:55 in 0.9 s (decode 0.40, resample 0.33, curves 0.17) |
+| A2b   | Tempo candidates (autocorrelation 30–300 BPM, log-normal prior at 120, top 3 with ½ and ×2), DP beat tracker (Ellis 2007), pulse clarity, IOI stability, free-time flag | 1 | BPM within 0.5 % and beat F1 ≥ 0.95 on 60/92/128/174 BPM click tracks |
+| A2c   | Onsets (`soundcraft-dsp::detect_transients`), the analysis document and its validation, `assetcraft-cli analyze --json`, background `track.analyze`; results in the **suite cache** (Paul, 2026-10-16: "like Bridge"; design in [design/cache.md](design/cache.md)) | 1 | `analyze --json` per track; second run from the cache |
+| A2d   | Oracle comparison: our tempo and beats against the Python stand-in / librosa on the 26 preset tracks | 1 | A table per track: agrees, ×½/×2, or differs |
 | A3    | Track on the storyboard, Tracks lane with waveform and beat grid, playback on the audio clock (PR3, **built early, §9c**), corrections → overrides | 3           | See and hear the grid in AssetCraft; fix tempo and downbeat      |
 | A4    | Downbeats, meter, phrases, sections with labels, builds, drops, swells                                         | 4           | Sections and drops drawn on the lane                              |
 | A5    | **Fit to length** (§6.5): fade, edit-to-ending and button endings, start trim, audio edit on the Track, playback and `fit --render` | 2 | Every track at 30/60/90/120 s, judged by ear |

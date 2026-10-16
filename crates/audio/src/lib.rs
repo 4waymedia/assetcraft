@@ -32,6 +32,8 @@ pub use sio::peaks::Peaks;
 
 /// Longest track, in seconds (20 minutes).
 pub const MAX_SECONDS: f64 = 20.0 * 60.0;
+/// Sample rate of the analysis signal (`docs/track-analysis.md` §3; librosa's default).
+pub const ANALYSIS_RATE: u32 = 22_050;
 /// Most channels.
 pub const MAX_CHANNELS: usize = 8;
 /// Lowest sample rate.
@@ -110,6 +112,59 @@ pub struct Summary {
     pub peak_dbfs: f64,
     /// RMS of the mono mix, in dBFS (−120 for silence).
     pub rms_dbfs: f64,
+}
+
+/// Half-length of the anti-alias filter, in taps either side.
+const AA_HALF: usize = 32;
+
+/// `x` at `from` Hz to [`ANALYSIS_RATE`] for analysis: a 65-tap Blackman-windowed sinc low-pass
+/// below the lower Nyquist (0.45 × the lower rate), then linear interpolation between filtered
+/// samples. Analysis reads energy up to 8 kHz and onsets, so this is ample, and it is ~10× faster
+/// than SoundCraft's high-quality resampler (3.5 s → ~0.3 s for a 4-minute 44.1 kHz track),
+/// which keeps the whole analysis inside its 2 s budget. Playback never goes through here.
+pub fn to_analysis_rate(x: &[f32], from: u32) -> Vec<f32> {
+    if from == ANALYSIS_RATE || from == 0 || x.is_empty() {
+        return x.to_vec();
+    }
+    let step = f64::from(from) / f64::from(ANALYSIS_RATE);
+    let fc = 0.45 * f64::from(from.min(ANALYSIS_RATE)) / f64::from(from);
+    let taps: Vec<f32> = {
+        let n = 2 * AA_HALF;
+        let h: Vec<f64> = (0..=n)
+            .map(|k| {
+                let m = k as f64 - AA_HALF as f64;
+                let sinc = if m == 0.0 {
+                    1.0
+                } else {
+                    (std::f64::consts::PI * 2.0 * fc * m).sin() / (std::f64::consts::PI * m) / (2.0 * fc)
+                };
+                let a = 2.0 * std::f64::consts::PI * k as f64 / n as f64;
+                let blackman = 0.42 - 0.5 * a.cos() + 0.08 * (2.0 * a).cos();
+                sinc * blackman
+            })
+            .collect();
+        let sum: f64 = h.iter().sum();
+        h.iter().map(|v| (v / sum) as f32).collect()
+    };
+    let filtered_at = |i: usize| -> f32 {
+        let mut acc = 0.0f32;
+        for (k, h) in taps.iter().enumerate() {
+            if let Some(v) = (i + k).checked_sub(AA_HALF).and_then(|j| x.get(j)) {
+                acc += h * v;
+            }
+        }
+        acc
+    };
+    let out_len = ((x.len() as f64) / step).round() as usize;
+    (0..out_len)
+        .map(|j| {
+            let pos = j as f64 * step;
+            let i = pos.floor() as usize;
+            let frac = (pos - i as f64) as f32;
+            let a = filtered_at(i);
+            if frac < 1e-6 { a } else { a + (filtered_at(i + 1) - a) * frac }
+        })
+        .collect()
 }
 
 /// Read and decode a track through the file services (the UI's and CLI's disk, or a fake).
@@ -216,6 +271,13 @@ impl Audio {
     pub fn mono(&self) -> Vec<f32> {
         let n = self.channels.len().max(1) as f32;
         (0..self.frames).map(|i| self.channels.iter().map(|c| c[i]).sum::<f32>() / n).collect()
+    }
+
+    /// The analysis signal (`docs/track-analysis.md` §3): the mono mix at [`ANALYSIS_RATE`].
+    /// Non-finite samples are zeroed. See [`to_analysis_rate`].
+    pub fn analysis_signal(&self) -> Vec<f32> {
+        let mono: Vec<f32> = self.mono().into_iter().map(|s| if s.is_finite() { s } else { 0.0 }).collect();
+        to_analysis_rate(&mono, self.rate)
     }
 
     /// Waveform overview of the mono mix.

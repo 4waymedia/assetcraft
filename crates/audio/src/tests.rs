@@ -176,3 +176,44 @@ fn players_report_what_they_do() {
     assert!(SilentPlayer.play(p, 0.0).is_err());
     assert_eq!(SilentPlayer.position(), None);
 }
+
+#[test]
+fn the_analysis_signal_is_mono_at_22050_and_keeps_the_pitch() {
+    let n = 44_100;
+    let sine: Vec<f32> =
+        (0..n).map(|i| 0.5 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44_100.0).sin()).collect();
+    let inverted: Vec<f32> = sine.iter().map(|s| s * 0.0).collect();
+    let audio = Audio::from_planar(44_100, vec![sine, inverted], "wav").unwrap();
+    let sig = audio.analysis_signal();
+    assert!((sig.len() as i64 - 22_050).abs() <= 1, "{}", sig.len());
+    // 440 Hz for one second: about 880 zero crossings.
+    let crossings = sig.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+    assert!((crossings as i64 - 880).abs() <= 4, "{crossings}");
+    // The mono mean of a half-scale sine and silence peaks near 0.25.
+    let peak = sig.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!((peak - 0.25).abs() < 0.01, "{peak}");
+    // Already at the analysis rate: unchanged.
+    let same = Audio::from_planar(ANALYSIS_RATE, vec![vec![0.1; 1000]], "wav").unwrap();
+    assert_eq!(same.analysis_signal(), vec![0.1; 1000]);
+}
+
+#[test]
+fn resampling_for_analysis_removes_what_would_alias() {
+    // 15 kHz at 44.1 kHz is above the analysis Nyquist (11,025 Hz): it must not fold down to 7 kHz.
+    let n = 44_100;
+    let high: Vec<f32> =
+        (0..n).map(|i| 0.5 * (2.0 * std::f32::consts::PI * 15_000.0 * i as f32 / 44_100.0).sin()).collect();
+    let out = to_analysis_rate(&high, 44_100);
+    let rms = (out[1000..out.len() - 1000].iter().map(|v| v * v).sum::<f32>() / (out.len() - 2000) as f32).sqrt();
+    assert!(rms < 0.01, "aliased energy: {rms}");
+    // 48 kHz (not a multiple) keeps a 1 kHz tone's level and length.
+    let tone: Vec<f32> =
+        (0..48_000).map(|i| 0.5 * (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 48_000.0).sin()).collect();
+    let out = to_analysis_rate(&tone, 48_000);
+    assert!((out.len() as i64 - 22_050).abs() <= 1);
+    let peak = out[1000..out.len() - 1000].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!((peak - 0.5).abs() < 0.02, "{peak}");
+    // Upsampling (8 kHz) works too; empty stays empty.
+    assert!((to_analysis_rate(&vec![0.0; 8_000], 8_000).len() as i64 - 22_050).abs() <= 1);
+    assert!(to_analysis_rate(&[], 44_100).is_empty());
+}

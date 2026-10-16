@@ -1,0 +1,22 @@
+[package]
+name = "assetcraft-analysis"
+description = "Track analysis for Storyboard mode (docs/track-analysis.md §4): pure functions over the 22,050 Hz mono signal: curves, tempo, beats, structure."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfft = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# The `curves` example decodes real tracks (dev only; the crate itself takes samples).
+assetcraft-audio = { workspace = true }
+assetcraft-fs = { workspace = true }

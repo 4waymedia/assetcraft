@@ -430,18 +430,17 @@ fn a_click_on_a_section_previews_from_its_start() {
 }
 
 #[test]
-fn the_timeline_puts_a_cut_version_over_the_music_it_plays_with() {
-    use crate::start_timeline::{to_track, track_ranges};
+fn the_timeline_runs_in_cut_time_and_maps_the_song_through_the_edit() {
+    use crate::start_timeline::{to_cut, to_track};
     // A 1:00 cut of a 1:27 track: 0–49.3 then 76.5–87.2 (the ending).
     let segs = [(0.0, 49.3), (76.5, 87.2)];
     assert!((to_track(&segs, 10.0) - 10.0).abs() < 1e-9);
     assert!((to_track(&segs, 50.0) - 77.2).abs() < 1e-9, "after the splice: the ending");
     assert!((to_track(&segs, 500.0) - 87.2).abs() < 1e-9, "past the end");
-    // A clip across the splice is drawn in two pieces.
-    let parts = track_ranges(&segs, 48.0, 52.0);
-    assert_eq!(parts.len(), 2);
-    assert!((parts[0].0 - 48.0).abs() < 1e-9 && (parts[0].1 - 49.3).abs() < 1e-9);
-    assert!((parts[1].0 - 76.5).abs() < 1e-9 && (parts[1].1 - 79.2).abs() < 1e-9);
-    // The whole track: one segment, no mapping.
-    assert_eq!(track_ranges(&[(0.0, 87.2)], 3.0, 5.0), vec![(3.0, 5.0)]);
+    // The preview's playhead (song time) back into the cut.
+    assert_eq!(to_cut(&segs, 10.0), Some(10.0));
+    assert!((to_cut(&segs, 77.2).unwrap_or(0.0) - 50.0).abs() < 1e-9);
+    assert_eq!(to_cut(&segs, 60.0), None, "skipped by the cut: no playhead");
+    // Full length: one segment, nothing moves.
+    assert_eq!(to_cut(&[(0.0, 87.2)], 42.0), Some(42.0));
 }
