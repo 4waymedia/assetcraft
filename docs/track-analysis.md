@@ -1,6 +1,6 @@
 # Track analysis and Shape to music
 
-_2026-10-16 · Stage 4 (Storyboard mode) · spec v1.5: G1, A1, playback (PR3) and A2a built; A2b next_
+_2026-10-16 · Stage 4 (Storyboard mode) · spec v1.6: G1, A1, playback (PR3), A2a and A2b built; A2c next (cache spec: design/cache.md)_
 
 - **Scope:** analyse a Track once, so the music's timing (beats, bars, sections, hits, energy) is
   stored as data, then use that data to propose timeline edits: cut points, clip lengths, scene
@@ -478,7 +478,7 @@ song's own ending.
 | A1    | `assetcraft-audio`: decode via `soundcraft-audio-io`, limits, mono, peaks; `track.summary`; `assetcraft-cli analyze --summary` prints duration, rate, peak, RMS. **Built 2026-10-15** (resample and fingerprint move to A2, their first user) | 1           | CLI summary of each of the 26 tracks: all 26 decode, ~0.5 s each (release) |
 | A2    | `assetcraft-analysis`: curves (RMS, bands, flux, centroid, flatness), onsets, tempo + candidates, DP beat tracker, pulse clarity, free-time flag; cache; `--json` | 1           | BPM and beat grid per track, compared with the librosa oracle    |
 | A2a   | **Built 2026-10-16.** `assetcraft-analysis` (L2): curves every 512 samples (23.2 ms, centred frames): RMS, 4 band energies, onset strength (SoundCraft's log-band flux as a curve), centroid, flatness; `Audio::analysis_signal` (mono at 22,050 Hz). **Deviation:** a 65-tap anti-alias filter + linear interpolation instead of SoundCraft's sinc resampler (3.5 s → 0.33 s for 4 min; analysis reads ≤ 8 kHz); `soundcraft-dsp` comes in at A2c for `detect_transients` | 1 | `--example curves`: Vanguard 3:55 in 0.9 s (decode 0.40, resample 0.33, curves 0.17) |
-| A2b   | Tempo candidates (autocorrelation 30–300 BPM, log-normal prior at 120, top 3 with ½ and ×2), DP beat tracker (Ellis 2007), pulse clarity, IOI stability, free-time flag | 1 | BPM within 0.5 % and beat F1 ≥ 0.95 on 60/92/128/174 BPM click tracks |
+| A2b   | **Built 2026-10-16.** `tempo()`: onset autocorrelation 30–300 BPM with a log-normal prior at 120 (top 3 candidates + ×½ and ×2 with scores), Ellis DP beat tracker, BPM from the slope through the beats, pulse clarity, IOI variation, free-time flag; **twice as fast** when the off-beats are ≥ 0.8 as strong as the beats (the off-beat test replaced an autocorrelation ratio that doubled 6 real tracks wrongly) | 1 | Click tracks 60/92/128/174 BPM within 0.5 %, beat F1 ≥ 0.95; 26 tracks below (§10.1) |
 | A2c   | Onsets (`soundcraft-dsp::detect_transients`), the analysis document and its validation, `assetcraft-cli analyze --json`, background `track.analyze`; results in the **suite cache** (Paul, 2026-10-16: "like Bridge"; design in [design/cache.md](design/cache.md)) | 1 | `analyze --json` per track; second run from the cache |
 | A2d   | Oracle comparison: our tempo and beats against the Python stand-in / librosa on the 26 preset tracks | 1 | A table per track: agrees, ×½/×2, or differs |
 | A3    | Track on the storyboard, Tracks lane with waveform and beat grid, playback on the audio clock (PR3, **built early, §9c**), corrections → overrides | 3           | See and hear the grid in AssetCraft; fix tempo and downbeat      |
@@ -488,6 +488,47 @@ song's own ending.
 | A7    | `preset draft` CLI (fit + plan + structure → preset file)                                                       | 2           | A draft preset file per track and length                          |
 | A8    | The 20 presets drafted, reviewed by ear, committed (`presets/`)                                                | –           | Style › Preset menu with real presets                             |
 | A9    | Optional: mood and tension per section through the AI provider (Stage 5)                                      | 5           | Mood tags in the lane; "match calm art to quiet sections"         |
+
+### 10.1 A2b on the 26 preset tracks (2026-10-16): input for A2d
+
+Ours (`cargo run -p assetcraft-analysis --release --example curves`) against the Python stand-in's
+cue maps (librosa 0.11, whose tempo comes from a coarse grid: 117.45, 123.05, 129.2 …). Unverified
+until Paul listens (§11, Paul's annotations).
+
+| Track                     | Ours (BPM) | Rhythm | Clarity | Off-beat | Python | Reading                               |
+|---------------------------|-----------:|--------|--------:|---------:|-------:|---------------------------------------|
+| Amazing Plan              | 114.5      | steady | 0.46    | 0.79     | 117.45 | agrees (grid)                         |
+| Amberlight                | 128.3      | free   | 0.08    | 0.29     | 129.2  | agrees; both say weak pulse           |
+| Black Vortex              | 164.1      | steady | 0.52    | 0.54     | 107.67 | **3:2**: 109.1 is our 3rd candidate   |
+| Blockbuster               | 180.0      | steady | 0.60    | 0.43     | 89.1   | ×2 (89.8 is our 2nd candidate)        |
+| blossom                   | 130.0      | steady | 0.55    | 0.14     | 129.2  | agrees                                |
+| Fall in Love              | 122.0      | steady | 0.58    | 0.31     | 123.05 | agrees (grid)                         |
+| From The Sky We Feel      | 126.0      | steady | 0.50    | 0.19     | 123.05 | agrees (grid)                         |
+| Geography                 | 63.3       | steady | 0.55    | 0.15     | 129.2  | ×½                                    |
+| Great                     | 164.0      | steady | 0.52    | 0.52     | 107.67 | **3:2**: 108.9 is our 2nd candidate   |
+| Halloween Moon            | 120.0      | steady | 0.51    | 0.21     | 117.45 | agrees (grid)                         |
+| I Can't Make You Love Me  | 63.0       | steady | 0.59    | 0.52     | 123.05 | ×½ (125.9 scores 1.00 too)            |
+| Ice Cream                 | 120.0      | steady | 0.29    | 0.18     | 117.45 | agrees (grid)                         |
+| Lovely                    | 150.0      | steady | 0.48    | 0.36     | 152.0  | agrees                                |
+| Movement Proposition      | 82.5       | steady | 0.38    | 0.22     | 123.05 | **2:3**                               |
+| Phase Shift               | 64.9       | free   | 0.24    | 0.17     | 129.2  | ×½; both weak                         |
+| Reminiscence              | 89.8       | steady | 0.41    | 0.69     | —      | (no cue map)                          |
+| Simplicity                | 100.0      | steady | 0.37    | 0.00     | 99.38  | agrees                                |
+| Sneaky                    | 113.9      | free   | 0.13    | 0.39     | 112.35 | agrees; free time as predicted (§11)  |
+| Source d'Amour            | 160.0      | steady | 0.59    | 0.70     | —      | (no cue map)                          |
+| Summer Love               | 70.0       | steady | 0.63    | 0.55     | 136.0  | ×½                                    |
+| The Flow of Time          | 98.0       | steady | 0.51    | 0.49     | 99.38  | agrees                                |
+| The Great Sea             | 136.0      | free   | 0.17    | 0.34     | 123.05 | differs; both weak                    |
+| Titan                     | 105.0      | steady | 0.61    | 0.28     | 103.36 | agrees                                |
+| Vanguard                  | 200.0      | steady | 0.47    | 0.50     | 136.0  | **3:2** (prototype said 136)          |
+| Where We Belong           | 90.0       | steady | 0.43    | 0.64     | 117.45 | differs (≈ 3:4)                       |
+| Whispers in the Wind      | 170.0      | steady | 0.54    | 0.05     | 172.27 | agrees                                |
+
+**Reading:** 13 of 24 agree, 5 are ×½/×2 (offered as one-click alternatives), 4 are 3:2 or 2:3 (a
+metrical-level error neither ×½ nor ×2 fixes; the right tempo is among our top 3 candidates in
+Black Vortex and Great). **A2d fix to try:** score each top-3 candidate by the beat tracker's mean
+onset strength on its beats and by bar regularity (downbeats, A4), not by the prior alone; then
+Paul's ear on the 3:2 and ×½ tracks sets the targets.
 
 ## 11. Validation
 

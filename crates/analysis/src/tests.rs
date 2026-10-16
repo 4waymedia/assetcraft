@@ -112,3 +112,57 @@ fn hostile_input_gives_curves_or_nothing_never_a_panic() {
     let v = serde_json::to_value(curves(&sine(440.0, 0.5, 0.1))).unwrap();
     assert!(v.get("rmsDb").is_some() && v.get("bandsDb").is_some() && v.get("centroidHz").is_some());
 }
+
+// ---- Tempo and beats (A2b) -------------------------------------------------------------------
+
+/// Share of `truth` found within `tol` seconds, and share of `found` that are true (each truth
+/// matched once): `(recall, precision, f1)`.
+fn f1(found: &[f64], truth: &[f64], tol: f64) -> (f64, f64, f64) {
+    let mut used = vec![false; found.len()];
+    let mut hits = 0;
+    for t in truth {
+        if let Some(i) = (0..found.len()).find(|&i| !used[i] && (found[i] - t).abs() <= tol) {
+            used[i] = true;
+            hits += 1;
+        }
+    }
+    let r = hits as f64 / truth.len().max(1) as f64;
+    let p = hits as f64 / found.len().max(1) as f64;
+    (r, p, if r + p > 0.0 { 2.0 * r * p / (r + p) } else { 0.0 })
+}
+
+#[test]
+fn click_tracks_give_their_tempo_and_beats() {
+    for bpm in [60.0f32, 92.0, 128.0, 174.0] {
+        let (sig, truth) = clicks(bpm, 30.0);
+        let t = tempo(&curves(&sig)).unwrap();
+        let err = (t.bpm - f64::from(bpm)).abs() / f64::from(bpm);
+        assert!(err < 0.005, "{bpm} BPM: got {:.2}", t.bpm);
+        let (r, p, f) = f1(&t.beats, &truth, 0.05);
+        assert!(f >= 0.95, "{bpm} BPM: beat F1 {f:.3} (recall {r:.3}, precision {p:.3})");
+        assert_eq!(t.rhythm, Rhythm::Steady, "{bpm}: clarity {} cv {}", t.pulse_clarity, t.stability_cv);
+        assert!((t.half.bpm * 2.0 - t.bpm).abs() < 1e-9 && (t.double.bpm / 2.0 - t.bpm).abs() < 1e-9);
+        assert!(!t.candidates.is_empty() && t.candidates[0].score == 1.0);
+    }
+}
+
+#[test]
+fn accented_beats_with_quiet_off_beats_keep_the_slower_tempo() {
+    // 100 BPM kicks with a quiet tick halfway between: the beat is 100, and 200 is offered as ×2.
+    let (kicks, truth) = clicks(100.0, 30.0);
+    let (ticks, _) = clicks(200.0, 30.0);
+    let sig: Vec<f32> = kicks.iter().zip(&ticks).map(|(k, t)| k + 0.15 * t).collect();
+    let t = tempo(&curves(&sig)).unwrap();
+    assert!((t.bpm - 100.0).abs() < 0.5, "{}", t.bpm);
+    assert!(f1(&t.beats, &truth, 0.05).2 >= 0.95);
+    assert!((t.double.bpm - 200.0).abs() < 1.0);
+}
+
+#[test]
+fn noise_is_free_time_and_short_or_silent_audio_has_no_tempo() {
+    let t = tempo(&curves(&noise(0.3, 20.0))).unwrap_or_else(|| panic!("noise still gets an answer"));
+    assert_eq!(t.rhythm, Rhythm::Free, "clarity {} cv {}", t.pulse_clarity, t.stability_cv);
+    assert!(tempo(&curves(&vec![0.0; RATE as usize * 10])).is_none(), "silence");
+    assert!(tempo(&curves(&clicks(120.0, 2.0).0)).is_none(), "under four seconds");
+    assert!(tempo(&curves(&[])).is_none());
+}

@@ -1,102 +1,263 @@
-# Suite cache: one design for every Crafting app
+# Suite cache and app storage: requirements for Windows, macOS, Linux and the web
 
-_2026-10-16 · Stage 4 (Storyboard mode, analysis A2c) · proposal, decisions open_
+_2026-10-16 · Stage 4 (Storyboard mode, analysis A2c) · spec v2, decisions open (supersedes
+[archive/cache-proposal-v1.md](../archive/cache-proposal-v1.md))_
 
-- **Scope:** where and how the Crafting apps keep disposable, regenerable data (thumbnails, previews,
-  waveforms, track analysis, rendered frames) on Windows, Linux, macOS and the web build.
+- **Scope:** where every Crafting app keeps the data it owns (settings, recovery, caches, and
+  results shared between apps), and how cache entries are named, written, budgeted, cleared and
+  driven by agents, on Windows, macOS, Linux and in the browser (WASM).
 - **Project goal it serves:** Bridge-style speed (Paul, 2026-10-16: "adobe bridge would create many
-  cache files for edits, and thumbnails. We should implement the same"), without ever writing into
-  the user's folders, and with one answer across the suite instead of one per app.
-- **Immediate area of improvement:** AssetCraft's track analysis (A2c) needs a home now; its
-  thumbnail cache already follows most of this design and moves onto it first.
+  cache files for edits, and thumbnails. We should implement the same") under the suite's six
+  rules, with one answer for every app rather than one per app ("We need to follow the same
+  principles and structures. The app needs to run on the web as well").
+- **Immediate area of improvement:** AssetCraft's track analysis (A2c) and thumbnails move onto it
+  first; the crate is written so that any app can depend on it and it can go upstream into
+  craft-libs.
 
-## 1. What the suite has today
+## 1. The six rules, as cache requirements
 
-| ID | App / crate | What it does | Where | Cite |
-|----|-------------|--------------|-------|------|
-| S1 | craft-libs `craft-settings` | `paths::cache_dir(app_id)` = the platform cache folder + app id (`%LOCALAPPDATA%` on Windows so it does not roam), `data_dir(app_id)` for recovery files. Desktop only (`#[cfg(not(target_arch = "wasm32"))]`) | `dirs::cache_dir()/<app id>` | storytold/craft-libs `crates/settings/src/paths.rs:162–170`, `lib.rs:42–51`, 83bf4cb |
-| S2 | EffectCraft disk cache | RAM-preview frames, layer buffers and mattes: `<folder>/v1/<kind>/<2 hex>/<32 hex>.ecc`, 128-bit content keys (a changed project changes its keys, so nothing goes stale), LZ4, magic + checksum per file (damaged = miss, deleted), LRU by modification time with a size limit, temp file + rename, background writes with a bounded queue. On the web build queued writes are dropped | user-set folder | storytold/effectcraft `crates/render/src/disk_cache.rs:1–60, 421`, 8f02f52 |
-| S3 | FilmCraft Media Cache | Settings ▸ Media Cache: location (default `<data dir>/Media Cache`), **save next to media**, a separate database location, management never / older than N days / exceeds N GB; analysis results stored "In the Media Cache" or "In the project" | `<data dir>/Media Cache` | storytold/filmcraft `crates/engine/src/settings.rs:656–668, 949, 1604–1608`, 8309f21 |
-| S4 | AssetCraft thumbnails | `<cache>/thumbs/<2 hex>/<32 hex>.png`; SipHash-1-3-128 key over renderer version, size bucket, file size, mtime and the first and last 64 KiB; 1 GiB LRU pruned to 80 % in the background; own-files-only listing; temp + rename | `%LOCALAPPDATA%\AssetCraft\thumbs`, `~/Library/Caches/AssetCraft/thumbs`, `$XDG_CACHE_HOME/assetcraft/thumbs` | `crates/thumbs/src/disk.rs:1–30`, `crates/ui-egui/src/prefs_file.rs:40–70` |
+| Rule (crafting apps)          | What it requires of a cache                                                                                                                   |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| 01 Open source                | The layout and entry format are documented here and versioned, so any app (or a user) can read, clear or rebuild them                         |
+| 02 Native, not wrapped        | Pure Rust on every target, the web included: `web-sys` for OPFS and IndexedDB, **no JavaScript glue** (most repos' AGENTS.md: "Rust only (no handwritten JS/TS). Never break wasm", e.g. designcraft `AGENTS.md:29` @c2609f9) |
+| 03 Familiar from day one      | The names professionals know: **Media Cache** (Premiere, Bridge), **Disk Cache** (After Effects), **Purge**; a Settings ▸ Cache page with location, size, budget and Clear |
+| 04 Your files, your machine   | A cache never writes into the user's folders by default, never leaves the machine, holds nothing that can't be rebuilt ("The cache is nobody's pictures", lightcraft `crates/preview/src/disk.rs:8` @f34c7a8) |
+| 05 Agent-ready                | Every cache action is a command with JSON params (`cache.info`, `cache.clear`, …) on the CLI, MCP and control channel                        |
+| 06 Also in your browser       | The same keys, layout and entry format in the browser's Origin Private File System, with IndexedDB and memory as fallbacks                    |
 
-**Reading:** S2's layout and file rules plus S4's cheap source key already add up to a Bridge-style
-cache. The gaps: every app picks its own root and folder name (S1 uses the app id, S4 a display
-name); no app has a cache on the web; nothing is shared between apps, so the same track is
-analysed again by every app that opens it.
+## 2. What the suite does today
 
-## 2. Proposal
+Survey of all 15 storytold repos, 2026-10-16 (commits: artcraft d4e4ac6, cadcraft 9b2308b,
+craft-libs 83bf4cb, deckcraft 1dc6972, designcraft c2609f9, effectcraft 8f02f52, figcraft d1d8c3f,
+filmcraft 8309f21, gridcraft f1894c6, lightcraft f34c7a8, pdfcraft 9e5b70d, photocraft 2a952f1,
+soundcraft 3a28a65, vectorcraft 8bc6532, wordcraft eae2421).
 
-### 2.1 One layout
+### 2.1 Desktop
+
+| App                | Cache                                                                                                                          | Cite                                                                                       |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| craft-libs         | Policy: caches and models in the platform cache folder (`paths::cache_dir(app_id)`, `%LOCALAPPDATA%` so it doesn't roam), recovery in the data folder; config override `<APP>_CONFIG_DIR` (empty = isolated), portable marker. **No app depends on `craft-settings` yet** | `crates/settings/src/paths.rs:116-136, 162-170`, `docs/settings-storage.md:13-14`          |
+| EffectCraft        | Disk Cache `<folder>/v1/{frames,layers,mattes}/<2 hex>/<32 hex>.ecc`; FNV-1a-128 content keys; magic `ECDC` + kind + LZ4 + FNV-64 checksum; temp `<key>.tmp.<pid>.<n>` + rename; 64-deep write queue; LRU by mtime, index rebuilt on open; 100 GB default; folder per OS, user-settable | `crates/render/src/disk_cache.rs:1-21, 274-290`; `crates/engine/src/prefs.rs:250-252`      |
+| LightCraft         | Inside the library: `thumbs/<2 hex>/<32 hex>.lcthumb` + `CACHEDIR.TAG`, SipHash-1-3-128 keys, 2 GiB LRU to 80 %; `Smart Previews/` with `LCSP1` magic and a JSON header | `crates/preview/src/disk.rs:1-31`, `crates/engine/src/smart.rs:16-57`                      |
+| FilmCraft          | Media Cache at `mediaCache.location` or `<data dir>/Media Cache` (roaming `%APPDATA%` on Windows); never / older than / exceeds size; `mediaCache.info`, `mediaCache.clean`; analysis "In the Media Cache" or "In the project" | `crates/engine/src/settings.rs:656-681, 949, 1603-1609`                                    |
+| PdfCraft           | Clipboard images in the platform cache folder                                                                                  | `crates/ui-egui/src/image_pick.rs:70-86`                                                   |
+| AssetCraft         | `<cache>/thumbs/<2 hex>/<32 hex>.png`, SipHash-1-3-128 key (renderer version, size bucket, file size, mtime, first and last 64 KiB), 1 GiB LRU to 80 %, own-files-only | `crates/thumbs/src/disk.rs:1-30`, `crates/ui-egui/src/prefs_file.rs:40-70`                 |
+| ArtCraft Native    | Media in memory only (textures evicted past a budget); **`~/Artcraft` shared with the Tauri app** for credentials, settings and job state ("connecting in either app works in both") | `artcraft-native/src/backend/media_cache.rs:1-30`, `session.rs:35, 94`, `README.md` (Other providers) |
+| Others             | PhotoCraft, DesignCraft, SoundCraft, VectorCraft, WordCraft, FigCraft, GridCraft, CADCraft, DeckCraft: no disk cache            | survey                                                                                      |
+
+### 2.2 Web
+
+| App          | Storage                                                                                                                 | Cite                                                                            |
+|--------------|-------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| EffectCraft  | OPFS → IndexedDB → memory; disk cache `effectcraft-cache/v1/<kind>/<32 hex>.ecc` in the desktop format; limit = setting capped at half the origin quota; `storage.info / persist / clear`. **Through JS glue** (`host.js`) | `apps/effectcraft-web/js/host.js:8-24`, `docs/web.md:75-95, 311-368`, `crates/engine/src/storage.rs:20-82` |
+| LightCraft   | OPFS → IndexedDB via `web-sys`; `request_persistence`; `QuotaExceededError` → `NotSaved`, retried; one tab holds the library | `apps/lightcraft-web/src/backend.rs:1-4, 326-345`, `files.rs:260-272`          |
+| FilmCraft    | OPFS for autosave, recovery and media copies (`web-sys`)                                                                 | `apps/filmcraft-web/src/opfs.rs:1-4`                                            |
+| PhotoCraft   | Prefs in `localStorage`, presets in IndexedDB                                                                            | `apps/photocraft-web/src/web.rs:388-397`                                        |
+| VectorCraft  | `localStorage` for prefs and recovery, with Web Locks                                                                    | `apps/vectorcraft-web/src/web.rs:495-524`                                       |
+| WordCraft    | IndexedDB for user fonts                                                                                                 | `apps/wordcraft-web/src/web/font_store.rs:1-10`                                 |
+| CADCraft, PdfCraft | eframe `persistence` (`localStorage`)                                                                              | `apps/cadcraft-web/src/main.rs:46-48`                                           |
+| DesignCraft, GridCraft, FigCraft, SoundCraft, DeckCraft | No storage code                                                               | survey                                                                          |
+
+### 2.3 What they already agree on
+
+1. Caches are disposable; a damaged entry is a miss and is deleted (EffectCraft, LightCraft).
+2. Content-addressed, versioned keys: an edit makes a new key, nothing is invalidated in place.
+3. Temp file + rename, so no reader in any process sees a partial entry.
+4. 128-bit hex names in 2-hex shard folders.
+5. Size budget, LRU by modification time, index rebuilt from the folder on open.
+6. Web: OPFS first, then IndexedDB, then memory, with `persist()` and `estimate()`.
+
+### 2.4 Where they differ (the spec settles each, §3)
+
+Root (cache folder vs roaming data folder vs inside the library), folder name (app id vs display
+name), hash (FNV-1a vs SipHash), eviction target (100 % vs 80 %), command ids (`edit.purge`,
+`cache.diskStats`, `mediaCache.*`, `storage.*`) and web plumbing (JS glue vs `web-sys` vs eframe).
+
+## 3. Requirements
+
+### 3.1 Storage classes
+
+| Class          | Holds                                                     | Windows                          | macOS                                      | Linux                                              | Web (per origin)                         |
+|----------------|-----------------------------------------------------------|----------------------------------|--------------------------------------------|----------------------------------------------------|------------------------------------------|
+| **Settings**   | Prefs, layouts, presets; small, valuable                  | `%APPDATA%\<app>` (roams)        | `~/Library/Application Support/<app>`      | `$XDG_CONFIG_HOME/<app>` (`~/.config`)             | OPFS `settings/` → IndexedDB → memory    |
+| **Data**       | Recovery, autosave, job state; valuable, machine-local    | `%LOCALAPPDATA%\<app>`           | `~/Library/Application Support/<app>`      | `$XDG_DATA_HOME/<app>` (`~/.local/share`)          | OPFS `data/`                             |
+| **Cache**      | Thumbnails, previews, waveforms, analysis, frames; disposable, large | `%LOCALAPPDATA%\<app>\Cache` (never roams) | `~/Library/Caches/<app>`         | `$XDG_CACHE_HOME/<app>` (`~/.cache`)               | OPFS `cache/`                            |
+| **Shared cache** | App-neutral results any Crafting app can reuse (§3.6)   | `%LOCALAPPDATA%\Crafting\Cache`  | `~/Library/Caches/Crafting`                | `$XDG_CACHE_HOME/crafting`                         | OPFS `shared/` when the apps share an origin, else the app's `cache/` |
+| **User files** | Pictures, tracks, documents                               | never written by a cache (rule 04) | never                                    | never                                              | only what the user opened or imported    |
+
+- **R1** Roots come from craft-libs' `paths` (`dirs::cache_dir()`, `data_local_dir()`,
+  `config_dir()`), never hand-built per app (fixes the differences in §2.4).
+- **R2** Resolution order for the cache root, the same as craft-settings' config rules
+  (`paths.rs:116-136`): Settings ▸ Cache location → `<APP>_CACHE_DIR` (set but empty = **memory
+  only**, for tests, demos and locked-down machines) → portable mode (`<exe dir>/<App>Data/Cache`,
+  beside the `.app` on macOS) → the platform folder above → memory only if none can be created.
+- **R3** Large caches never go in roaming `%APPDATA%` (opportunity G4 for FilmCraft's Media Cache
+  default and EffectCraft's models).
+
+### 3.2 Layout
 
 ```
-<cache root>/<owner>/v<N>/<kind>/<2 hex>/<32 hex>.<ext>
+<cache root>/v<N>/<kind>/<2 hex>/<32 hex>.<ext>        (+ CACHEDIR.TAG at <cache root>)
 ```
 
-| Part | Rule |
-|------|------|
-| `<cache root>` | Windows `%LOCALAPPDATA%`, macOS `~/Library/Caches`, Linux `$XDG_CACHE_HOME` else `~/.cache` (S1's `dirs::cache_dir()`); a user-chosen folder in Settings overrides it (S3) |
-| `<owner>` | The app id (`assetcraft`, `filmcraft`, …), or **`craft-shared`** for results any app can reuse (§2.3) |
-| `v<N>` | Format version of that kind's files; a new format starts an empty folder, the old one is pruned whole |
-| `<kind>` | `thumbs`, `waveforms`, `analysis`, `frames`, `layers`, … one folder per kind, each with its own budget |
-| `<32 hex>` | 128-bit key: kind version + parameters + **source identity** (file size, mtime, first and last 64 KiB: S4's key) |
-| `<ext>` | The payload type (`png`, `json`, `ecc`) |
+- **R4** `<kind>`: `thumbs`, `previews`, `waveforms`, `analysis`, `frames`, `layers`, `mattes`, …;
+  each kind has its own format version `v<N>` and budget. A new format version starts an empty
+  folder; the old one is deleted whole on the next prune.
+- **R5** `CACHEDIR.TAG` (the Cache Directory Tagging spec, as LightCraft does) at every cache root
+  on desktop, so backup tools skip it.
+- **R6** Names stay short (≤ 60 characters under the root), which keeps Windows under `MAX_PATH`
+  even below a long `%LOCALAPPDATA%`; names are lower-case hex, so case-insensitive file systems
+  (Windows, macOS default) and case-sensitive ones agree.
 
-**Files** (from S2 and S4): magic + format version + payload + checksum; a damaged, short or
-unreadable file is a miss and is deleted; writes go to a unique temp file renamed into place (safe
-across processes, so two apps can share a folder); only names of the cache's own shape are ever
-listed or deleted.
+### 3.3 Keys and entries
 
-### 2.2 Budgets and management
+- **R7** Key: SipHash-1-3-128 with the suite's fixed keys (already in LightCraft and AssetCraft)
+  over `kind`, the kind's format version, the producer's version (renderer, analyser), the
+  parameters, and the **source identity**: file size, modification time, first and last 64 KiB.
+  At most 128 KiB is read per key, so a 2 GB file costs what a 2 MB file does.
+- **R8** Entry: magic `CRFT`, header version, kind tag, the source identity again, payload length,
+  payload (optionally LZ4, `lz4_flex`, MIT), then a 64-bit checksum. On read the source identity
+  is compared with the file's current one, so a key collision or a shared entry written by
+  another app can never show the wrong picture or tempo.
+- **R9** Every entry is **hostile input** (another process, another app or a damaged disk may have
+  written it): length limits per kind, checksum, never executed, never trusted for paths. A bad
+  entry is a miss and is deleted.
 
-Per kind: a size budget with LRU eviction (S2, S4), optionally "older than N days" (S3). Settings ▸
-Cache, the same page in every app: location, size used per kind, budget, **Clear**, and (later) the
-shared cache's total. Clearing is always safe: everything is regenerable.
+### 3.4 Writing and concurrency
 
-### 2.3 Shared results (Bridge's central cache)
+- **R10** Write to `<32 hex>.tmp.<pid>.<n>` in the shard folder, then rename into place (atomic on
+  NTFS, APFS, ext4 and in OPFS via `move()`); no fsync (disposable).
+- **R11** Windows: a rename onto a file another process has open fails; the write is dropped and
+  the next request recomputes (never an error to the user).
+- **R12** Writes run off the UI thread through a bounded queue; a full queue drops the write
+  (EffectCraft's rule), so caching never stalls the app.
+- **R13** Several processes (two apps on the shared cache, two windows) may read and write at once:
+  entries are immutable once named, so no locks are needed; pruning only deletes files older than
+  the prune's own start.
+- **R14** Own files only: list, count and delete only names of the cache's shape; never follow
+  links (AssetCraft and LightCraft rule).
 
-App-neutral results go under `craft-shared` so the first app to compute them saves the work for the
-rest: **track analysis** (AssetCraft, FilmCraft, SoundCraft), **waveform overviews**, **image
-thumbnails**. App-specific results (EffectCraft frames, FilmCraft conformed media) stay under the
-app. A shared kind's file format is versioned and documented in the interchange spec (storyboard
-plan step 10).
+### 3.5 Budgets and management
 
-### 2.4 Web build
+- **R15** Budget per kind (defaults: thumbs 1 GiB, previews 4 GiB, waveforms 256 MiB, analysis
+  256 MiB, frames 20 GiB in apps that render); LRU by modification time down to 80 %, a read
+  refreshes the time at most once a day; optional "older than N days" (FilmCraft).
+- **R16** Index rebuilt from the folder on open, on a background thread; the app works while it
+  runs.
+- **R17** Commands, the same ids in every app:
 
-No file system: the same keys and layout in the browser's **Origin Private File System** (OPFS,
-reached from Rust/WASM through `web-sys`, no JS UI), with the browser's storage quota as the outer
-budget and our LRU inside it. Until that lands, the web build keeps an in-memory cache only (what
-EffectCraft does today, S2).
+| Command          | Params                                         | Result                                                                  | Effect |
+|------------------|------------------------------------------------|-------------------------------------------------------------------------|--------|
+| `cache.info`     | `{}`                                           | `{root, rule, kinds: [{kind, version, bytes, files, budget}], shared?}` | READ   |
+| `cache.clear`    | `{kind?: id, shared?: bool}`                   | `{freedBytes}` (dry run with `dryRun: true`)                            | APP    |
+| `cache.budget`   | `{kind: id, bytes: n}`                         | `{kind, budget}`                                                        | APP    |
+| `cache.location` | `{path: folder \| null}`                       | `{root, rule}` (null = platform default; contents are not moved)        | APP    |
+| `storage.info`   | `{}` (web)                                     | `{backend: opfs\|indexeddb\|memory, usage, quota, persisted}`           | READ   |
+| `storage.persist`| `{}` (web)                                     | `{persisted}` (asks the browser to keep the app's storage)              | APP    |
 
-### 2.5 Cache beside the media (later, opt-in)
+  Existing ids map onto these: EffectCraft `edit.purge {what: disk}` → `cache.clear {kind:
+  frames}`, `cache.diskStats` → `cache.info`; FilmCraft `mediaCache.info / clean` → `cache.info /
+  clear` (aliases kept in each app until its next major version).
+- **R18** Settings ▸ Cache, the same page in every app: location (and the rule that chose it),
+  size per kind against its budget, Clear per kind and Clear all, and the shared cache's size.
 
-Bridge's "export cache to folders" and FilmCraft's "save next to media" (S3) write into the user's
-folders, so for AssetCraft they wait for Stage 2's write rules and stay **off by default**.
+### 3.6 The shared cache
 
-### 2.6 Where the code lives
+- **R19** Kinds that depend only on the source file and a published producer version go in the
+  shared cache, so the first app to compute them saves every other app the work: **track
+  analysis**, **waveform overviews**, **image thumbnails** at the standard sizes. App-specific
+  results (EffectCraft frames, FilmCraft conformed media, LightCraft develop-dependent previews)
+  stay in the app's cache.
+- **R20** Each shared kind's format is specified in the interchange spec (storyboard plan step 10)
+  and versioned; an app that reads a newer format than it knows treats it as a miss.
+- **R21** Sandboxes: a Mac App Store build (App Sandbox), a Windows MSIX package (virtualised
+  `%LOCALAPPDATA%`), a Flatpak or Snap (per-app `XDG_CACHE_HOME`) and a web build on its own origin
+  cannot reach a common folder. There the shared kinds simply live in the app's own cache, same
+  layout; nothing else changes. The shared cache is a speed-up, never a dependency.
+- **R22** The shared cache's budget is the largest budget any app set; each app prunes only kinds
+  it knows.
 
-1. **C1** `assetcraft-cache` (L1, std only): `Cache::open(root, owner, kind, version, budget)`,
-   `get(key) / put(key, bytes)`, `key(source identity, params)`, LRU prune, own-files-only; S4's
-   thumbnail cache moves onto it (the old `thumbs/` folder is cleared once, nothing to migrate:
-   it's all regenerable).
-2. **C2** `analysis` and `waveforms` kinds for A2c (under `craft-shared` if D-C1 says so).
-3. **C3** Settings ▸ Cache page and `cache.*` commands (`cache.info`, `cache.clear {kind?}`).
-4. **C4** OPFS backend for the web build.
-5. **C5** Offer the crate upstream as `craft-cache` in craft-libs, beside `craft-settings`, so
-   every app shares one implementation (a PR from Paul's fork, in craft-libs' own style).
+### 3.7 Web
 
-## 3. Decisions for Paul
+- **R23** Backends in order: **OPFS** (sync access handles in a worker, `createWritable` on the
+  main thread), then **IndexedDB** (one object store per kind, key = the file name), then
+  **memory**; chosen once at start, reported by `storage.info`. All through `web-sys` from Rust.
+- **R24** Budget = min(the setting, half of `navigator.storage.estimate()` quota) (EffectCraft's
+  rule); `QuotaExceededError` drops the write (LightCraft's `NotSaved`) and prunes.
+- **R25** `storage.persist` (`navigator.storage.persist()`) is offered, never forced; without it
+  the browser may evict the cache, which is allowed.
+- **R26** Several tabs: entries are immutable, so tabs share the cache safely; pruning takes a Web
+  Lock (`navigator.locks`) so two tabs don't prune at once (VectorCraft and LightCraft use Web
+  Locks and a single library owner).
+- **R27** Only content the user opened lives there; nothing is uploaded (rule 04; "Nothing is
+  uploaded anywhere", filmcraft `docs/web.md:6`).
 
-| ID   | Question | Recommendation | Needed by |
-|------|----------|----------------|-----------|
-| D-C1 | Shared `craft-shared` folder for app-neutral results (analysis, waveforms, thumbnails), or each app keeps its own copy? | **Shared:** analyse a track once for the whole suite, like Bridge's central cache | A2c |
-| D-C2 | Folder names: the app id (`assetcraft`, S1) or the display name (`AssetCraft`, S4 today)? | **App id**, as craft-settings already does; AssetCraft's thumbnails move with C1 | C1 |
-| D-C3 | Web: OPFS now, or memory-only first? | **Memory-only first**, OPFS as C4; the desktop apps come first | C4 |
-| D-C4 | Cache beside media (Bridge "export cache to folders") | **Later, opt-in, after Stage 2** (it writes into the user's folders) | Stage 2 |
+### 3.8 Beside the media (later)
 
-## 4. Findings
+- **R28** Bridge's "export cache to folders" and FilmCraft's "save next to media" write into the
+  user's folders: off by default, and in AssetCraft only after Stage 2's write rules (atomic, dry
+  run, undo).
 
-| ID | Scope | Finding (opportunity) | Fix | Owner | Status |
-|----|-------|-----------------------|-----|-------|--------|
-| F-C1 | Suite | Each app picks its own cache root and naming (S1–S4) | One layout (§2.1) in a shared crate (C1 → C5) | Claude (C1), Paul (C5 upstream) | Open |
-| F-C2 | Web | No persistent cache in any web build (S2 drops writes) | OPFS backend (C4) | Claude | Open |
-| F-C3 | Suite | The same track or image is analysed again by every app | `craft-shared` kinds (D-C1) | Paul (decision) | Open |
+### 3.9 Tests every implementation passes
+
+| Test                                    | What                                                                                       |
+|-----------------------------------------|--------------------------------------------------------------------------------------------|
+| Round trip per backend                  | put → get the same bytes (file system, OPFS in a headless browser, IndexedDB, memory)      |
+| Hostile entries                         | truncated, wrong magic, wrong checksum, wrong source identity, oversized, a symlinked shard: all misses, deleted, no panic |
+| Concurrency                             | two processes writing the same key; a reader during a write; a prune during reads          |
+| Budget                                  | over budget → 80 % by LRU; a new format version folder empties the old                    |
+| Roots                                   | each rule of R2, including empty `<APP>_CACHE_DIR` = memory only and portable mode         |
+| Windows rename onto an open file        | the write is dropped, the next get recomputes                                              |
+
+## 4. Where the code lives
+
+A `craft-cache` crate, no UI and no app dependencies, built in AssetCraft first
+(`crates/cache`, layer L1) and offered upstream to craft-libs beside `craft-settings` and
+`craft-atomic`, so every app can depend on one implementation:
+
+```rust
+pub enum Root { Platform { app_id: &'static str }, Shared, Dir(PathBuf), Memory }
+pub struct Cache { /* backend, root, kind, version, budget */ }
+impl Cache {
+    pub fn open(root: Root, kind: &'static str, version: u16, budget: u64) -> Cache; // never fails: memory as the last resort
+    pub fn key(&self, source: &SourceId, params: &[u8]) -> Key;
+    pub fn get(&self, key: &Key, source: &SourceId) -> Option<Vec<u8>>;
+    pub fn put(&self, key: &Key, source: &SourceId, payload: &[u8]); // queued, may drop
+    pub fn info(&self) -> KindInfo;
+    pub fn clear(&self, dry_run: bool) -> u64;
+}
+pub struct SourceId { pub size: u64, pub mtime_ns: i64, pub head_tail: [u8; 16] }
+// Backends: FsBackend (desktop), OpfsBackend / IdbBackend (wasm32, web-sys), MemBackend.
+```
+
+## 5. Phases
+
+| Phase | Delivers                                                                                                           | Owner                    |
+|-------|--------------------------------------------------------------------------------------------------------------------|--------------------------|
+| C1    | `assetcraft-cache` (desktop + memory backends, R1–R18), AssetCraft thumbnails moved onto it (the old `thumbs/` folder cleared once) | Claude                   |
+| C2    | `analysis` and `waveforms` kinds for A2c, in the shared cache (R19–R22)                                            | Claude                   |
+| C3    | Settings ▸ Cache page and the `cache.*` commands                                                                   | Claude                   |
+| C4    | OPFS and IndexedDB backends (R23–R27), tested in a headless browser                                                | Claude                   |
+| C5    | Upstream as `craft-cache` in craft-libs (a PR from Paul's fork, in craft-libs' style); sibling apps adopt it at their own pace | Paul (PR), each app      |
+
+## 6. Decisions for Paul
+
+| ID   | Question                                                                                                  | Recommendation                                                                                                   | Needed by |
+|------|-----------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|-----------|
+| D-C1 | Shared cache for app-neutral results (§3.6)?                                                              | **Yes**, with the sandbox fallback (R21): analyse a track once for the whole suite; no app depends on it         | C2 (A2c)  |
+| D-C2 | Folder names: app id (`assetcraft`, craft-libs policy) or display name (`AssetCraft`, what most apps do on Windows and macOS)? | **Display name on Windows and macOS, lower-case id on Linux**: what users see in Explorer and Finder, and what EffectCraft, PdfCraft, PhotoCraft and FilmCraft already do | C1        |
+| D-C3 | Web backends OPFS → IndexedDB → memory, all from Rust through `web-sys` (no JS glue)?                    | **Yes**; EffectCraft's `host.js` storage becomes an upstream opportunity (G6)                                   | C4        |
+| D-C4 | Shared cache folder name: `Crafting`?                                                                     | **`Crafting`** (`crafting` on Linux): neutral, matches "Crafting Apps"                                           | C2        |
+| D-C5 | `cache.*` and `storage.*` as the suite's command ids, with the existing ids as aliases?                   | **Yes**                                                                                                          | C3        |
+| D-C6 | Cache beside the media (R28)                                                                              | **Later, opt-in, after Stage 2**                                                                                 | Stage 2   |
+
+## 7. Findings (opportunities in the sibling apps)
+
+| ID | Scope        | Opportunity                                                                                       | Fix                                                                   | Owner                     | Status |
+|----|--------------|---------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|---------------------------|--------|
+| G1 | Suite        | No shared cache crate; `craft-settings` has no dependents yet                                      | `craft-cache` (C1 → C5), built on `craft-settings` paths              | Claude (C1), Paul (C5)    | Open   |
+| G2 | Web builds   | DesignCraft, GridCraft, FigCraft, SoundCraft and DeckCraft keep nothing between visits              | `craft-cache` OPFS backend + settings on OPFS                          | Each app                  | Open   |
+| G3 | Docs         | Web READMEs say prefs are kept in `localStorage` but no code does it (designcraft, gridcraft, wordcraft `packaging/web/README.md:67`, filmcraft `:69`) | Fix the text or add the code                    | Each app                  | Open   |
+| G4 | FilmCraft, EffectCraft | Large data in roaming `%APPDATA%` (Media Cache default; AI models)                       | Move to `%LOCALAPPDATA%` per craft-libs `docs/settings-storage.md:13` | FilmCraft, EffectCraft    | Open   |
+| G5 | Suite        | Four namespaces for cache commands                                                                 | `cache.*` / `storage.*` with aliases (D-C5)                           | Each app                  | Open   |
+| G6 | EffectCraft  | Web storage through `host.js`, against the suite's "Rust only, no handwritten JS" rule              | Replace with `craft-cache`'s `web-sys` OPFS backend                   | EffectCraft               | Open   |

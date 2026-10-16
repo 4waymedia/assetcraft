@@ -1,4 +1,4 @@
-//! Print a track's analysis curves summary (dev check for A2a; the oracle comparison in A2d).
+//! Print a track's analysis summary: curves (A2a) and tempo (A2b); the oracle comparison in A2d.
 //!
 //! `cargo run -p assetcraft-analysis --release --example curves -- <audio file>...`
 
@@ -20,6 +20,8 @@ fn main() {
         let t2 = Instant::now();
         let c = assetcraft_analysis::curves(&signal);
         let t3 = Instant::now();
+        let tempo = assetcraft_analysis::tempo(&c);
+        let t4 = Instant::now();
         let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
         let name = std::path::Path::new(&arg).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         println!(
@@ -37,5 +39,23 @@ fn main() {
             (t2 - t1).as_secs_f64(),
             (t3 - t2).as_secs_f64(),
         );
+        match tempo {
+            Some(t) => println!(
+                "    tempo {:.1} BPM ({:?}, clarity {:.2}, cv {:.3}, offbeat {:.2}, {} beats) · ×½ {:.1} ({:.2}) ×2 {:.1} ({:.2}) · candidates {} · {:.2}s",
+                t.bpm,
+                t.rhythm,
+                t.pulse_clarity,
+                t.stability_cv,
+                t.offbeat,
+                t.beats.len(),
+                t.half.bpm,
+                t.half.score,
+                t.double.bpm,
+                t.double.score,
+                t.candidates.iter().map(|c| format!("{:.1} ({:.2})", c.bpm, c.score)).collect::<Vec<_>>().join(", "),
+                (t4 - t3).as_secs_f64(),
+            ),
+            None => println!("    no tempo"),
+        }
     }
 }

@@ -4,13 +4,16 @@
 //!
 //! - [`curves`] (A2a): loudness, band energies, onset strength, brightness and noisiness every
 //!   [`HOP`] samples (23.2 ms).
+//! - [`tempo`] (A2b): tempo candidates with ×½ and ×2, beats, pulse clarity, free time.
 //!
 //! Every input is treated as hostile: non-finite samples count as silence, and an empty or tiny
 //! signal gives empty curves, never a panic.
 
 pub mod curves;
+pub mod tempo;
 
 pub use curves::{BANDS, Band, Curves, curves};
+pub use tempo::{Candidate, Rhythm, Tempo, tempo};
 
 /// Sample rate of the analysis signal.
 pub const RATE: u32 = 22_050;
