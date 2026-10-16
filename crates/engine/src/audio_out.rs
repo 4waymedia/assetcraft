@@ -23,6 +23,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+/// Preview volume until the user sets one: a quick, quiet sample (Paul, 2026-10-16: "most people
+/// don't need a full blast").
+pub const DEFAULT_PREVIEW_VOLUME: f32 = 0.35;
+
+/// Slider position (0–1) to output gain: squared, so the low end of the slider is usable.
+pub fn volume_gain(volume: f32) -> f32 {
+    let v = if volume.is_finite() { volume.clamp(0.0, 1.0) } else { DEFAULT_PREVIEW_VOLUME };
+    v * v
+}
+
 /// A background decode.
 #[derive(Debug, Clone)]
 enum Load {
@@ -44,6 +54,16 @@ pub(crate) struct TrackAudio {
     playing: Option<Arc<Program>>,
     /// Why the last start failed; cleared by the next `storyboard.play`.
     failed: Option<String>,
+    /// A track previewed from the Start screen (`track.preview`).
+    preview: Option<Preview>,
+}
+
+/// A Start screen preview: the track, where to start, and whether it is sounding yet.
+#[derive(Debug, Clone)]
+struct Preview {
+    path: PathBuf,
+    from: f64,
+    started: bool,
 }
 
 impl Default for TrackAudio {
@@ -55,6 +75,7 @@ impl Default for TrackAudio {
             program: None,
             playing: None,
             failed: None,
+            preview: None,
         }
     }
 }
@@ -134,6 +155,7 @@ impl Session {
     /// for the status bar when the Cut will be silent for now.
     pub(crate) fn audio_start(&mut self, from: Ticks) -> Option<String> {
         self.audio.failed = None;
+        self.preview_stop();
         self.audio_stop();
         let (path, _) = self.board_track()?;
         self.load_slot(&path);
@@ -143,6 +165,7 @@ impl Session {
             _ => {}
         }
         let program = self.program()?;
+        self.audio.player.set_volume(1.0);
         match self.audio.player.play(Arc::clone(&program), from.as_secs_f64()) {
             Ok(()) => {
                 self.audio.playing = Some(program);
@@ -168,6 +191,9 @@ impl Session {
     /// decode finishes mid-play, restarts it when undo or a new fit changed the edit, and stops
     /// it when the Cut isn't playing. Cheap when nothing changed.
     pub fn poll_audio(&mut self, at: Ticks) {
+        if self.poll_preview() {
+            return;
+        }
         let Some((path, _)) = self.board_track() else {
             self.audio_stop();
             return;
@@ -189,6 +215,90 @@ impl Session {
         };
         if !same {
             let _ = self.audio_start(at);
+        }
+    }
+
+    /// Preview a track from the Start screen: decode it (if needed) and play it from `from`
+    /// seconds through the whole file. Replaces any preview; stops the Cut's music. Returns
+    /// `loading`, `playing` or `failed: …`.
+    pub(crate) fn preview_start(&mut self, path: PathBuf, from: f64) -> String {
+        self.preview_stop();
+        self.audio_stop();
+        self.load_slot(&path);
+        self.audio.preview =
+            Some(Preview { path, from: if from.is_finite() { from.max(0.0) } else { 0.0 }, started: false });
+        self.poll_preview();
+        self.preview_status()
+    }
+
+    /// Stop a preview (no-op when none).
+    pub(crate) fn preview_stop(&mut self) {
+        if let Some(p) = self.audio.preview.take()
+            && p.started
+        {
+            self.audio.player.stop();
+        }
+    }
+
+    /// Start a pending preview once its decode is done. True while a preview is active.
+    fn poll_preview(&mut self) -> bool {
+        let Some(p) = self.audio.preview.clone() else { return false };
+        if p.started {
+            return true;
+        }
+        match self.load_state(&p.path) {
+            Some(Load::Ready(audio)) => {
+                let program = Arc::new(Program::new(audio, None));
+                self.audio.player.set_volume(volume_gain(self.preview_volume));
+                let ok = self.audio.player.play(program, p.from).is_ok();
+                match &mut self.audio.preview {
+                    Some(q) if ok => q.started = true,
+                    _ => self.audio.preview = None,
+                }
+                ok
+            }
+            Some(Load::Failed(_)) => {
+                self.audio.preview = None;
+                false
+            }
+            _ => true,
+        }
+    }
+
+    /// The preview volume, 0–1.
+    pub fn preview_volume(&self) -> f32 {
+        self.preview_volume
+    }
+
+    /// Set the preview volume (0–1); a playing preview changes level at once.
+    pub(crate) fn set_preview_volume(&mut self, volume: f32) {
+        self.preview_volume = volume.clamp(0.0, 1.0);
+        if self.audio.preview.as_ref().is_some_and(|p| p.started) {
+            self.audio.player.set_volume(volume_gain(self.preview_volume));
+        }
+    }
+
+    /// The previewed track and whether it is still loading.
+    pub fn preview_state(&self) -> Option<(&std::path::Path, bool)> {
+        self.audio.preview.as_ref().map(|p| (p.path.as_path(), !p.started))
+    }
+
+    /// Seconds into the previewed track being heard now (`None` when no preview is playing). The
+    /// preview plays the whole file, so this is a time in the track.
+    pub fn preview_position(&self) -> Option<f64> {
+        self.audio.preview.as_ref().filter(|p| p.started).and_then(|_| self.audio.player.position())
+    }
+
+    fn preview_status(&self) -> String {
+        match &self.audio.preview {
+            Some(p) if p.started => "playing".into(),
+            Some(_) => "loading".into(),
+            None => {
+                match self.audio.load.as_ref().map(|(_, s)| s.lock().unwrap_or_else(PoisonError::into_inner).clone()) {
+                    Some(Load::Failed(e)) => format!("failed: {e}"),
+                    _ => "stopped".into(),
+                }
+            }
         }
     }
 

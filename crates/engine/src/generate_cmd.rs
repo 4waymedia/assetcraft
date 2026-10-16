@@ -30,6 +30,10 @@ pub struct GeneratedFrom {
     pub seconds: Option<u32>,
     /// Lengths the cue map can fit to (whole track included as `None`).
     pub lengths: Vec<Option<u32>>,
+    /// Tone (`density`, 1 = the profile as designed).
+    pub density: f32,
+    /// Shape overrides (titles, tighten, end card, transition, overlays).
+    pub shape: assetcraft_storyboard::Shape,
 }
 
 impl Session {
@@ -63,7 +67,8 @@ pub(crate) fn sb_cue_maps(s: &mut Session, _: &Value) -> CmdResult {
     Ok(json!({ "cueMaps": maps }))
 }
 
-pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
+/// The `cueMap` param: a full path.
+pub(crate) fn cue_map_param(p: &Value) -> Result<PathBuf, CmdError> {
     let path = match p.get("cueMap").and_then(Value::as_str).map(str::trim) {
         Some(x) if !x.is_empty() && x.len() <= 4096 => PathBuf::from(x),
         _ => return Err(CmdError::BadParams("need `cueMap` (path to a .cuemap.json)".into())),
@@ -73,41 +78,72 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     if !path.has_root() {
         return Err(CmdError::BadParams("`cueMap` must be a full path".into()));
     }
-    let pacing = match p.get("pacing") {
-        None => s.boards.generated.as_ref().map_or(Pacing::Trailer, |g| g.pacing),
+    Ok(path)
+}
+
+/// The `pacing` param, defaulting to `default`.
+pub(crate) fn pacing_param(p: &Value, default: Pacing) -> Result<Pacing, CmdError> {
+    match p.get("pacing") {
+        None => Ok(default),
         Some(v) => v
             .as_str()
             .and_then(Pacing::from_id)
-            .ok_or_else(|| CmdError::BadParams("`pacing`: calm|cinematic|energetic|trailer".into()))?,
-    };
-    let seconds = match p.get("seconds") {
-        None | Some(Value::Null) => None,
-        Some(v) => Some(
-            v.as_u64()
-                .and_then(|n| u32::try_from(n).ok())
-                .filter(|n| (5..=3600).contains(n))
-                .ok_or_else(|| CmdError::BadParams("`seconds`: 5..3600, or null for the whole track".into()))?,
-        ),
-    };
-    let fit_mode = match p.get("fit").and_then(Value::as_str) {
-        None => None,
-        Some("fade") => Some(FitMode::Fade),
-        Some("edit") => Some(FitMode::Edit),
-        Some(_) => return Err(CmdError::BadParams("`fit`: fade|edit".into())),
-    };
-    let bytes = s.services.read_head(&path, MAX_CUEMAP_BYTES + 1).map_err(CmdError::Fs)?;
-    let cue = CueMap::from_json(&bytes).map_err(|e| CmdError::Unavailable(e.to_string()))?;
-    let track_path = path.parent().map(|d| d.join(&cue.track.file)).unwrap_or_else(|| PathBuf::from(&cue.track.file));
-    let name = match p.get("name").and_then(Value::as_str).map(str::trim) {
-        Some(n) if !n.is_empty() && n.len() <= 256 => n.to_owned(),
-        Some(_) => return Err(CmdError::BadParams("`name` must be 1–256 bytes".into())),
-        None => format!("{} · {}", cue.track.title, pacing.name()),
-    };
-    let opts =
-        GenerateOptions { name, track_path: track_path.to_string_lossy().into_owned(), pacing, seconds, fit_mode };
-    let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+            .ok_or_else(|| CmdError::BadParams("`pacing`: calm|cinematic|energetic|trailer".into())),
+    }
+}
+
+/// The `seconds` param (`None` = the whole track).
+pub(crate) fn seconds_param(p: &Value) -> Result<Option<u32>, CmdError> {
+    match p.get("seconds") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| (5..=3600).contains(n))
+            .map(Some)
+            .ok_or_else(|| CmdError::BadParams("`seconds`: 5..3600, or null for the whole track".into())),
+    }
+}
+
+/// The `density` param (tone: 0.5 fewer, longer shots … 2 more, shorter), defaulting to `default`.
+pub(crate) fn density_param(p: &Value, default: f32) -> Result<f32, CmdError> {
+    match p.get("density") {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .map(|d| d as f32)
+            .filter(|d| assetcraft_storyboard::DENSITY_RANGE.contains(d))
+            .ok_or_else(|| CmdError::BadParams("`density`: 0.5..2 (1 = the style as designed)".into())),
+    }
+}
+
+/// The `shape` param: `{titles?: every|key|opening|none, tighten?, endCard?, transition?:
+/// cut|crossfade|dip|flash, overlays?}`; missing fields keep the style's own choice.
+pub(crate) fn shape_param(
+    p: &Value,
+    default: assetcraft_storyboard::Shape,
+) -> Result<assetcraft_storyboard::Shape, CmdError> {
+    match p.get("shape") {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| CmdError::BadParams(format!("`shape`: {e}"))),
+    }
+}
+
+/// Read and validate a cue map (size-capped, hostile input).
+pub(crate) fn read_cue(s: &Session, path: &Path) -> Result<CueMap, CmdError> {
+    let bytes = s.services.read_head(path, MAX_CUEMAP_BYTES + 1).map_err(CmdError::Fs)?;
+    CueMap::from_json(&bytes).map_err(|e| CmdError::Unavailable(e.to_string()))
+}
+
+/// The audio file a cue map describes (`track.file`, next to the cue map).
+pub(crate) fn track_path(path: &Path, cue: &CueMap) -> PathBuf {
+    path.parent().map(|d| d.join(&cue.track.file)).unwrap_or_else(|| PathBuf::from(&cue.track.file))
+}
+
+/// Lengths a cue map can be generated at (`None` = whole track, then each fit shorter than it).
+pub(crate) fn fit_lengths(cue: &CueMap) -> Vec<Option<u32>> {
     let duration_secs = cue.duration_frames / u64::from(cue.sample_rate.max(1));
-    let lengths = std::iter::once(None)
+    std::iter::once(None)
         .chain(
             cue.fits
                 .keys()
@@ -115,14 +151,48 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
                 .filter(|k| u64::from(*k) + 2 < duration_secs)
                 .map(Some),
         )
-        .collect();
+        .collect()
+}
+
+pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
+    let path = cue_map_param(p)?;
+    let pacing = pacing_param(p, s.boards.generated.as_ref().map_or(Pacing::Trailer, |g| g.pacing))?;
+    let seconds = seconds_param(p)?;
+    let density = density_param(p, s.boards.generated.as_ref().map_or(1.0, |g| g.density))?;
+    let shape = shape_param(p, s.boards.generated.as_ref().map(|g| g.shape).unwrap_or_default())?;
+    let fit_mode = match p.get("fit").and_then(Value::as_str) {
+        None => None,
+        Some("fade") => Some(FitMode::Fade),
+        Some("edit") => Some(FitMode::Edit),
+        Some(_) => return Err(CmdError::BadParams("`fit`: fade|edit".into())),
+    };
+    let cue = read_cue(s, &path)?;
+    let track_path = track_path(&path, &cue);
+    let name = match p.get("name").and_then(Value::as_str).map(str::trim) {
+        Some(n) if !n.is_empty() && n.len() <= 256 => n.to_owned(),
+        Some(_) => return Err(CmdError::BadParams("`name` must be 1–256 bytes".into())),
+        None => format!("{} · {}", cue.track.title, pacing.name()),
+    };
+    let opts = GenerateOptions {
+        name,
+        track_path: track_path.to_string_lossy().into_owned(),
+        pacing,
+        seconds,
+        fit_mode,
+        density,
+        shape,
+    };
+    let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    let lengths = fit_lengths(&cue);
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board);
     s.boards.board = Some(board);
     s.boards.mode = Mode::Storyboard;
+    // A new storyboard opens in the Strip view: Viewer, Content panel and timeline (Paul, 2026-10-16).
+    s.boards.view = crate::storyboard::BoardView::Strip;
     s.boards.transport = Transport::default();
     s.audio_stop();
-    s.boards.generated = Some(GeneratedFrom { cue_map: path, pacing, seconds, lengths });
+    s.boards.generated = Some(GeneratedFrom { cue_map: path, pacing, seconds, lengths, density, shape });
     let mut message = format!(
         "{} · {}: {} clips in {} scenes, {} on bars, {} on hits, {}",
         cue.track.title,
@@ -159,6 +229,8 @@ pub(crate) fn generated_json(s: &Session) -> Value {
             "pacing": g.pacing.id(),
             "seconds": g.seconds,
             "lengths": g.lengths,
+            "density": g.density,
+            "shape": serde_json::to_value(g.shape).unwrap_or(Value::Null),
         }),
         None => Value::Null,
     }

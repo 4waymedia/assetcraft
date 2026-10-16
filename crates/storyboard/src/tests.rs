@@ -333,7 +333,15 @@ mod cue {
     }
 
     pub fn opts(pacing: Pacing, seconds: Option<u32>) -> GenerateOptions {
-        GenerateOptions { name: "Test".into(), track_path: "/music/song.wav".into(), pacing, seconds, fit_mode: None }
+        GenerateOptions {
+            name: "Test".into(),
+            track_path: "/music/song.wav".into(),
+            pacing,
+            seconds,
+            fit_mode: None,
+            density: 1.0,
+            shape: Shape::default(),
+        }
     }
 }
 
@@ -431,8 +439,8 @@ fn profiles_differ_the_way_they_say() {
         cine.clips,
         energetic.clips
     );
-    assert_eq!(calm.title_cards, 1, "Calm: opening title only");
-    assert_eq!(cine.title_cards, 2, "Cinematic: opening + end card");
+    assert_eq!(calm.title_cards, 2, "Calm: opening title + end card");
+    assert_eq!(cine.title_cards, 3, "Cinematic: opening, the chorus with the drop (key moment), end card");
     // Title cards take the profile's look.
     let (board, _) = generate(&m, &opts(Pacing::Trailer, None)).unwrap();
     for c in board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl) {
@@ -445,6 +453,13 @@ fn profiles_differ_the_way_they_say() {
     assert!(starts.contains(&m.ticks(24 * BAR)));
     // The hit between beats in bar 31 moves a cut onto it.
     assert!(starts.contains(&m.ticks(30 * BAR + 2 * BEAT)), "cut moved onto the hit");
+    // Density: more, shorter shots up; fewer, longer shots down; the length never changes.
+    let at = |d: f32| generate(&m, &GenerateOptions { density: d, ..opts(Pacing::Cinematic, None) }).unwrap().1;
+    let (low, mid, high) = (at(0.5), at(1.0), at(2.0));
+    assert!(low.clips < mid.clips && mid.clips < high.clips, "{} {} {}", low.clips, mid.clips, high.clips);
+    assert_eq!((low.length, high.length), (mid.length, mid.length));
+    assert_eq!(at(f32::NAN).clips, mid.clips, "nonsense density is the default");
+    assert_eq!(at(9.0).clips, high.clips, "clamped to 2");
     // Deterministic.
     assert_eq!(
         generate(&m, &opts(Pacing::Trailer, Some(60))).unwrap(),
@@ -606,4 +621,75 @@ fn animations_start_hidden_end_at_rest_and_never_misbehave() {
     assert_eq!(type_on.visible_chars(10), 5);
     assert_eq!(AnimFrame::REST.visible_chars(10), 10);
     assert_eq!(TextAnimation::Typewriter.frame(0.0).visible_chars(10), 0);
+}
+
+// ---- Shape (S2b) -----------------------------------------------------------------------------
+
+#[test]
+fn shape_overrides_titles_end_card_transitions_and_overlays() {
+    use cue::*;
+    let m = map();
+    let gen_with =
+        |pacing: Pacing, shape: Shape| generate(&m, &GenerateOptions { shape, ..opts(pacing, None) }).unwrap();
+    // Titles.
+    let titles = |t: Titles, end: bool| {
+        gen_with(Pacing::Trailer, Shape { titles: Some(t), end_card: Some(end), ..Shape::default() }).1.title_cards
+    };
+    assert_eq!(titles(Titles::None, false), 0);
+    assert_eq!(titles(Titles::OpeningOnly, false), 1);
+    assert_eq!(titles(Titles::OpeningOnly, true), 2);
+    assert!(titles(Titles::KeyMoments, false) < titles(Titles::EveryScene, false));
+    // Transitions at scene boundaries.
+    let (board, _) = gen_with(Pacing::Calm, Shape::default());
+    let starts: Vec<usize> =
+        (1..board.clips.len()).filter(|&i| board.clips[i].scene_id != board.clips[i - 1].scene_id).collect();
+    assert!(!starts.is_empty());
+    for &i in &starts {
+        assert_eq!(board.clips[i].transition_in, Transition::FadeIn, "Calm dips to black");
+        assert_eq!(board.clips[i - 1].transition_out, Transition::FadeOut);
+    }
+    let (board, _) = gen_with(Pacing::Calm, Shape { transition: Some(SceneTransition::Flash), ..Shape::default() });
+    assert!(
+        starts.iter().all(|&i| board.clips[i].transition_in == Transition::Flash
+            || board.clips[i].transition_in == Transition::SmashCut)
+    );
+    // Overlays: scene titles after the opening become text over a shot; the opening and end card stay cards.
+    let (board, _) = gen_with(Pacing::Trailer, Shape { overlays: Some(true), ..Shape::default() });
+    let kinds: Vec<_> = board.clips.iter().filter_map(|c| c.text_kind()).collect();
+    assert_eq!(kinds.first(), Some(&TextKind::Card), "opening title");
+    assert_eq!(kinds.last(), Some(&TextKind::Card), "end card");
+    assert!(kinds.contains(&TextKind::Overlay));
+    assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok());
+    // Ids parse back; the shape travels as JSON.
+    for t in Titles::ALL {
+        assert_eq!(Titles::from_id(t.id()), Some(t));
+    }
+    for t in SceneTransition::ALL {
+        assert_eq!(SceneTransition::from_id(t.id()), Some(t));
+    }
+    let shape = Shape { titles: Some(Titles::KeyMoments), transition: Some(SceneTransition::Dip), ..Shape::default() };
+    let json = serde_json::to_value(shape).unwrap();
+    assert_eq!(json, serde_json::json!({ "titles": "key", "transition": "dip" }));
+    assert_eq!(serde_json::from_value::<Shape>(json).unwrap(), shape);
+    assert!(serde_json::from_value::<Shape>(serde_json::json!({ "titles": "sometimes" })).is_err());
+}
+
+#[test]
+fn family_and_hero_have_their_own_character() {
+    use cue::*;
+    let m = map();
+    let (family, fr) = generate(&m, &opts(Pacing::Family, None)).unwrap();
+    let (hero, hr) = generate(&m, &opts(Pacing::Hero, None)).unwrap();
+    assert!(fr.title_cards >= 5 && hr.title_cards >= 5, "a title on every scene");
+    let share =
+        |b: &Storyboard, t: ShotType| b.clips.iter().filter(|c| c.shot_type == t).count() as f32 / b.clips.len() as f32;
+    assert!(share(&family, ShotType::Cu) > share(&family, ShotType::Ws), "Family leans on close-ups");
+    // Hero: the shot after the drop is a close-up.
+    let starts = hero.starts();
+    let drop_at = m.ticks(24 * BAR);
+    let i = (0..hero.clips.len()).find(|&i| starts[i] >= drop_at && hero.clips[i].shot_type != ShotType::Ttl).unwrap();
+    assert_eq!(hero.clips[i].shot_type, ShotType::Cu, "the first shot of the drop");
+    assert!(hero.clips.len() > family.clips.len(), "Hero cuts faster");
+    assert!(Pacing::Hero.suits(130.0) && !Pacing::Family.suits(130.0));
+    assert_eq!(Pacing::from_id("hero"), Some(Pacing::Hero));
 }

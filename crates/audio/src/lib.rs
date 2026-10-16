@@ -223,6 +223,20 @@ impl Audio {
         Peaks::build(&self.mono())
     }
 
+    /// A fixed waveform overview of the mono mix: `(min, max)` over each of `buckets` equal spans
+    /// (fewer when the track is shorter than `buckets` frames; empty for no audio).
+    pub fn overview(&self, buckets: usize) -> Vec<(f32, f32)> {
+        let mono = self.mono();
+        if mono.is_empty() || buckets == 0 {
+            return Vec::new();
+        }
+        let peaks = Peaks::build(&mono);
+        let n = buckets.min(mono.len());
+        (0..n)
+            .map(|j| peaks.minmax(&mono, j * mono.len() / n, ((j + 1) * mono.len() / n).max(j * mono.len() / n + 1)))
+            .collect()
+    }
+
     /// Duration, rate, channels, peak and RMS.
     pub fn summary(&self) -> Summary {
         let peak = self.channels.iter().flatten().fold(0.0f32, |m, s| m.max(s.abs()));

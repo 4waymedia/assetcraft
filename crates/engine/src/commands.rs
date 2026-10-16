@@ -195,7 +195,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard from Track",
         "File",
         None,
-        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, name?} (scenes from sections, clips on bars and hits; one undo step)",
+        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, density?: 0.5..2, name?} (scenes from sections, clips on bars and hits; density: fewer, longer shots below 1, more, shorter above; one undo step)",
         crate::generate_cmd::sb_generate
     ),
     cmd!(
@@ -215,6 +215,60 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{path} → {path, format, rate, channels, frames, seconds, peakDbfs, rmsDbfs} (decodes the whole file; ≤ 20 min, ≤ 8 channels, 8–384 kHz)",
         crate::track_cmd::track_summary
+    ),
+    cmd!(
+        READ,
+        "track.peaks",
+        "Track Waveform",
+        "Storyboard",
+        None,
+        "{path, buckets?: 16..4096} → {path, status: loading|ready|failed, seconds?, peaks?: [[min, max]], error?} (decodes in the background; ask again while loading)",
+        crate::waveform::track_peaks
+    ),
+    cmd!(
+        APP,
+        "storyboard.musicFolder",
+        "Music Folder",
+        "Storyboard",
+        None,
+        "{path: folder | null} (where the Start screen looks for tracks; saved)",
+        crate::library_cmd::sb_music_folder
+    ),
+    cmd!(
+        READ,
+        "storyboard.tracks",
+        "Music Library",
+        "Storyboard",
+        None,
+        "{} → {musicFolder, tracks: [{audio, cueMap, analysed, title, artist, license, seconds, bpm, lengths}]} (music folder + the open folder)",
+        crate::library_cmd::sb_tracks
+    ),
+    cmd!(
+        READ,
+        "storyboard.preview",
+        "Preview Storyboard",
+        "Storyboard",
+        None,
+        "{cueMap, pacing?, seconds?, density?, shape?} → {clips: [{shot, start, seconds, scene, text?, in, out}], count, titleCards, scenes, length, avgSeconds, avgBeats, trackSeconds, edit: {segments: [[start, end]], fadeOut?}} (what storyboard.generate would build; times in seconds, edit in track time; changes nothing)",
+        crate::library_cmd::sb_preview
+    ),
+    cmd!(
+        APP,
+        "track.preview",
+        "Preview Track",
+        "Storyboard",
+        None,
+        "{path: audio file | null, from?: seconds} (plays the track on the output device; null stops; the Cut's ▶ stops it)",
+        crate::track_cmd::track_preview
+    ),
+    cmd!(
+        APP,
+        "track.previewVolume",
+        "Preview Volume",
+        "Storyboard",
+        None,
+        "{volume: 0..1} (track preview level, saved; Watch your Cut stays at full level)",
+        crate::track_cmd::track_preview_volume
     ),
     cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip|fill}", storyboard::sb_view),
     cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),

@@ -112,6 +112,10 @@ pub struct Prefs {
     pub panels: Option<Value>,
     /// Optional formats (`formats.heic`).
     pub formats: FormatPrefs,
+    /// Where Storyboard mode looks for music (`storyboard.musicFolder`).
+    pub music_folder: Option<PathBuf>,
+    /// Track preview volume in percent, 0–100 (`track.previewVolume`); `None` = the default.
+    pub preview_volume: Option<u8>,
 }
 
 /// Largest panel-layout JSON accepted by `view.panels` and restored from disk.
@@ -153,6 +157,8 @@ impl Prefs {
         if let Some(Value::Object(formats)) = root.get("formats") {
             set_field(&mut prefs.formats.heic, formats.get("heic"));
         }
+        prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
+        prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
         prefs.view.thumb_size = prefs.view.thumb_size.clamp(THUMB_SIZE_RANGE.0, THUMB_SIZE_RANGE.1);
         prefs.version = PREFS_VERSION;
         (prefs, true)
@@ -164,6 +170,7 @@ impl Prefs {
         let mut clean = self.clone();
         clean.favorites.retain(|p| p.to_str().is_some());
         clean.last_folder = clean.last_folder.filter(|p| p.to_str().is_some());
+        clean.music_folder = clean.music_folder.filter(|p| p.to_str().is_some());
         // Nothing left can fail to serialize; the fallback only guards future fields.
         serde_json::to_string_pretty(&clean).unwrap_or_else(|_| "{}".into())
     }
@@ -197,6 +204,13 @@ mod tests {
         assert_eq!(Prefs::from_json(r#"{"view":{"thumb_size":9999},"extra":1}"#).view.thumb_size, THUMB_SIZE_RANGE.1);
         assert_eq!(Prefs::from_json(r#"{"panels":{"root":null}}"#).panels, Some(serde_json::json!({"root": null})));
         assert_eq!(Prefs::from_json(r#"{"panels":[1,2]}"#).panels, None, "a non-object layout is dropped");
+        p.music_folder = Some("/music".into());
+        assert_eq!(Prefs::from_json(&p.to_json()).music_folder, Some(PathBuf::from("/music")));
+        assert_eq!(Prefs::from_json(r#"{"music_folder":7}"#).music_folder, None);
+        p.preview_volume = Some(50);
+        assert_eq!(Prefs::from_json(&p.to_json()).preview_volume, Some(50));
+        assert_eq!(Prefs::from_json(r#"{"preview_volume":900}"#).preview_volume, Some(100));
+        assert_eq!(Prefs::from_json(r#"{"preview_volume":"loud"}"#).preview_volume, None);
     }
 
     #[test]

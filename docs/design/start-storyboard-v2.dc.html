@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/tokens/effects.css">
+  <link rel="stylesheet" href="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/styles.css">
+  <script src="_ds/assetcraft-design-system-83f3df4b-6f4f-4b8c-bfc7-94a81a3ded5d/_ds_bundle.js"></script>
+  <style>
+    body{margin:0;background:#101010;font-family:"Segoe UI",system-ui,sans-serif;}
+    a{color:#4da3ff;} a:hover{color:#8cc4ff;}
+    input[type=range]{accent-color:#2f6fd6;}
+    ::-webkit-scrollbar{width:10px;height:10px;} ::-webkit-scrollbar-thumb{background:#3a3a3a;border-radius:5px;border:2px solid #181818;} ::-webkit-scrollbar-track{background:transparent;}
+  </style>
+</helmet>
+<div data-screen-label="Start storyboard" style="height:100vh;min-width:1200px;display:flex;flex-direction:column;background:var(--surface-app);color:var(--text-body);font-size:12px;overflow:auto">
+  <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.TitleBar" app="AssetCraft" subtitle="Storyboard" hint-size="100%,30px"></x-import>
+  <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.MenuBar" items="{{ menuItems }}" hint-size="100%,24px"></x-import>
+  <div style="height:34px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--border-chrome);background:var(--surface-chrome)">
+    <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.SegmentedControl" variant="mode" options="{{ modeOpts }}" value="Storyboard" hint-size="170px,24px"></x-import>
+    <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" hint-size="56px,22px">+ New</x-import>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:14px;font-size:11px;color:var(--text-tertiary)">
+      <span style="color:var(--text-primary)">1 · Track</span><span>›</span>
+      <span style="color:var(--text-primary)">2 · Preset</span><span>›</span>
+      <span style="color:var(--text-primary)">3 · Create</span>
+    </div>
+  </div>
+
+  <div style="flex:1;min-height:420px;display:grid;grid-template-columns:340px minmax(0,1fr) 320px">
+    <!-- 1 · TRACK -->
+    <div style="min-height:0;display:flex;flex-direction:column;background:var(--surface-panel);border-right:1px solid var(--border-panel)">
+      <div style="padding:12px 14px 10px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--border-section)">
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <div style="font-size:16px;font-weight:700;color:var(--text-strong)">Start storyboard</div>
+          <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">1 · Pick a track</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <div style="flex:1;min-width:0;height:24px;display:flex;align-items:center;padding:0 8px;background:var(--surface-input);border:1px solid var(--border-control);border-radius:3px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left">F:\Script-Projects\ArtCrafting\_dev-data\assetcraft\preset-tracks</div>
+          <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" hint-size="40px,22px">Set</x-import>
+          <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" hint-size="28px,22px">↻</x-import>
+        </div>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.TextField" value="{{ query }}" on-change="{{ onQuery }}" placeholder="Search tracks" hint-size="100%,26px"></x-import>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          <sc-for list="{{ bands }}" as="b" hint-placeholder-count="5">
+            <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Chip" variant="tone" selected="{{ b.selected }}" on-click="{{ b.onClick }}" hint-size="60px,22px">{{ b.label }} <span style="font-family:var(--font-mono);opacity:.7">{{ b.count }}</span></x-import>
+          </sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Sort</span>
+          <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.SegmentedControl" variant="view" options="{{ sortOpts }}" value="{{ sort }}" on-change="{{ onSort }}" hint-size="160px,22px"></x-import>
+          <div style="flex:1"></div>
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">{{ listCount }}</span>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto;padding:4px 0">
+        <sc-for list="{{ songs }}" as="s" hint-placeholder-count="12">
+          <div onClick="{{ s.onClick }}" style="padding:7px 14px 7px 10px;display:flex;flex-direction:column;gap:5px;cursor:default;background:{{ s.bg }};border-top:1px solid var(--border-row)">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div onClick="{{ s.onPreview }}" title="Preview" style="width:20px;height:20px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:9px;color:{{ s.playInk }};background:{{ s.playBg }};border:1px solid var(--border-control)">{{ s.playGlyph }}</div>
+              <div style="flex:1;min-width:0;font-size:13px;color:{{ s.ink }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.name }}</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">{{ s.durStr }}</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-primary);width:68px;text-align:right">{{ s.bpmStr }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding-left:28px">
+              <div style="width:96px;height:16px;flex:none;display:flex;align-items:flex-end;gap:1px">
+                <sc-for list="{{ s.bars }}" as="b" hint-placeholder-count="28">
+                  <div style="flex:1;height:{{ b.h }}%;background:{{ s.barColor }}"></div>
+                </sc-for>
+              </div>
+              <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary);width:52px">{{ s.band }}</div>
+              <div style="flex:1;min-width:0;font-size:11px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.suggest }}</div>
+            </div>
+            <sc-if value="{{ s.selected }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:4px 0 2px 28px;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;height:18px;gap:1px;border-radius:2px;overflow:hidden">
+                  <sc-for list="{{ selSections }}" as="x" hint-placeholder-count="8">
+                    <div style="flex:{{ x.len }} 0 0;background:{{ x.bg }};display:flex;align-items:center;padding:0 4px;overflow:hidden;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:{{ x.ink }};white-space:nowrap;text-overflow:ellipsis">{{ x.label }}</div>
+                  </sc-for>
+                </div>
+                <div style="font-size:11px;color:var(--text-ai);line-height:1.4">{{ selAi }}</div>
+                <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">Scott Buckley · CC-BY-4.0</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+        <sc-for list="{{ pending }}" as="p" hint-placeholder-count="3">
+          <div style="padding:7px 14px 7px 38px;display:flex;align-items:center;gap:8px;border-top:1px solid var(--border-row)">
+            <div style="flex:1;min-width:0;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.name }}</div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint)">not analysed</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="height:36px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;border-top:1px solid var(--border-section)">
+        <span style="flex:1;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">24 tracks · 3 not analysed</span>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="outline" size="sm" hint-size="80px,22px">Analyse 3</x-import>
+      </div>
+    </div>
+
+    <!-- 2 · PRESET -->
+    <div style="min-width:0;min-height:0;overflow:auto;padding:12px 18px 18px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">2 · Pick a preset</div>
+        <div style="flex:1"></div>
+        <div style="min-width:0;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ songMeta }}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px">
+        <sc-for list="{{ presets }}" as="p" hint-placeholder-count="6">
+          <div onClick="{{ p.onClick }}" style="padding:9px 10px 8px;border-radius:6px;background:{{ p.bg }};border:1px solid {{ p.border }};box-shadow:{{ p.ring }};display:flex;flex-direction:column;gap:3px;cursor:default">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:4px">
+              <span style="font-size:13px;font-weight:600;color:{{ p.ink }}">{{ p.name }}</span>
+              <span style="font-size:11px;color:var(--text-ai)">{{ p.mark }}</span>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.range }}</div>
+            <div style="font-size:10px;color:{{ p.fitInk }}">{{ p.fitLabel }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:12px;color:var(--text-hint)">{{ presetDesc }}</div>
+
+      <div style="background:var(--surface-card);border:1px solid var(--border-panel);border-radius:6px;padding:12px 14px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 24px">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Cut pace</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-primary);white-space:nowrap">{{ paceReadout }}</span>
+          </div>
+          <input type="range" min="0" max="4" step="1" value="{{ pace }}" onChange="{{ onPace }}" style="width:100%;margin:2px 0"></input>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim)"><span>Long holds</span><span>Preset</span><span>Rapid</span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Transitions</span>
+          <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.SegmentedControl" variant="fill" options="{{ transOpts }}" value="{{ trans }}" on-change="{{ onTrans }}" hint-size="100%,26px"></x-import>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Title cards</span>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            <sc-for list="{{ titleOpts }}" as="t" hint-placeholder-count="4">
+              <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Chip" variant="tone" selected="{{ t.selected }}" on-click="{{ t.onClick }}" hint-size="80px,22px">{{ t.label }}</x-import>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Shape</span>
+            <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="ghost" size="sm" on-click="{{ onReset }}" hint-size="100px,20px">Reset to preset</x-import>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;white-space:nowrap">
+            <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Toggle" checked="{{ build }}" on-change="{{ onBuild }}" label="Tighten into drops" hint-size="140px,16px"></x-import>
+            <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Toggle" checked="{{ endCard }}" on-change="{{ onEnd }}" label="End title card" hint-size="120px,16px"></x-import>
+            <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Toggle" checked="{{ overlays }}" on-change="{{ onOverlays }}" label="Text overlays" hint-size="110px,16px"></x-import>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:baseline;gap:10px;margin-top:4px">
+        <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Length</div>
+        <div style="font-size:11px;color:var(--text-tertiary)">{{ lengthsCaption }}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px">
+        <sc-for list="{{ lengths }}" as="l" hint-placeholder-count="5">
+          <div onClick="{{ l.onClick }}" style="padding:10px 12px;border-radius:6px;background:{{ l.bg }};border:1px solid {{ l.border }};box-shadow:{{ l.ring }};display:flex;flex-direction:column;gap:4px;cursor:default">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:15px;font-weight:600;color:var(--text-strong)">{{ l.title }}</span>
+              <span style="color:var(--accent-highlight);font-size:13px">{{ l.check }}</span>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-soft)">{{ l.meta }}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);min-height:26px;line-height:1.3;text-wrap:pretty">{{ l.note }}</div>
+            <div style="display:flex;height:18px;gap:1px;margin-top:2px">
+              <sc-for list="{{ l.strip }}" as="c" hint-placeholder-count="20">
+                <div style="flex:{{ c.f }} 0 0;background:{{ c.bg }};min-width:1px"></div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- 3 · CREATE -->
+    <div style="min-height:0;overflow:auto;background:var(--surface-panel);border-left:1px solid var(--border-panel);padding:12px 16px 16px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">3 · Create</div>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="default" size="sm" hint-size="60px,22px">Cancel</x-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font-size:18px;font-weight:700;color:var(--text-strong)">{{ songName }}</div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">{{ createMeta }}</div>
+      </div>
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Field" label="Name" caps="{{ true }}" hint-size="100%,48px">
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.TextField" value="{{ nameVal }}" on-change="{{ onName }}" hint-size="100%,28px"></x-import>
+      </x-import>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Aspect ratio</span>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px">
+          <sc-for list="{{ aspects }}" as="a" hint-placeholder-count="5">
+            <div onClick="{{ a.onClick }}" style="height:58px;border-radius:4px;background:{{ a.bg }};border:1px solid {{ a.border }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:default">
+              <div style="height:28px;display:flex;align-items:center"><div style="width:{{ a.w }}px;height:{{ a.h }}px;border:1.5px solid {{ a.ink }};border-radius:2px"></div></div>
+              <div style="font-family:var(--font-mono);font-size:10px;color:{{ a.ink }}">{{ a.label }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">{{ aspectHint }}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Resolution</span>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.SegmentedControl" variant="fill" options="{{ resOpts }}" value="{{ res }}" on-change="{{ onRes }}" hint-size="100%,26px"></x-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Frame rate</span>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.SegmentedControl" variant="fill" options="{{ fpsOpts }}" value="{{ fps }}" on-change="{{ onFps }}" hint-size="100%,26px"></x-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Assets</span>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Toggle" checked="{{ autofill }}" on-change="{{ onAutofill }}" label="Auto-fill clips from the open folder" hint-size="100%,16px"></x-import>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);padding-left:34px">501 files · midjourney_session_1</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="primary" size="md" block="{{ true }}" on-click="{{ onCreate }}" hint-size="100%,32px">Create storyboard</x-import>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);text-align:center">{{ createHint }}</div>
+      </div>
+      <div style="border-top:1px solid var(--border-section);padding-top:10px;display:flex;align-items:center;gap:6px">
+        <span style="flex:1;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-section-label)">Or start without a track</span>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="ghost" size="sm" hint-size="56px,22px">Sample</x-import>
+        <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="ghost" size="sm" hint-size="50px,22px">Blank</x-import>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIMELINE -->
+  <div style="flex:none;height:{{ tlHeight }}px;display:flex;flex-direction:column;background:var(--surface-timeline);border-top:1px solid var(--border-timeline)">
+    <div style="height:34px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--border-timeline);background:var(--surface-toolbar)">
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" on-click="{{ onRewind }}" hint-size="28px,22px">⏮</x-import>
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" on-click="{{ onPlay }}" hint-size="32px,22px">{{ playGlyph }}</x-import>
+      <span style="flex:none;font-family:var(--font-mono);font-size:11px;color:var(--text-timeline);width:110px;white-space:nowrap">{{ timecode }}</span>
+      <span style="flex:none;font-size:12px;font-weight:600;color:var(--text-primary);white-space:nowrap">{{ tlTitle }}</span>
+      <span style="flex:1;min-width:0;font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ tlMeta }}</span>
+      <div style="flex:0 1 auto;min-width:0;overflow:hidden;display:flex;gap:8px;align-items:center;margin-right:8px">
+        <sc-for list="{{ legend }}" as="g" hint-placeholder-count="6">
+          <div style="display:flex;align-items:center;gap:4px;font-family:var(--font-mono);font-size:9px;font-weight:700;color:var(--text-secondary)"><div style="width:10px;height:10px;border-radius:2px;background:{{ g.bg }};border:1px {{ g.bs }} var(--shot-ins-border)"></div>{{ g.code }}</div>
+        </sc-for>
+      </div>
+      <div style="width:1px;height:18px;background:var(--border-divider)"></div>
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" on-click="{{ onZoomOut }}" hint-size="26px,22px">−</x-import>
+      <input type="range" min="0" max="100" step="1" value="{{ zoomV }}" onChange="{{ onZoom }}" style="width:140px"></input>
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" on-click="{{ onZoomIn }}" hint-size="26px,22px">+</x-import>
+      <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.Button" variant="control" size="sm" on-click="{{ onFit }}" hint-size="36px,22px">Fit</x-import>
+      <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);width:56px;text-align:right">{{ zoomLabel }}</span>
+    </div>
+    <div style="flex:1;min-height:0;display:flex">
+      <div style="width:64px;flex:none;border-right:1px solid var(--border-timeline);display:flex;flex-direction:column;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim)">
+        <div style="height:28px;border-bottom:1px solid var(--border-timeline)"></div>
+        <div style="height:18px;display:flex;align-items:center;padding-left:8px">Sections</div>
+        <div style="height:56px;display:flex;align-items:center;padding-left:8px">Clips</div>
+        <div style="height:40px;display:flex;align-items:center;padding-left:8px">♪ Track</div>
+      </div>
+      <div ref="{{ tlRef }}" style="flex:1;min-width:0;overflow-x:auto;overflow-y:hidden">
+        <div style="position:relative;width:{{ tlWidth }}px;height:142px">
+          <div onClick="{{ onSeek }}" style="position:absolute;left:0;right:0;top:0;height:28px;border-bottom:1px solid var(--border-timeline);cursor:pointer">
+            <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="10">
+              <div style="position:absolute;left:{{ t.x }}px;top:0;height:14px;border-left:1px solid var(--border-divider);padding-left:4px;font-family:var(--font-mono);font-size:9px;line-height:14px;color:var(--text-dim);white-space:nowrap;pointer-events:none">{{ t.label }}</div>
+            </sc-for>
+            <sc-for list="{{ sceneMarks }}" as="m" hint-placeholder-count="3">
+              <div style="position:absolute;left:{{ m.x }}px;top:14px;height:12px;padding:0 4px;border-radius:2px;background:var(--surface-title-track);color:var(--scene-marker);font-family:var(--font-mono);font-size:9px;line-height:12px;white-space:nowrap;pointer-events:none">§{{ m.n }}</div>
+            </sc-for>
+          </div>
+          <div style="position:absolute;left:0;right:0;top:28px;height:18px">
+            <sc-for list="{{ tlSections }}" as="x" hint-placeholder-count="8">
+              <div style="position:absolute;top:0;height:18px;left:{{ x.x }}px;width:{{ x.w }}px;background:{{ x.bg }};border-left:1px solid var(--border-timeline);padding-left:5px;box-sizing:border-box;overflow:hidden;font-size:9px;letter-spacing:.06em;text-transform:uppercase;line-height:18px;color:{{ x.ink }};white-space:nowrap;text-overflow:ellipsis">{{ x.label }}</div>
+            </sc-for>
+          </div>
+          <div style="position:absolute;left:0;right:0;top:46px;height:56px;background:var(--surface-lane)">
+            <sc-if value="{{ showBeatGrid }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ barLines }}" as="b" hint-placeholder-count="0">
+                <div style="position:absolute;top:0;bottom:0;left:{{ b.x }}px;width:1px;background:{{ b.c }}"></div>
+              </sc-for>
+            </sc-if>
+            <sc-for list="{{ tlClips }}" as="c" hint-placeholder-count="0">
+              <div onClick="{{ c.onClick }}" title="{{ c.tip }}" style="position:absolute;top:6px;height:44px;left:{{ c.x }}px;width:{{ c.w }}px;box-sizing:border-box;background:{{ c.bg }};border:{{ c.border }};outline:{{ c.outline }};outline-offset:1px;border-radius:2px;overflow:hidden;padding:4px 5px;display:flex;flex-direction:column;justify-content:space-between;color:{{ c.ink }};cursor:default;z-index:{{ c.z }}">
+                <span style="font-family:var(--font-mono);font-size:9px;font-weight:700;white-space:nowrap">{{ c.code }}</span>
+                <span style="font-family:var(--font-mono);font-size:9px;opacity:.75;white-space:nowrap">{{ c.sub }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="position:absolute;left:0;right:0;top:102px;height:40px;display:flex;align-items:center;opacity:.75;border-top:1px solid var(--border-timeline)">
+            <sc-if value="{{ showWaveform }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ wave }}" as="w" hint-placeholder-count="0">
+                <div style="flex:1;height:{{ w.h }}%;background:var(--waveform);border-right:1px solid var(--surface-timeline)"></div>
+              </sc-for>
+            </sc-if>
+          </div>
+          <div style="position:absolute;top:0;bottom:0;left:{{ playX }}px;width:1px;background:var(--playhead);pointer-events:none;z-index:5">
+            <div style="position:absolute;top:0;left:-5px;width:11px;height:8px;background:var(--playhead);border-radius:0 0 3px 3px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <x-import component-from-global-scope="AssetCraftDesignSystem_83f3df.StatusBar" items="{{ statusItems }}" hint-size="100%,24px"></x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showWaveform&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Timeline&quot;},&quot;showBeatGrid&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Timeline&quot;},&quot;timelineSize&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Compact&quot;,&quot;Tall&quot;],&quot;default&quot;:&quot;Compact&quot;,&quot;tsType&quot;:&quot;'Compact'|'Tall'&quot;,&quot;section&quot;:&quot;Timeline&quot;}}">
+const P=s=>{const[m,x]=s.split(':');return +m*60+ +x};
+const fmt=t=>{t=Math.max(0,t);const m=Math.floor(t/60),s=Math.floor(t%60);return m+':'+String(s).padStart(2,'0')};
+const fmt1=t=>{t=Math.max(0,t);const m=Math.floor(t/60);const s=t-m*60;return m+':'+(s<10?'0':'')+s.toFixed(1)};
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function rng(seed){let a=hash(seed);return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+const SONG_DATA=[["Amazing Plan","1:27",117.5],["Amberlight","4:42",129.2],["Black Vortex","2:49",107.7],["Blockbuster","1:24",89.1],["blossom","2:49",129.2],["Fall in Love","2:31",123.1],["From The Sky We Feel","2:15",123.1],["Geography","1:59",129.2],["Great","1:46",107.7],["Halloween Moon","2:17",117.5],["I Cant Make You Love Me","2:40",123.1],["Ice Cream","4:13",117.5],["Lovely","2:30",152.0],["Movement Proposition","2:21",123.1],["Phase Shift","6:02",129.2],["Simplicity","3:04",99.4],["Sneaky","2:30",112.4],["Summer Love","2:07",136.0],["The Flow of Time","2:27",99.4],["The Great Sea","4:41",123.1],["Titan","2:14",103.4],["Vanguard","3:54",136.0],["Where We Belong","1:58",117.5],["Whispers in the Wind","3:14",172.3]];
+const PENDING=["geography-by-aylex (1)","reminiscence-by-lucjo","source-damour-by-arthur-marie-brillouin"];
+const BANDS=[{id:'all',label:'All'},{id:'slow',label:'Slow',min:0,max:100},{id:'mid',label:'Mid',min:100,max:118},{id:'up',label:'Upbeat',min:118,max:135},{id:'fast',label:'Fast',min:135,max:999}];
+const PRESETS=[
+ {id:'Trailer',min:115,max:135,beats:[8,4,4,2],titles:'scene',build:true,end:true,trans:'Cut',w:{EST:1,WS:2,MS:3,CU:3,INS:1},desc:'A title per scene, cuts tightening toward each drop, end title card.'},
+ {id:'Energetic',min:132,max:180,beats:[2,2,1,4],titles:'key',build:true,end:false,trans:'Flash',w:{WS:1,MS:3,CU:3,INS:2},desc:'Cuts on every beat or two, flash transitions, titles only at drops.'},
+ {id:'Cinematic',min:95,max:120,beats:[8,8,16,4],titles:'key',build:false,end:true,trans:'Crossfade',w:{EST:3,WS:4,MS:2,CU:1,INS:1},desc:'Long holds weighted to wide shots, crossfades between scenes.'},
+ {id:'Calm',min:60,max:100,beats:[16,8,8],titles:'open',build:false,end:true,trans:'Dip',w:{EST:2,WS:3,MS:2,CU:1,INS:2},desc:'Gentle holds, an opening title only, dip to black between scenes.'},
+ {id:'Family',min:95,max:125,beats:[4,8,4,8],titles:'scene',build:false,end:true,trans:'Crossfade',w:{WS:1,MS:3,CU:4,INS:1},desc:'Even pacing, warm titles on every scene, weighted to close-ups.'},
+ {id:'Hero',min:118,max:145,beats:[4,4,2,8],titles:'scene',build:true,end:true,trans:'Cut',w:{EST:1,WS:2,MS:2,CU:4,INS:1},desc:'Builds to a close-up at every drop, bold titles, hard cuts.'}];
+const SHOT={EST:{bg:'var(--shot-est)',ink:'var(--shot-est-ink)'},WS:{bg:'var(--shot-ws)',ink:'var(--shot-ws-ink)'},MS:{bg:'var(--shot-ms)',ink:'var(--shot-ms-ink)'},CU:{bg:'var(--shot-cu)',ink:'var(--shot-cu-ink)'},INS:{bg:'var(--surface-lane)',ink:'var(--shot-ins-ink)'},TTL:{bg:'var(--shot-ttl)',ink:'var(--shot-ttl-ink)'}};
+const PACE=[2,1.4,1,0.7,0.5];
+const ASPECTS=[{id:'16:9',r:16/9,px:[1920,1080],o:'Landscape'},{id:'9:16',r:9/16,px:[1080,1920],o:'Vertical'},{id:'1:1',r:1,px:[1080,1080],o:'Square'},{id:'4:5',r:4/5,px:[1080,1350],o:'Portrait'},{id:'2.39:1',r:2.39,px:[1920,804],o:'Scope'}];
+const RES={'720p':2/3,'1080p':1,'4K':2};
+
+function sectionsFor(name,dur,bpm){
+ const r=rng(name+'sec'),bar=240/bpm;
+ const plan=dur<100?[['Intro',.15,.25],['Build',.25,.6],['Drop',.4,1],['Outro',.2,.3]]:[['Intro',.08,.25],['Verse',.14,.45],['Build',.1,.65],['Drop',.16,1],['Break',.1,.35],['Build',.1,.7],['Drop',.2,1],['Outro',.12,.3]];
+ const w=plan.map(p=>p[1]*(0.8+r()*0.4)),sum=w.reduce((a,b)=>a+b);
+ let t=0;return plan.map((p,i)=>{const s=t;const e=i===plan.length-1?dur:Math.round((t+w[i]/sum*dur)/bar)*bar;t=e;return{name:p[0],start:s,end:e,energy:p[2]}});
+}
+function energyAt(secs,t){const s=secs.find(x=>t>=x.start&&t<x.end)||secs[secs.length-1];const p=(t-s.start)/((s.end-s.start)||1);let e=s.energy;
+ if(s.name==='Build')e*=0.6+0.5*p;else if(s.name==='Intro')e*=0.6+0.6*p;else if(s.name==='Outro')e*=1-0.6*p;return Math.min(1,e)}
+const SONGS=SONG_DATA.map(([name,d,bpm])=>{const dur=P(d);const sections=sectionsFor(name,dur,bpm);const r=rng(name+'bars');
+ const band=BANDS.find(b=>b.id!=='all'&&bpm>=b.min&&bpm<b.max);
+ const sug=PRESETS.filter(p=>bpm>=p.min&&bpm<=p.max).map(p=>p.id);
+ return{name,dur,bpm,sections,band,sug,bars:Array.from({length:28},(_,i)=>({h:Math.round(15+80*energyAt(sections,(i+.5)/28*dur)*(0.8+r()*0.3))}))}});
+
+function cutInfo(song,len){
+ if(len>=song.dur-1)return{len:song.dur,note:'Full track, no edits',map:t=>t};
+ if(len<=60)return{len,note:`Cut to ${fmt(len)} with a fade out`,map:t=>t};
+ const head=Math.round(len*0.82*10)/10,ts=song.dur-(len-head);
+ return{len,head,ts,note:`Edited to ${fmt(len)}: 0:00–${fmt1(head)} and ${fmt1(ts)}–end, crossfaded`,map:t=>t<head?t:ts+(t-head)};
+}
+function cutSections(song,ci){
+ if(!ci.ts)return song.sections.filter(s=>s.start<ci.len).map(s=>({...s,end:Math.min(s.end,ci.len)}));
+ const a=song.sections.filter(s=>s.start<ci.head).map(s=>({...s,end:Math.min(s.end,ci.head)}));
+ const b=song.sections.filter(s=>s.end>ci.ts).map(s=>({...s,start:Math.max(s.start,ci.ts)-ci.ts+ci.head,end:s.end-ci.ts+ci.head}));
+ return a.concat(b);
+}
+function gen(song,preset,ci,o){
+ const r=rng([song.name,preset.id,ci.len,o.pace,o.titles,o.build,o.endCard].join('|'));
+ const beat=60/song.bpm,f=PACE[o.pace];
+ const secs=cutSections(song,ci);const scenes=[];
+ secs.forEach(s=>{if(scenes.length&&(s.end-s.start)<8)scenes[scenes.length-1].end=s.end;else scenes.push({...s})});
+ const endT=o.endCard?ci.len-4*beat:ci.len;
+ const types=Object.keys(preset.w),wSum=types.reduce((a,k)=>a+preset.w[k],0);
+ const pick=()=>{let x=r()*wSum;for(const k of types){x-=preset.w[k];if(x<=0)return k}return'MS'};
+ const clips=[];let titles=0,nScenes=0;
+ scenes.forEach((sc,si)=>{
+  const s0=sc.start,s1=Math.min(sc.end,endT);if(s1-s0<beat)return;nScenes++;
+  let t=s0;
+  const want=o.titles==='scene'||(o.titles==='key'&&(nScenes===1||sc.name==='Drop'))||(o.titles==='open'&&nScenes===1);
+  if(want){const d=Math.min(4*beat,s1-t);clips.push({type:'TTL',start:t,dur:d,scene:nScenes,title:true});titles++;t+=d}
+  let k=0;
+  while(t<s1-1e-3){
+   let b=preset.beats[Math.floor(r()*preset.beats.length)]*f;const p=(t-s0)/(s1-s0);
+   if(o.build){if(sc.name==='Build')b*=1-0.7*p;if(sc.name==='Drop')b*=0.75}
+   b=Math.max(1,Math.round(b));let d=b*beat;if(t+d>s1-beat*0.5)d=s1-t;
+   clips.push({type:k===0&&sc.name!=='Drop'?(r()<.6?'EST':'WS'):pick(),start:t,dur:d,scene:nScenes});t+=d;k++;
+  }
+ });
+ if(o.endCard){clips.push({type:'TTL',start:endT,dur:ci.len-endT,scene:nScenes,end:true});titles++}
+ clips.forEach((c,i)=>{c.i=i+1;c.beats=Math.round(c.dur/beat)});
+ const shots=clips.filter(c=>c.type!=='TTL');
+ return{clips,scenes:nScenes,titles,secs,avg:shots.reduce((a,c)=>a+c.dur,0)/(shots.length||1),avgBeats:shots.reduce((a,c)=>a+c.dur,0)/(shots.length||1)/beat};
+}
+const pad2=n=>String(n).padStart(2,'0');
+
+class Component extends DCLogic {
+  state={song:'Amberlight',preset:'Trailer',lenId:'60',pace:2,titles:'scene',build:true,endCard:true,overlays:true,trans:'Cut',
+    query:'',band:'all',sort:'Name',preview:null,nameVal:null,aspect:'16:9',res:'1080p',fps:'24',autofill:true,
+    zoomV:0,cw:1000,playT:0,playing:false,selClip:null,created:false};
+  tlRef=React.createRef();cache=new Map();
+  componentDidMount(){
+    const el=this.tlRef.current;if(!el)return;
+    this.ro=new ResizeObserver(()=>this.setState({cw:el.clientWidth}));this.ro.observe(el);
+    this.onWheel=e=>{if(!(e.ctrlKey||e.metaKey))return;e.preventDefault();
+      const rect=el.getBoundingClientRect(),ox=e.clientX-rect.left,pps=this.pps(),t=(el.scrollLeft+ox)/pps;
+      const v=Math.max(0,Math.min(100,this.state.zoomV+(e.deltaY<0?6:-6)));
+      this.setState({zoomV:v},()=>{el.scrollLeft=t*this.pps()-ox})};
+    el.addEventListener('wheel',this.onWheel,{passive:false});
+  }
+  componentWillUnmount(){this.ro&&this.ro.disconnect();clearInterval(this.timer);const el=this.tlRef.current;el&&el.removeEventListener('wheel',this.onWheel)}
+  get song(){return SONGS.find(s=>s.name===this.state.song)}
+  get presetObj(){return PRESETS.find(p=>p.id===this.state.preset)}
+  lenOptions(song){const o=[30,60,90,120].filter(s=>s<song.dur-5).map(s=>({id:String(s),sec:s,title:fmt(s)}));o.push({id:'full',sec:song.dur,title:'Full · '+fmt(song.dur)});return o}
+  build(song,preset,sec){const s=this.state;const o={pace:s.pace,titles:s.titles,build:s.build,endCard:s.endCard};
+    const key=[song.name,preset.id,sec,o.pace,o.titles,o.build,o.endCard].join('|');
+    if(!this.cache.has(key)){const ci=cutInfo(song,sec);this.cache.set(key,{ci,...gen(song,preset,ci,o)})}return this.cache.get(key)}
+  current(){const song=this.song;const opts=this.lenOptions(song);const l=opts.find(x=>x.id===this.state.lenId)||opts[opts.length-1];return{song,l,data:this.build(song,this.presetObj,l.sec)}}
+  fitPps(){const {data}=this.current();return Math.max(0.5,(this.state.cw-2)/data.ci.len)}
+  pps(){const fit=this.fitPps(),max=Math.max(fit*1.01,140);return fit*Math.pow(max/fit,this.state.zoomV/100)}
+  stop(){clearInterval(this.timer);this.timer=null}
+  togglePlay=()=>{if(this.state.playing){this.stop();this.setState({playing:false});return}
+    const len=this.current().data.ci.len;if(this.state.playT>=len-0.05)this.setState({playT:0});
+    this.setState({playing:true});let last=performance.now();
+    this.timer=setInterval(()=>{const now=performance.now(),dt=(now-last)/1000;last=now;
+      const L=this.current().data.ci.len;let t=this.state.playT+dt;
+      if(t>=L){t=L;this.stop();this.setState({playing:false,playT:t});return}
+      this.setState({playT:t});const el=this.tlRef.current;if(el){const x=t*this.pps();if(x>el.scrollLeft+el.clientWidth-40||x<el.scrollLeft)el.scrollLeft=x-40}},40)};
+  resetTimeline(extra){this.stop();this.setState({playT:0,playing:false,selClip:null,...extra});const el=this.tlRef.current;if(el)el.scrollLeft=0}
+  applyPreset(id){const p=PRESETS.find(x=>x.id===id);this.resetTimeline({preset:id,pace:2,titles:p.titles,build:p.build,endCard:p.end,trans:p.trans})}
+
+  renderVals(){
+    const s=this.state,{song,l,data}=this.current(),preset=this.presetObj,props=this.props;
+    const showWaveform=props.showWaveform??true,showBeatGrid=props.showBeatGrid??true,tlHeight=({Compact:208,Tall:260})[props.timelineSize]??208;
+    // track list
+    const q=s.query.trim().toLowerCase();
+    let list=SONGS.filter(x=>(!q||x.name.toLowerCase().includes(q))&&(s.band==='all'||x.band.id===s.band));
+    list=[...list].sort(s.sort==='BPM'?(a,b)=>a.bpm-b.bpm:s.sort==='Length'?(a,b)=>a.dur-b.dur:(a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
+    const songs=list.map(x=>{const sel=x.name===s.song,pv=s.preview===x.name;return{
+      name:x.name,durStr:fmt(x.dur),bpmStr:x.bpm.toFixed(1)+' BPM',band:x.band.label,bars:x.bars,selected:sel,
+      suggest:x.sug.length?'Suits '+x.sug.slice(0,2).join(', '):'',
+      bg:sel?'var(--surface-selected)':'transparent',ink:sel?'var(--text-on-selected-strong)':'var(--text-body)',
+      barColor:sel?'var(--accent-highlight)':pv?'var(--blue-wave)':'var(--gray-600)',
+      playGlyph:pv?'❚❚':'▶',playBg:pv?'var(--accent)':'var(--surface-control)',playInk:pv?'#fff':'var(--text-muted)',
+      onClick:()=>{if(x.name===s.song)return;const opts=this.lenOptions(x);this.resetTimeline({song:x.name,nameVal:null,zoomV:0,lenId:opts.find(o=>o.id===s.lenId)?s.lenId:(opts.find(o=>o.id==='60')?'60':'full')})},
+      onPreview:e=>{e.stopPropagation();this.setState({preview:pv?null:x.name})}}});
+    const bands=BANDS.map(b=>({label:b.id==='all'?'All':b.label+(b.max<999?' <'+b.max:' '+b.min+'+'),count:b.id==='all'?SONGS.length:SONGS.filter(x=>x.band.id===b.id).length,selected:s.band===b.id,onClick:()=>this.setState({band:b.id})}));
+    const secColor=n=>n==='Drop'?'rgba(229,36,59,.22)':n==='Build'?'rgba(77,163,255,.16)':'rgba(255,255,255,.05)';
+    const secInk=n=>n==='Drop'?'var(--scene-on)':n==='Build'?'var(--text-on-selected)':'var(--text-tertiary)';
+    const selSections=song.sections.map(x=>({len:x.end-x.start,label:(x.end-x.start)/song.dur>0.1?x.name:'',bg:secColor(x.name),ink:secInk(x.name)}));
+    const drops=song.sections.filter(x=>x.name==='Drop').map(x=>fmt(x.start));
+    const selAi=`AI: ${song.bpm.toFixed(1)} BPM, ${song.band.label.toLowerCase()} tempo${drops.length?', drop'+(drops.length>1?'s':'')+' at '+drops.join(' and '):''}. `+(song.sug.length?'Suggested: '+song.sug.join(', ')+'.':'No preset matches this tempo; Calm or Energetic with pace adjusted.');
+    // presets
+    const presets=PRESETS.map(p=>{const sel=p.id===s.preset,fit=song.bpm>=p.min&&song.bpm<=p.max;return{name:p.id,range:p.min+'–'+p.max+' BPM',
+      mark:fit?'◆':'',fitLabel:fit?'Matches tempo':'Off tempo',fitInk:fit?'var(--text-ai)':'var(--text-faint)',
+      bg:sel?'var(--surface-selected)':'var(--surface-card)',border:sel?'var(--accent-highlight)':'var(--border-panel)',ring:sel?'var(--ring-target)':'none',ink:sel?'#fff':'var(--text-primary)',
+      onClick:()=>this.applyPreset(p.id)}});
+    const titleOpts=[['scene','Every scene'],['key','Key moments'],['open','Opening only'],['none','None']].map(([id,label])=>({label,selected:s.titles===id,onClick:()=>this.resetTimeline({titles:id})}));
+    // lengths
+    const lengths=this.lenOptions(song).map(o=>{const d=this.build(song,preset,o.sec),sel=o.id===l.id;return{title:o.title,check:sel?'✓':'',
+      meta:`${d.clips.length} clips · ${d.scenes} scenes · ${d.titles} titles`,note:d.ci.note,
+      strip:d.clips.map(c=>({f:c.dur.toFixed(2),bg:c.type==='INS'?'var(--shot-border)':SHOT[c.type].bg})),
+      bg:sel?'var(--surface-selected-deep)':'var(--surface-card)',border:sel?'var(--accent-highlight)':'var(--border-panel)',ring:sel?'var(--ring-target)':'none',
+      onClick:()=>this.resetTimeline({lenId:o.id,zoomV:0})}});
+    // timeline
+    const len=data.ci.len,pps=this.pps(),W=Math.max(s.cw-2,Math.round(len*pps));
+    const step=[0.5,1,2,5,10,15,30,60].find(st=>st*pps>=56)||60;const ticks=[];
+    for(let t=0;t<len;t+=step)ticks.push({x:Math.round(t*pps),label:step<1?fmt1(t):fmt(t)});
+    const bar=240/song.bpm,barStep=bar*pps>=8?1:bar*pps>=2?4:16,barLines=[];
+    for(let i=0,t=0;t<len;i+=barStep,t=i*bar)barLines.push({x:Math.round(t*pps),c:i%(barStep*4)===0?'rgba(255,255,255,.09)':'rgba(255,255,255,.04)'});
+    const tlClips=data.clips.map(c=>{const w=Math.max(1,c.dur*pps-1),sel=s.selClip===c.i,sh=SHOT[c.type];
+      return{x:(c.start*pps).toFixed(1),w:w.toFixed(1),bg:sh.bg,ink:sh.ink,border:c.type==='INS'?'1px dashed var(--shot-ins-border)':'none',
+        outline:sel?'2px solid var(--selection-ring)':'none',z:sel?3:1,
+        code:w>26?(c.type==='TTL'?(c.end?'END':'TTL'):c.type):'',sub:w>64?`#${pad2(c.i)} · ${c.dur.toFixed(1)}s`:w>34?'#'+pad2(c.i):'',
+        tip:`#${pad2(c.i)} · ${c.type} · ${c.dur.toFixed(1)}s · ${c.beats}b · §${c.scene}`,
+        onClick:()=>this.setState({selClip:c.i,playT:c.start})}});
+    const sceneMarks=[];let lastScene=0;data.clips.forEach(c=>{if(c.scene!==lastScene){lastScene=c.scene;sceneMarks.push({n:c.scene,x:Math.round(c.start*pps)+2})}});
+    const tlSections=data.secs.map(x=>({x:(x.start*pps).toFixed(1),w:Math.max(1,(x.end-x.start)*pps).toFixed(1),label:(x.end-x.start)*pps>56?x.name:'',bg:secColor(x.name),ink:secInk(x.name)}));
+    const r=rng(song.name+'wave'),N=Math.min(600,Math.max(120,Math.round(W/4)));
+    const wave=Array.from({length:N},(_,i)=>({h:Math.round(10+85*energyAt(song.sections,data.ci.map((i+.5)/N*len))*(0.55+r()*0.45))}));
+    const sel=data.clips.find(c=>c.i===s.selClip);
+    const name=s.nameVal??`${song.name} · ${preset.id}`;
+    const asp=ASPECTS.find(a=>a.id===s.aspect),k=RES[s.res],pxW=Math.round(asp.px[0]*k/2)*2,pxH=Math.round(asp.px[1]*k/2)*2;
+    const aspects=ASPECTS.map(a=>{const on=a.id===s.aspect;const m=a.r>=1?[26,26/a.r]:[26*a.r,26];return{label:a.id,w:m[0].toFixed(1),h:m[1].toFixed(1),
+      bg:on?'var(--surface-selected)':'var(--surface-control)',border:on?'var(--accent-highlight)':'var(--border-control)',ink:on?'#fff':'var(--text-muted)',onClick:()=>this.setState({aspect:a.id})}});
+    const shots=data.clips.filter(c=>c.type!=='TTL').length;
+    return{
+      menuItems:['File','Edit','View','Go','Window','Help'],modeOpts:['Organizer','Storyboard'],
+      query:s.query,onQuery:v=>this.setState({query:v}),bands,sortOpts:['Name','BPM','Length'],sort:s.sort,onSort:v=>this.setState({sort:v}),
+      listCount:songs.length+' shown',songs,pending:PENDING.map(n=>({name:n})),selSections,selAi,
+      songMeta:`${song.name} · ${song.bpm.toFixed(1)} BPM · ${song.band.label}`,presets,presetDesc:preset.desc,
+      pace:s.pace,onPace:e=>this.resetTimeline({pace:+e.target.value}),paceReadout:`avg ${data.avg.toFixed(1)}s · ${data.avgBeats.toFixed(1)} beats`,
+      transOpts:['Cut','Crossfade','Dip','Flash'],trans:s.trans,onTrans:v=>this.setState({trans:v}),titleOpts,
+      build:s.build,onBuild:v=>this.resetTimeline({build:v}),endCard:s.endCard,onEnd:v=>this.resetTimeline({endCard:v}),overlays:s.overlays,onOverlays:v=>this.setState({overlays:v}),
+      onReset:()=>this.applyPreset(s.preset),
+      lengthsCaption:`${song.name} · ${preset.id} at each length the track allows`,lengths,
+      songName:song.name,createMeta:`${preset.id} · ${fmt(len)} · ${data.clips.length} clips · ${data.scenes} scenes`,
+      nameVal:name,onName:v=>this.setState({nameVal:v}),aspects,aspectHint:`${pxW} × ${pxH} · ${asp.o}`,
+      resOpts:['720p','1080p','4K'],res:s.res,onRes:v=>this.setState({res:v}),fpsOpts:['24','25','30','60'],fps:s.fps,onFps:v=>this.setState({fps:v}),
+      autofill:s.autofill,onAutofill:v=>this.setState({autofill:v}),
+      createHint:s.created?'Created · opening Shot map':(s.autofill?`${shots} clips filled from 501 files · ${data.titles} title cards`:`${shots} empty clips · ${data.titles} title cards`),
+      onCreate:()=>this.setState({created:true}),
+      tlHeight,showWaveform,showBeatGrid,tlRef:this.tlRef,tlWidth:W,ticks,barLines,tlClips,sceneMarks,tlSections,wave,
+      playX:(s.playT*pps).toFixed(1),playGlyph:s.playing?'❚❚':'▶',onPlay:this.togglePlay,onRewind:()=>{this.setState({playT:0});const el=this.tlRef.current;if(el)el.scrollLeft=0},
+      timecode:`${fmt1(s.playT)} / ${fmt1(len)}`,tlTitle:`${song.name} · ${preset.id} · ${l.title}`,tlMeta:`${data.clips.length} clips · ${data.scenes} scenes · ${s.trans} · Beat grid ${song.bpm.toFixed(1)} BPM`,
+      legend:['EST','WS','MS','CU','INS','TTL'].map(c=>({code:c,bg:SHOT[c].bg,bs:c==='INS'?'dashed':'none'})),
+      zoomV:s.zoomV,onZoom:e=>this.setState({zoomV:+e.target.value}),onZoomIn:()=>this.setState({zoomV:Math.min(100,s.zoomV+12)}),onZoomOut:()=>this.setState({zoomV:Math.max(0,s.zoomV-12)}),onFit:()=>this.setState({zoomV:0}),
+      zoomLabel:s.zoomV===0?'Fit':pps.toFixed(0)+' px/s',
+      onSeek:e=>{const rect=e.currentTarget.getBoundingClientRect();this.setState({playT:Math.max(0,Math.min(len,(e.clientX-rect.left)/pps))})},
+      statusItems:[`${data.clips.length} clips`,`${data.scenes} scenes · ${data.titles} titles`,sel?`#${pad2(sel.i)} · ${sel.type} · ${sel.dur.toFixed(1)}s · ${sel.beats}b · §${sel.scene}`:'No clip selected',s.created?'Storyboard created':'No storyboard'],
+    };
+  }
+}
+</script>
+</body>
+</html>

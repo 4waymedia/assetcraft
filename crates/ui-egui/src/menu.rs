@@ -31,6 +31,13 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.select",
     "storyboard.recut",
     "storyboard.text.kind",
+    // The Start screen (design 3b / 3c) drives these.
+    "storyboard.musicFolder",
+    "storyboard.tracks",
+    "storyboard.preview",
+    "track.preview",
+    "track.previewVolume",
+    "track.peaks",
     "storyboard.text.style",
     "storyboard.undo",
     "storyboard.redo",

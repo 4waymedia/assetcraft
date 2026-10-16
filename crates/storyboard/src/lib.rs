@@ -11,6 +11,8 @@
 //! - [`cuemap`]: a track's musical timing (beats, bars, sections, hits, Fit to length) as data.
 //! - [`generate`]: a storyboard from a cue map and a pacing profile.
 //! - [`text`]: text clips, a Card or an Overlay, with theme, animation and position.
+//! - [`shape`]: a preset's shape on top of a pacing profile (titles, tighten, end card, transition,
+//!   overlays, shot mix).
 //! - [`fill`]: Quick fill, placing assets into empty clips in order.
 //! - [`sample`]: the handoff's 24-clip sample board (placeholder content).
 //! - [`validate`]: loading a storyboard document from bytes as hostile input, with [`Limits`].
@@ -24,19 +26,21 @@ pub mod generate;
 pub mod model;
 pub mod recut;
 pub mod sample;
+pub mod shape;
 pub mod text;
 pub mod time;
 pub mod validate;
 
 pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
 pub use fill::{FillError, auto_fill, clear, next_empty, place};
-pub use generate::{GenerateError, GenerateOptions, GenerateReport, Pacing, generate};
+pub use generate::{DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, generate};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
     Transition,
 };
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
+pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
 pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,
     set_text_style,

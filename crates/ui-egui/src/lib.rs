@@ -17,6 +17,9 @@ mod menu;
 mod model_preview;
 mod pathbar;
 pub mod prefs_file;
+mod start_timeline;
+mod start_tracks;
+mod start_view;
 mod storyboard_view;
 mod strip_view;
 mod text_view;
@@ -320,8 +323,10 @@ impl Navigator {
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
         let focused = ctx.memory(|m| m.focused());
-        if focused == Some(pathbar::edit_id()) {
-            return; // typing a path
+        // Typing in any text field (the path bar, the Start screen's music folder and name, …):
+        // the keys are the field's, and it keeps its focus.
+        if focused == Some(pathbar::edit_id()) || ctx.text_edit_focused() {
+            return;
         }
         // Our shortcuts own the keyboard: a button keeping focus after a click must not also
         // react to Space / Enter.

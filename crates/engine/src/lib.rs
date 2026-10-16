@@ -10,6 +10,7 @@ mod commands;
 pub mod effect;
 pub mod generate_cmd;
 pub mod launch;
+mod library_cmd;
 pub mod open_in;
 pub mod paths;
 pub mod prefs;
@@ -19,6 +20,7 @@ pub mod storyboard;
 mod text_cmd;
 mod track_cmd;
 mod watching;
+mod waveform;
 
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_thumbs::DiskCache;
@@ -170,6 +172,12 @@ pub struct Session {
     boards: storyboard::Boards,
     /// Track audio for Watch your Cut: player, decode, program (`audio_out`).
     audio: audio_out::TrackAudio,
+    /// Waveform overviews for the Start screen's timeline (`track.peaks`).
+    waveforms: waveform::Waveforms,
+    /// Where Storyboard mode's Start screen looks for music (`storyboard.musicFolder`).
+    music_folder: Option<PathBuf>,
+    /// Track preview volume, 0–1 (`track.previewVolume`).
+    preview_volume: f32,
 }
 
 impl Session {
@@ -205,6 +213,9 @@ impl Session {
             formats: prefs.formats,
             boards: storyboard::Boards::default(),
             audio: audio_out::TrackAudio::default(),
+            waveforms: waveform::Waveforms::default(),
+            music_folder: prefs.music_folder.clone(),
+            preview_volume: prefs.preview_volume.map_or(audio_out::DEFAULT_PREVIEW_VOLUME, |p| f32::from(p) / 100.0),
         };
         session.rescan_places();
         let start = prefs
@@ -463,6 +474,8 @@ impl Session {
             view: self.view.clone(),
             panels: self.panels.clone(),
             formats: self.formats,
+            music_folder: self.music_folder.clone().filter(|p| p.to_str().is_some()),
+            preview_volume: Some((self.preview_volume * 100.0).round().clamp(0.0, 100.0) as u8),
         }
     }
 
@@ -592,6 +605,8 @@ fn same_location(a: &Location, b: &Location) -> bool {
 mod audio_tests;
 #[cfg(test)]
 mod generate_tests;
+#[cfg(test)]
+mod library_tests;
 #[cfg(test)]
 mod open_in_tests;
 #[cfg(test)]

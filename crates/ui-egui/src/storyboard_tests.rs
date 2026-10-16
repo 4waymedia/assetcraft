@@ -58,6 +58,7 @@ fn clicking_a_tile_selects_it_and_ctrl_z_undoes_a_placement() {
     let ctx = Context::default();
     let mut nav = nav();
     nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "map" }));
     frame(&ctx, &mut nav, Vec::new(), 0.0);
     // Tile 1 sits at the top-left of the Shot map: click the middle of where it is drawn.
     let first = Pos2::new(60.0, 92.0);
@@ -296,6 +297,7 @@ fn clicking_a_title_cards_kind_chip_switches_it_and_back() {
     let ctx = Context::default();
     let mut nav = nav();
     nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "map" }));
     let mut t = 0.0;
     frame(&ctx, &mut nav, Vec::new(), t);
     let kind = |nav: &Navigator| nav.session().storyboard().and_then(|b| b.clip(ClipId(1))).and_then(|c| c.text_kind());
@@ -313,4 +315,133 @@ fn clicking_a_title_cards_kind_chip_switches_it_and_back() {
     t += 0.1;
     click(&ctx, &mut nav, chip, &mut t);
     assert_eq!(kind(&nav), Some(TextKind::Card), "and back");
+}
+
+#[test]
+fn the_start_screen_creates_from_a_song_and_opens_the_strip_view() {
+    use assetcraft_engine::BoardView;
+    // A music folder with one analysed song (64 s at 120 BPM, a 30 s fade fit).
+    let dir = std::env::temp_dir().join(format!("ac-start-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let rate = 8_000u64;
+    let cue = json!({
+        "version": 1, "analyzer": "test",
+        "track": { "file": "song.mp3", "title": "Song", "artist": "Me", "license": "CC0-1.0", "credit": "" },
+        "sampleRate": rate, "durationFrames": 64 * rate, "bpm": 120.0, "beatsPerBar": 4, "pulseClarity": 0.9,
+        "beats": (0..128).map(|i| i * rate / 2).collect::<Vec<u64>>(),
+        "downbeats": (0..32).map(|i| i * 2 * rate).collect::<Vec<u64>>(),
+        "sections": [{ "start": 0, "end": 64 * rate, "label": "Song", "energy": 0.5 }],
+        "hits": [],
+        "fits": { "30": { "chosen": "fade", "fade": {
+            "mode": "fade", "lengthFrames": 30 * rate, "segments": [[0, 30 * rate]], "crossfadeFrames": 0,
+            "fadeOut": { "start": 26 * rate, "frames": 4 * rate }, "reasons": [], "changes": "Cut to 0:30 with a fade out"
+        }, "edit": null } }
+    });
+    let cue_path = dir.join("song.cuemap.json");
+    assert!(std::fs::write(&cue_path, cue.to_string()).is_ok());
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    // No board: the Start screen draws and lists the song.
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    let tracks = nav.run("storyboard.tracks", json!({})).unwrap_or_default();
+    assert_eq!(tracks["tracks"][0]["title"], "Song");
+    // Song + Trailer at 0:30 → Create.
+    nav.state.storyboard.start.choose(
+        &cue_path.to_string_lossy(),
+        assetcraft_storyboard::Pacing::Trailer,
+        Some(30),
+        3,
+        assetcraft_storyboard::Shape {
+            titles: Some(assetcraft_storyboard::Titles::OpeningOnly),
+            transition: Some(assetcraft_storyboard::SceneTransition::Dip),
+            ..Default::default()
+        },
+    );
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned();
+    assert!(board.is_some(), "created");
+    assert_eq!(nav.session().board_view(), BoardView::Strip, "opens in the Strip view");
+    let st = nav.run("storyboard.state", json!({})).unwrap_or_default();
+    let density = st["generatedFrom"]["density"].as_f64().unwrap_or(0.0);
+    assert!((density - 1.43).abs() < 0.01, "the cut pace step reaches the generator: {density}");
+    assert_eq!(st["generatedFrom"]["shape"], json!({ "titles": "opening", "transition": "dip" }), "and the shape");
+    assert!(!nav.state.storyboard.start.open);
+    frame(&ctx, &mut nav, Vec::new(), 0.2);
+    // + New reopens the Start screen over the board; the board stays.
+    nav.state.storyboard.start.open = true;
+    frame(&ctx, &mut nav, Vec::new(), 0.3);
+    assert!(nav.session().storyboard().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn text_fields_keep_focus_and_take_typing_in_storyboard_mode() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let field = crate::start_view::folder_field_id();
+    ctx.memory_mut(|m| m.request_focus(field));
+    for events in [Vec::new(), vec![Event::Text("F:\\Music X".into())], Vec::new()] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    assert!(
+        nav.state.storyboard.start.folder_text().ends_with("F:\\Music X"),
+        "{:?}",
+        nav.state.storyboard.start.folder_text()
+    );
+    assert_eq!(ctx.memory(|m| m.focused()), Some(field), "the field keeps focus");
+    // Space types a space here instead of playing.
+    let space = Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    frame(&ctx, &mut nav, vec![space, Event::Text(" ".into())], t + 0.05);
+    assert!(nav.state.storyboard.start.folder_text().ends_with("Music X "));
+}
+
+#[test]
+fn a_click_on_a_section_previews_from_its_start() {
+    use crate::start_tracks::section_at;
+    let sections = vec![
+        json!({ "label": "Intro", "start": 0.0, "end": 16.0 }),
+        json!({ "label": "Chorus", "start": 16.0, "end": 48.0 }),
+        json!({ "label": "Outro", "start": 48.0, "end": 64.0 }),
+    ];
+    let strip = egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(640.0, 16.0));
+    // 10 px per second.
+    assert_eq!(section_at(&sections, 64.0, strip, 105.0), Some(("Intro".into(), 0.0)));
+    assert_eq!(
+        section_at(&sections, 64.0, strip, 100.0 + 300.0),
+        Some(("Chorus".into(), 16.0)),
+        "mid-chorus → its start"
+    );
+    assert_eq!(section_at(&sections, 64.0, strip, 100.0 + 480.0), Some(("Outro".into(), 48.0)));
+    assert_eq!(section_at(&sections, 64.0, strip, 90.0), None, "left of the strip");
+    assert_eq!(section_at(&sections, 0.0, strip, 105.0), None);
+}
+
+#[test]
+fn the_timeline_puts_a_cut_version_over_the_music_it_plays_with() {
+    use crate::start_timeline::{to_track, track_ranges};
+    // A 1:00 cut of a 1:27 track: 0–49.3 then 76.5–87.2 (the ending).
+    let segs = [(0.0, 49.3), (76.5, 87.2)];
+    assert!((to_track(&segs, 10.0) - 10.0).abs() < 1e-9);
+    assert!((to_track(&segs, 50.0) - 77.2).abs() < 1e-9, "after the splice: the ending");
+    assert!((to_track(&segs, 500.0) - 87.2).abs() < 1e-9, "past the end");
+    // A clip across the splice is drawn in two pieces.
+    let parts = track_ranges(&segs, 48.0, 52.0);
+    assert_eq!(parts.len(), 2);
+    assert!((parts[0].0 - 48.0).abs() < 1e-9 && (parts[0].1 - 49.3).abs() < 1e-9);
+    assert!((parts[1].0 - 76.5).abs() < 1e-9 && (parts[1].1 - 79.2).abs() < 1e-9);
+    // The whole track: one segment, no mapping.
+    assert_eq!(track_ranges(&[(0.0, 87.2)], 3.0, 5.0), vec![(3.0, 5.0)]);
 }

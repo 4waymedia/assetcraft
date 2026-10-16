@@ -78,6 +78,9 @@ here with repository, path and revision.
 
 Other crates.io dependencies are listed in Cargo.lock; `cargo xtask deny` checks their licences
 against deny.toml. One is called out here because it stands in for platform code:
+- rfd 0.17 (PolyMeilex/rfd, MIT): the native folder picker behind Storyboard's Browse… (Windows
+  system dialog, Linux XDG desktop portal), UI layer only; SoundCraft uses the same crate. Used as a
+  dependency; no code copied.
 - known-folders 1.4 (artichoke/known-folders-rs, MIT OR Apache-2.0, Windows only): the Windows
   Known Folder API (SHGetKnownFolderPath) for Desktop/Documents/Downloads/Pictures/Videos in
   crates/fs/src/real.rs. Used as a dependency; no code copied.

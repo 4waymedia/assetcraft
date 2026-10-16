@@ -208,7 +208,26 @@ fn screenshot() {
         .map(|e| e.path.to_string_lossy().into_owned())
         .take(6)
         .collect();
+    // The Start screen (no board yet). `AC_MUSIC=/abs/folder` sets the music folder first.
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    if let Some(music) = std::env::var_os("AC_MUSIC") {
+        nav.run("storyboard.musicFolder", json!({ "path": music.to_string_lossy() }));
+    }
+    let mut start = None;
+    // A few frames, then until the timeline's waveform has decoded (≤ 10 s).
+    for i in 0..200 {
+        t += 0.05;
+        start = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        if i >= 3 && (std::env::var_os("AC_MUSIC").is_none() || nav.state.storyboard.start.waveform.is_some()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if let Some(start) = start {
+        save(&out.with_file_name(format!("{stem}-start.png")), start);
+    }
     assert!(nav.run("storyboard.new", json!({ "sample": true })).is_some());
+    nav.run("storyboard.view", json!({ "view": "map" }));
     for f in &files {
         nav.run("storyboard.place", json!({ "asset": f }));
     }
@@ -335,5 +354,22 @@ fn screenshot() {
                 }
             }
         }
+    }
+
+    // Optional: the Start screen over a music folder (`AC_MUSIC=/abs/folder`).
+    if let Some(music) = std::env::var_os("AC_MUSIC") {
+        nav.run("app.mode", json!({ "mode": "storyboard" }));
+        nav.run("storyboard.musicFolder", json!({ "path": music.to_string_lossy() }));
+        nav.state.storyboard.start.open = true;
+        nav.state.storyboard.start.library_refresh();
+        let mut shot = None;
+        for _ in 0..6 {
+            t += 0.05;
+            shot = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+        }
+        if let Some(shot) = shot {
+            save(&out.with_file_name(format!("{stem}-start.png")), shot);
+        }
+        nav.state.storyboard.start.open = false;
     }
 }

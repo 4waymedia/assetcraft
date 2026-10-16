@@ -19,6 +19,8 @@ fn main() {
         pacing,
         seconds,
         fit_mode: None,
+        density: args.get(4).and_then(|d| d.parse().ok()).unwrap_or(1.0),
+        shape: Default::default(),
     };
     match generate(&cue, &opts) {
         Ok((board, r)) => {

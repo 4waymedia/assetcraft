@@ -24,7 +24,8 @@ use crate::cuemap::{CueMap, FitMode, Timeline};
 use crate::model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Storyboard, Track, TrackEdit, Transition,
 };
-use crate::text::{TextAnimation, TextPosition, TextStyle, TextTheme};
+use crate::shape::{ResolvedShape, SceneTransition, Shape, Titles, pick_shot};
+use crate::text::{TextAnimation, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind};
 use crate::time::{Bpm, Ticks};
 use crate::validate::Limits;
 
@@ -39,11 +40,16 @@ pub enum Pacing {
     Energetic,
     /// Staged escalation, title cards on section changes, impact on drops.
     Trailer,
+    /// Even 1–2 bar pacing, a warm title on every scene, crossfades, weighted to close-ups.
+    Family,
+    /// Builds to a close-up at every drop, bold titles, hard cuts.
+    Hero,
 }
 
 impl Pacing {
     /// Every profile, in menu order.
-    pub const ALL: [Pacing; 4] = [Pacing::Calm, Pacing::Cinematic, Pacing::Energetic, Pacing::Trailer];
+    pub const ALL: [Pacing; 6] =
+        [Pacing::Trailer, Pacing::Energetic, Pacing::Cinematic, Pacing::Calm, Pacing::Family, Pacing::Hero];
 
     /// Name used in commands.
     pub fn id(self) -> &'static str {
@@ -52,6 +58,8 @@ impl Pacing {
             Pacing::Cinematic => "cinematic",
             Pacing::Energetic => "energetic",
             Pacing::Trailer => "trailer",
+            Pacing::Family => "family",
+            Pacing::Hero => "hero",
         }
     }
 
@@ -62,12 +70,58 @@ impl Pacing {
             Pacing::Cinematic => "Cinematic",
             Pacing::Energetic => "Energetic",
             Pacing::Trailer => "Trailer",
+            Pacing::Family => "Family",
+            Pacing::Hero => "Hero",
         }
     }
 
     /// Parse a command id.
     pub fn from_id(id: &str) -> Option<Pacing> {
         Pacing::ALL.into_iter().find(|p| p.id() == id)
+    }
+
+    /// What the style does, in one line (Start screen).
+    pub fn description(self) -> &'static str {
+        match self {
+            Pacing::Trailer => "A title per scene, cuts tightening toward each drop, end title card.",
+            Pacing::Energetic => "Cuts on every beat or two, flash transitions, titles only at key moments.",
+            Pacing::Cinematic => "Long holds weighted to wide shots, crossfades between scenes.",
+            Pacing::Calm => "Gentle holds, an opening title only, dip to black between scenes.",
+            Pacing::Family => "Even pacing, warm titles on every scene, weighted to close-ups.",
+            Pacing::Hero => "Builds to a close-up at every drop, bold titles, hard cuts.",
+        }
+    }
+
+    /// The style's own shape (Start screen v2 mock-up, 2026-10-16).
+    pub fn shape(self) -> ResolvedShape {
+        use SceneTransition::{Crossfade, Cut, Dip, Flash};
+        let (titles, tighten, end_card, transition) = match self {
+            Pacing::Trailer => (Titles::EveryScene, true, true, Cut),
+            Pacing::Energetic => (Titles::KeyMoments, true, false, Flash),
+            Pacing::Cinematic => (Titles::KeyMoments, false, true, Crossfade),
+            Pacing::Calm => (Titles::OpeningOnly, false, true, Dip),
+            Pacing::Family => (Titles::EveryScene, false, true, Crossfade),
+            Pacing::Hero => (Titles::EveryScene, true, true, Cut),
+        };
+        ResolvedShape { titles, tighten, end_card, transition, overlays: false }
+    }
+
+    /// Tempos the profile suits, in BPM (Start screen v2: a ◆ when the track's tempo is inside).
+    pub fn bpm_range(self) -> (f64, f64) {
+        match self {
+            Pacing::Calm => (60.0, 100.0),
+            Pacing::Cinematic => (95.0, 120.0),
+            Pacing::Energetic => (132.0, 180.0),
+            Pacing::Trailer => (115.0, 135.0),
+            Pacing::Family => (95.0, 125.0),
+            Pacing::Hero => (118.0, 145.0),
+        }
+    }
+
+    /// Whether the profile suits a track at `bpm`.
+    pub fn suits(self, bpm: f64) -> bool {
+        let (lo, hi) = self.bpm_range();
+        bpm >= lo && bpm <= hi
     }
 
     /// The look of the profile's title cards: Calm and Cinematic fade in quietly, Energetic
@@ -78,6 +132,8 @@ impl Pacing {
             Pacing::Cinematic => (TextTheme::Cinematic, TextAnimation::Fade),
             Pacing::Energetic => (TextTheme::Bold, TextAnimation::Zoom),
             Pacing::Trailer => (TextTheme::Bold, TextAnimation::Rise),
+            Pacing::Family => (TextTheme::Paper, TextAnimation::Fade),
+            Pacing::Hero => (TextTheme::Bold, TextAnimation::Zoom),
         };
         TextStyle { theme, animation, position: TextPosition::LowerThirdLeft }
     }
@@ -89,11 +145,8 @@ impl Pacing {
                 short_bars: 4.0,
                 min_beats: 8,
                 min_secs: 3.0,
-                title_every_scene: false,
-                end_card: false,
                 title_bars: 2,
                 max_scene_bars: 32,
-                escalate: false,
                 cut_on_hits: false,
             },
             Pacing::Cinematic => Params {
@@ -101,11 +154,8 @@ impl Pacing {
                 short_bars: 2.0,
                 min_beats: 4,
                 min_secs: 1.5,
-                title_every_scene: false,
-                end_card: true,
                 title_bars: 2,
                 max_scene_bars: 32,
-                escalate: false,
                 cut_on_hits: true,
             },
             Pacing::Energetic => Params {
@@ -113,11 +163,8 @@ impl Pacing {
                 short_bars: 0.5,
                 min_beats: 2,
                 min_secs: 0.6,
-                title_every_scene: false,
-                end_card: true,
                 title_bars: 1,
                 max_scene_bars: 16,
-                escalate: false,
                 cut_on_hits: true,
             },
             Pacing::Trailer => Params {
@@ -125,11 +172,26 @@ impl Pacing {
                 short_bars: 0.5,
                 min_beats: 2,
                 min_secs: 0.9,
-                title_every_scene: true,
-                end_card: true,
                 title_bars: 1,
                 max_scene_bars: 16,
-                escalate: true,
+                cut_on_hits: true,
+            },
+            Pacing::Family => Params {
+                long_bars: 2.0,
+                short_bars: 1.0,
+                min_beats: 4,
+                min_secs: 1.5,
+                title_bars: 2,
+                max_scene_bars: 32,
+                cut_on_hits: false,
+            },
+            Pacing::Hero => Params {
+                long_bars: 2.0,
+                short_bars: 0.5,
+                min_beats: 2,
+                min_secs: 0.9,
+                title_bars: 1,
+                max_scene_bars: 16,
                 cut_on_hits: true,
             },
         }
@@ -143,11 +205,8 @@ struct Params {
     min_beats: u32,
     /// Shortest shot in seconds, whatever the tempo (fast songs would otherwise flicker).
     min_secs: f32,
-    title_every_scene: bool,
-    end_card: bool,
     title_bars: u32,
     max_scene_bars: usize,
-    escalate: bool,
     cut_on_hits: bool,
 }
 
@@ -164,6 +223,27 @@ pub struct GenerateOptions {
     pub seconds: Option<u32>,
     /// Force fade or edit; `None` = the cue map's choice.
     pub fit_mode: Option<FitMode>,
+    /// Tone: how many shots, `0.5..=2.0` ([`DENSITY_RANGE`]); 1 is the profile as designed,
+    /// 2 doubles the cuts (shots half as long), 0.5 halves them. Scales the shot lengths and the
+    /// shortest shot together; title cards keep their length.
+    pub density: f32,
+    /// Overrides of the style's shape (titles, tighten, end card, transition, overlays).
+    pub shape: Shape,
+}
+
+/// Allowed [`GenerateOptions::density`].
+pub const DENSITY_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
+
+impl Params {
+    /// The profile at `density` (clamped to [`DENSITY_RANGE`]; non-finite = 1).
+    fn at_density(mut self, density: f32) -> Params {
+        let d = if density.is_finite() { density.clamp(*DENSITY_RANGE.start(), *DENSITY_RANGE.end()) } else { 1.0 };
+        self.long_bars /= d;
+        self.short_bars /= d;
+        self.min_beats = ((self.min_beats as f32 / d).round() as u32).max(1);
+        self.min_secs = (self.min_secs / d).max(0.4);
+        self
+    }
 }
 
 /// What a generation did.
@@ -251,7 +331,8 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         _ => None,
     };
     let tl = cue.timeline(fit);
-    let p = opts.pacing.params();
+    let p = opts.pacing.params().at_density(opts.density);
+    let shape = opts.shape.resolve(opts.pacing);
     let bpb = u64::from(cue.beats_per_bar.max(1));
     let beat_frames = ((60.0 / cue.bpm) * sr as f64).round().max(1.0) as u64;
     let bar_frames = beat_frames * bpb;
@@ -264,14 +345,23 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
     let scenes = scene_spans(&tl, &bars, bar_frames, p.max_scene_bars);
 
     // 3–6. Clips.
-    let end_card_len = if p.end_card && tl.length > 20 * sr { 2 * bar_frames } else { 0 };
+    let end_card_len = if shape.end_card && tl.length > 20 * sr { 2 * bar_frames } else { 0 };
     let end_card_start = snap_down(&bars, tl.length.saturating_sub(end_card_len));
     let min_len = (u64::from(p.min_beats) * beat_frames).max((f64::from(p.min_secs) * sr as f64) as u64);
     let mut spans: Vec<(usize, Span)> = Vec::new();
     for (si, sc) in scenes.iter().enumerate() {
         let scene_end = if end_card_len > 0 && sc.end > end_card_start { end_card_start.max(sc.start) } else { sc.end };
         let mut cursor = sc.start;
-        let title = si == 0 || p.title_every_scene;
+        let has_drop = tl.hits.iter().any(|h| h.kind == "drop" && h.frame >= sc.start && h.frame < sc.end);
+        // A drop on the scene's first bar: the scene's first shot (after any title) lands on it.
+        let opens_on_drop =
+            tl.hits.iter().any(|h| h.kind == "drop" && h.frame >= sc.start && h.frame < sc.start + bar_frames);
+        let title = match shape.titles {
+            Titles::EveryScene => true,
+            Titles::KeyMoments => si == 0 || has_drop || sc.label == "Chorus",
+            Titles::OpeningOnly => si == 0,
+            Titles::None => false,
+        };
         if title && scene_end > cursor {
             let want = cursor + u64::from(p.title_bars) * bar_frames;
             let mut t_end = snap_near(&bars, want, cursor + min_len.min(bar_frames), scene_end);
@@ -293,7 +383,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             cursor = t_end;
         }
         let position = sc.start as f32 / tl.length.max(1) as f32;
-        let energy = if p.escalate { sc.energy.max(position * 0.9) } else { sc.energy };
+        let energy = if shape.tighten { sc.energy.max(position * 0.9) } else { sc.energy };
         let shot_bars = p.long_bars - (p.long_bars - p.short_bars) * energy.clamp(0.0, 1.0);
         // Shots under one bar step on beats, but never below the profile's shortest shot.
         let (step, points) = if shot_bars >= 1.0 {
@@ -319,8 +409,9 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             if scene_end.saturating_sub(end) < min_len {
                 end = scene_end;
             }
-            let len = end - cursor;
-            let shot = shot_type(si, k, sc.energy, len < bar_frames);
+            let after_drop =
+                spans.last().and_then(|(_, s)| s.on_hit.as_deref()) == Some("drop") || (k == 0 && opens_on_drop);
+            let shot = pick_shot(opts.pacing, si, k, sc.energy, after_drop);
             let first_bar = bar_index(&bars, cursor) + 1;
             let last_bar = bar_index(&bars, end.saturating_sub(1)) + 1;
             let mut reasons = Vec::new();
@@ -374,6 +465,8 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         ..GenerateReport::default()
     };
     let n = spans.len();
+    let (scene_out, scene_in) = shape.transition.transitions();
+    let mut prev_scene = None;
     for (i, (si, s)) in spans.into_iter().enumerate() {
         let start_t = cue.ticks(s.start);
         let end_t = cue.ticks(s.end);
@@ -401,7 +494,32 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         if i + 1 == n && tl.fade_out.is_some() {
             clip.transition_out = Transition::FadeOut;
         }
+        // The style's transition where one scene hands over to the next (a smash cut on a drop stays).
+        if i > 0 && prev_scene != Some(si) {
+            if clip.transition_in == Transition::Cut {
+                clip.transition_in = scene_in;
+            }
+            if let Some(last) = board.clips.last_mut()
+                && last.transition_out == Transition::Cut
+            {
+                last.transition_out = scene_out;
+            }
+        }
+        prev_scene = Some(si);
         board.clips.push(clip);
+    }
+    // Text overlays: scene titles after the opening become text over a shot (the end card stays a card).
+    if shape.overlays {
+        let scene_titles: Vec<ClipId> = board
+            .clips
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| *i > 0 && c.shot_type == ShotType::Ttl && !c.description.starts_with("End card"))
+            .map(|(_, c)| c.id)
+            .collect();
+        for id in scene_titles {
+            let _ = set_text_kind(&mut board, id, TextKind::Overlay);
+        }
     }
     report.clips = board.clips.len();
     report.length = cue.ticks(tl.length);
@@ -517,18 +635,4 @@ fn scene_spans(tl: &Timeline, bars: &[u64], bar_frames: u64, max_bars: usize) ->
         out.push(SceneSpan { start, end: s.end, label: s.label.clone(), energy: s.energy });
     }
     out
-}
-
-/// Shot type for the `k`-th shot of scene `si`.
-fn shot_type(si: usize, k: usize, energy: f32, short: bool) -> ShotType {
-    use ShotType::{Cu, Est, Ins, Ms, Ws};
-    if short {
-        return if k.is_multiple_of(2) { Ins } else { Cu };
-    }
-    if k == 0 {
-        return if si == 0 || energy < 0.35 { Est } else { Ws };
-    }
-    let low = [Ms, Cu, Ws, Ins];
-    let high = [Cu, Ms, Ins, Cu, Ws];
-    if energy < 0.5 { low[(k - 1) % low.len()] } else { high[(k - 1) % high.len()] }
 }

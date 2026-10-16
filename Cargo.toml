@@ -39,6 +39,10 @@ siphasher = "1"
 known-folders = "1.4"
 # Folder watching (CC0-1.0). Default features keep FSEvents on macOS.
 notify = "8.2"
+# Native file / folder dialogs (MIT; PolyMeilex/rfd), the UI layer only (Browse… for the music folder).
+# SoundCraft's version (storytold/soundcraft Cargo.toml) without the `wayland` feature, so Linux needs no
+# libwayland headers; Windows uses the system dialog, Linux the XDG desktop portal.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
 # UI (L6 and apps only; see xtask/src/layers.rs). craft-ui pinned to the rev FilmCraft/PhotoCraft use.
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
 egui = { version = "0.36", default-features = false, features = ["default_fonts"] }

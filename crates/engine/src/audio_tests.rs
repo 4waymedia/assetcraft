@@ -150,3 +150,51 @@ fn without_a_player_the_session_never_decodes() {
     assert_eq!(s.audio_status(), "none");
     assert_eq!(run(&mut s, "storyboard.play", json!({}))["audio"], "none");
 }
+
+#[test]
+fn preview_plays_the_whole_track_and_the_cut_takes_over() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    let r = run(&mut s, "track.preview", json!({ "path": music("track.wav"), "from": 4.0 }));
+    if r["preview"] == "loading" {
+        // Decode on its thread, then the window's next frame starts it.
+        for _ in 0..2000 {
+            s.poll_audio(Ticks::ZERO);
+            if player.log().len() == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    assert_eq!(player.log(), ["play 64.0s from 4.0"], "the whole file, not a fit");
+    let quiet = crate::audio_out::volume_gain(crate::audio_out::DEFAULT_PREVIEW_VOLUME);
+    assert_eq!(player.gain(), Some(quiet), "previews start quiet");
+    run(&mut s, "track.previewVolume", json!({ "volume": 0.5 }));
+    assert_eq!(player.gain(), Some(0.25), "changes at once while playing");
+    assert_eq!(s.prefs().preview_volume, Some(50), "saved, in percent");
+    assert!(matches!(s.execute("track.previewVolume", &json!({ "volume": 2 })), Err(CmdError::BadParams(_))));
+    assert_eq!(s.preview_state().map(|(_, loading)| loading), Some(false));
+    assert_eq!(s.preview_position(), Some(4.0), "seconds into the track (the section strip's playhead)");
+    // Jump to another section: a new `from` replaces the playing preview.
+    run(&mut s, "track.preview", json!({ "path": music("track.wav"), "from": 32.0 }));
+    assert_eq!(player.log().last().map(String::as_str), Some("play 64.0s from 32.0"), "decoded once, starts at once");
+    assert_eq!(s.preview_position(), Some(32.0));
+    // Stop with null.
+    run(&mut s, "track.preview", json!({ "path": null }));
+    assert_eq!(player.log().last().map(String::as_str), Some("stop"));
+    assert!(s.preview_state().is_none());
+    assert_eq!(s.preview_position(), None);
+    // Preview again, then the Cut plays: the preview stops first.
+    run(&mut s, "track.preview", json!({ "path": music("track.wav") }));
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
+    s.poll_audio(Ticks::ZERO);
+    assert!(s.wait_track_audio(Duration::from_secs(10)));
+    run(&mut s, "storyboard.play", json!({}));
+    assert!(s.preview_state().is_none());
+    assert_eq!(player.log().last().map(String::as_str), Some("play 10.0s from 0.0"), "the fixture's 30 fit is 10 s");
+    assert_eq!(player.gain(), Some(1.0), "the Cut plays at full level");
+    // Bad params.
+    for bad in [json!({}), json!({ "path": "rel.wav" }), json!({ "path": music("track.wav"), "from": -1 })] {
+        assert!(matches!(s.execute("track.preview", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+}

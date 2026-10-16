@@ -157,7 +157,10 @@ mod tests {
                 "app.state",
                 "item.probe",
                 "storyboard.cueMaps",
+                "storyboard.preview",
                 "storyboard.state",
+                "storyboard.tracks",
+                "track.peaks",
                 "track.summary"
             ])
         );

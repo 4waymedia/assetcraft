@@ -182,6 +182,8 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     s.boards.generated = None;
     s.boards.board = Some(board);
     s.boards.mode = Mode::Storyboard;
+    // A new storyboard opens in the Strip view: Viewer, Content panel and timeline (Paul, 2026-10-16).
+    s.boards.view = crate::storyboard::BoardView::Strip;
     s.boards.transport = Transport::default();
     s.audio_stop();
     Ok(state(s))

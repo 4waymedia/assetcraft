@@ -60,6 +60,8 @@ pub(crate) struct SbUi {
     pub(crate) play_started: Option<f64>,
     /// Re-cut toast and when it was first drawn.
     pub(crate) toast: Option<(String, Option<f64>)>,
+    /// The Start storyboard screen (design 3b / 3c).
+    pub(crate) start: crate::start_view::StartUi,
 }
 
 /// Where the playhead is now. While the track plays it is the audio clock (so pictures follow
@@ -344,15 +346,19 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     }
     let selected = nav.session.selected_clip().and_then(|id| board.clip(id)).cloned();
     match &selected {
-        None => {
-            ui.painter().text(
-                frame.center(),
-                Align2::CENTER_CENTER,
-                "Select a clip",
-                FontId::proportional(14.0),
-                Color32::GRAY,
-            );
-        }
+        // Nothing selected: the frame under the playhead (the first clip of a new board).
+        None => match board.clip_at(at.min(board.total())).or_else(|| board.clips.first()).cloned() {
+            Some(clip) => show_clip(nav, ui, frame, &clip, index, f64::INFINITY),
+            None => {
+                ui.painter().text(
+                    frame.center(),
+                    Align2::CENTER_CENTER,
+                    "Select a clip",
+                    FontId::proportional(14.0),
+                    Color32::GRAY,
+                );
+            }
+        },
         Some(clip) => show_clip(nav, ui, frame, clip, index, f64::INFINITY),
     }
     // Dropping on the Viewer places into the selected clip.

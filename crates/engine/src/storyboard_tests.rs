@@ -113,6 +113,10 @@ fn view_switches_between_map_and_strip() {
     assert_eq!(run(&mut s, "storyboard.state", json!({}))["view"], "strip");
     assert!(matches!(s.execute("storyboard.view", &json!({"view": "tracks"})), Err(CmdError::BadParams(_))));
     assert_eq!(s.board_view(), BoardView::Strip);
+    // A new storyboard opens in the Strip view.
+    run(&mut s, "storyboard.view", json!({"view": "map"}));
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    assert_eq!(s.board_view(), BoardView::Strip);
 }
 
 #[test]

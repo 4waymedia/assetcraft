@@ -61,10 +61,16 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
             return;
         }
         ui.add_space(12.0);
-        let Some(board) = nav.session.storyboard() else {
-            ui.weak("No storyboard open");
+        let starting = nav.session.storyboard().is_none() || nav.state.storyboard.start.open;
+        let new = egui::Button::new("+ New").selected(starting);
+        if ui.add(new).on_hover_text("Start a storyboard: style, preset, music").clicked() && !starting {
+            nav.state.storyboard.start.open = true;
+            nav.state.storyboard.start.library_refresh();
+        }
+        if starting {
             return;
-        };
+        }
+        let Some(board) = nav.session.storyboard() else { return };
         let name = board.name.clone();
         let format = match (&board.format, &board.preset) {
             (Some(f), Some(p)) => format!("{f} › {p}"),
@@ -76,10 +82,19 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
         let tname = track_name(board);
         ui.label(RichText::new(name).strong());
         ui.weak(format);
+        // View switcher, as a segmented control like Organizer | Storyboard.
         ui.spacing_mut().item_spacing.x = 0.0;
         let view = nav.session.board_view();
-        for (v, label) in [(BoardView::Map, "Shot map"), (BoardView::Strip, "Strip"), (BoardView::Fill, "Quick fill")] {
-            if ui.selectable_label(view == v, label).clicked() && view != v {
+        let views = [
+            (BoardView::Strip, "Strip", "Viewer, assets and the timeline"),
+            (BoardView::Map, "Shot map", "Every clip as a tile"),
+            (BoardView::Fill, "Quick fill", "Click assets into empty clips in order"),
+        ];
+        for (v, label, tip) in views {
+            let on = view == v;
+            let text = if on { RichText::new(label).color(Color32::WHITE) } else { RichText::new(label) };
+            let fill = if on { ACCENT } else { ui.visuals().widgets.inactive.bg_fill };
+            if ui.add(egui::Button::new(text).fill(fill)).on_hover_text(tip).clicked() && !on {
                 nav.run("storyboard.view", json!({ "view": v.as_str() }));
             }
         }
@@ -118,8 +133,8 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
 
 /// Storyboard mode's main area: Inspector on the right, Shot map in the middle.
 pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
-    if nav.session.storyboard().is_none() {
-        empty_state(nav, ui);
+    if nav.session.storyboard().is_none() || nav.state.storyboard.start.open {
+        crate::start_view::show(nav, ui);
         return;
     }
     if nav.session.board_view() != BoardView::Map {
@@ -131,42 +146,6 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     });
     egui::CentralPanel::default().show(ui, |ui| shot_map(nav, ui));
     crate::strip_view::toast(nav, ui.ctx(), 0.0);
-}
-
-fn empty_state(nav: &mut Navigator, ui: &mut Ui) {
-    let maps = nav.session.cue_maps();
-    ui.vertical_centered(|ui| {
-        ui.add_space(ui.available_height() * 0.2);
-        ui.heading("No storyboard yet");
-        ui.weak("Start empty, open the 24-clip sample, or build one from a track's cue map.");
-        ui.add_space(12.0);
-        if ui.button("New storyboard").clicked() {
-            nav.run("storyboard.new", json!({}));
-        }
-        if ui.button("New from sample").clicked() {
-            nav.run("storyboard.new", json!({ "sample": true }));
-        }
-        ui.add_space(16.0);
-        if maps.is_empty() {
-            ui.weak("Open a folder with .cuemap.json files in the Organizer to build from a track.");
-            return;
-        }
-        ui.label(
-            RichText::new("FROM A TRACK (Trailer pacing; change it after)")
-                .size(10.0)
-                .color(ui.visuals().weak_text_color()),
-        );
-        for path in &maps {
-            ui.horizontal(|ui| {
-                ui.label(assetcraft_engine::cue_map_label(path));
-                for (secs, label) in LENGTH_CHOICES {
-                    if ui.small_button(label).clicked() {
-                        nav.run("storyboard.generate", json!({ "cueMap": path.to_string_lossy(), "seconds": secs }));
-                    }
-                }
-            });
-        }
-    });
 }
 
 /// Lengths offered when generating from a track: seconds (`None` = whole track) and label.
@@ -188,7 +167,10 @@ fn regenerate_controls(nav: &mut Navigator, ui: &mut Ui) {
         .show_ui(ui, |ui| {
             for p in assetcraft_storyboard::Pacing::ALL {
                 if ui.selectable_label(p == g.pacing, p.name()).clicked() && p != g.pacing {
-                    run = Some(json!({ "cueMap": cue, "pacing": p.id(), "seconds": g.seconds }));
+                    // A new style brings its own shape (as picking a preset does on the Start screen).
+                    run = Some(json!({
+                        "cueMap": cue, "pacing": p.id(), "seconds": g.seconds, "density": g.density, "shape": {}
+                    }));
                 }
             }
         });
@@ -198,7 +180,8 @@ fn regenerate_controls(nav: &mut Navigator, ui: &mut Ui) {
         .show_ui(ui, |ui| {
             for secs in &g.lengths {
                 if ui.selectable_label(*secs == g.seconds, length_label(*secs)).clicked() && *secs != g.seconds {
-                    run = Some(json!({ "cueMap": cue, "pacing": g.pacing.id(), "seconds": secs }));
+                    run =
+                        Some(json!({ "cueMap": cue, "pacing": g.pacing.id(), "seconds": secs, "density": g.density }));
                 }
             }
         });

@@ -20,7 +20,7 @@
 
 use assetcraft_audio::{Player, Program};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -51,6 +51,17 @@ struct Shared {
     gone: AtomicBool,
     /// Output latency the device last reported (callback → speaker), in microseconds.
     latency_us: AtomicU64,
+    /// Output gain as `f32` bits (`Player::set_volume`); `0` bits = never set = full level.
+    gain_bits: AtomicU32,
+}
+
+impl Shared {
+    fn gain(&self) -> f32 {
+        match self.gain_bits.load(Ordering::Relaxed) {
+            0 => 1.0,
+            bits => f32::from_bits(bits),
+        }
+    }
 }
 
 /// The device thread: dropping `_keep` ends it, which drops the stream.
@@ -135,6 +146,13 @@ impl Player for DevicePlayer {
         *voice = None;
     }
 
+    fn set_volume(&self, gain: f32) {
+        let g = if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 1.0 };
+        // Store silence as the smallest positive value so `0` keeps meaning "never set".
+        let g = if g <= 0.0 { f32::MIN_POSITIVE } else { g };
+        self.shared.gain_bits.store(g.to_bits(), Ordering::Relaxed);
+    }
+
     fn position(&self) -> Option<f64> {
         let voice = self.shared.voice.lock().unwrap_or_else(PoisonError::into_inner);
         let from = voice.as_ref()?.from;
@@ -209,8 +227,9 @@ where
                     }
                     None => buf.iter_mut().for_each(|s| *s = 0.0),
                 }
+                let gain = state.gain();
                 for (o, s) in out.iter_mut().zip(buf.iter()) {
-                    *o = T::from_sample(s.clamp(-1.0, 1.0));
+                    *o = T::from_sample((s * gain).clamp(-1.0, 1.0));
                 }
             }
         },
@@ -233,5 +252,12 @@ mod tests {
         assert_eq!(p.position(), None);
         p.stop();
         assert_eq!(p.device(), None, "nothing opens until play");
+        assert_eq!(p.shared.gain(), 1.0, "full level until set");
+        p.set_volume(0.25);
+        assert_eq!(p.shared.gain(), 0.25);
+        p.set_volume(0.0);
+        assert!(p.shared.gain() < 1e-30, "silent");
+        p.set_volume(f32::NAN);
+        assert_eq!(p.shared.gain(), 1.0);
     }
 }

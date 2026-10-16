@@ -67,3 +67,36 @@ fn refuses_bad_paths_and_bad_audio() {
         );
     }
 }
+
+#[test]
+fn peaks_load_in_the_background_and_keep_the_shape_of_the_track() {
+    let fs = FakeFs::new()
+        .file_with(music("a.wav"), wav(22_050, 44_100))
+        .file_with(music("junk.mp3"), b"not audio".to_vec());
+    let mut s = session(fs);
+    let ask = |s: &mut Session, path: &str, buckets: u64| {
+        for _ in 0..2000 {
+            let r = s.execute("track.peaks", &json!({ "path": path, "buckets": buckets })).unwrap();
+            if r["status"] != "loading" {
+                return r;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        json!(null)
+    };
+    let r = ask(&mut s, &music("a.wav"), 64);
+    assert_eq!(r["status"], "ready", "{r}");
+    assert_eq!(r["seconds"], 2.0);
+    let peaks = r["peaks"].as_array().cloned().unwrap_or_default();
+    assert_eq!(peaks.len(), 64);
+    // A quarter-scale square wave: every bucket spans -0.25..0.25.
+    assert!(peaks.iter().all(|p| p[0] == -0.25 && p[1] == 0.25), "{:?}", &peaks[..4]);
+    // Kept: a second ask is ready at once, at another resolution.
+    let r = s.execute("track.peaks", &json!({ "path": music("a.wav") })).unwrap();
+    assert_eq!((r["status"].as_str(), r["peaks"].as_array().map(Vec::len)), (Some("ready"), Some(1024)));
+    // Bad audio fails without an error; bad params are refused.
+    assert_eq!(ask(&mut s, &music("junk.mp3"), 64)["status"], "failed");
+    for bad in [json!({}), json!({ "path": "rel.wav" }), json!({ "path": music("a.wav"), "buckets": 8 })] {
+        assert!(matches!(s.execute("track.peaks", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+}

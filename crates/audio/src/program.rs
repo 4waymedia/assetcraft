@@ -181,6 +181,9 @@ pub trait Player: Send + Sync {
     /// Seconds into the program being heard now, while playing; `None` when idle. This is the
     /// audio clock the playhead follows.
     fn position(&self) -> Option<f64>;
+    /// Output gain, 0 (silent) to 1 (as recorded); applies at once, also while playing. Players
+    /// without a level control ignore it.
+    fn set_volume(&self, _gain: f32) {}
 }
 
 /// No output: the Cut plays silent on the window's clock (headless sessions, the CLI).
@@ -203,9 +206,15 @@ impl Player for SilentPlayer {
 pub struct RecordingPlayer {
     log: Mutex<Vec<String>>,
     at: Mutex<Option<f64>>,
+    gain: Mutex<Option<f32>>,
 }
 
 impl RecordingPlayer {
+    /// The last gain set (`None` until `set_volume` is called).
+    pub fn gain(&self) -> Option<f32> {
+        self.gain.lock().ok().and_then(|g| *g)
+    }
+
     /// What was asked so far: `play <seconds> from <from>` and `stop`.
     pub fn log(&self) -> Vec<String> {
         self.log.lock().map(|l| l.clone()).unwrap_or_default()
@@ -232,5 +241,10 @@ impl Player for RecordingPlayer {
     }
     fn position(&self) -> Option<f64> {
         self.at.lock().ok().and_then(|a| *a)
+    }
+    fn set_volume(&self, gain: f32) {
+        if let Ok(mut g) = self.gain.lock() {
+            *g = Some(gain);
+        }
     }
 }

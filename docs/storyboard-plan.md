@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1 and music playback done, step 3 first slice done; A2 or step 6 next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback and S1 (Start storyboard) done, step 3 first slice done; A2 or step 6 next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -41,6 +41,7 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | 4    | Strip view (2b): Content panel, Viewer, full-width timeline at 44 px/s, drag asset → clip                    | done; Effects / Titles tabs are placeholders, Scenes and Tracks toggles wait for steps 6 and 8 |
 | 5    | Quick fill (4a): NEXT card, click-to-place, REPLACING target, progress bar, Undo / Auto-fill rest / Clear; Re-cut on track change with toast; Watch your Cut (animatic) | done; the animatic plays the track's music (2026-10-15, [track-analysis.md §9c](track-analysis.md)) |
 | TC1  | Text clips: Card \| Overlay per clip, themes, intro animations, overlay positions; click the kind chip to switch ([Text clips](#text-clips-tc1)) | done   |
+| S1   | Start storyboard (3b) with the preset picker (3c), song first: 1 · pick a song (music folder + open folder, `storyboard.tracks`, `storyboard.musicFolder`), 2 · pick a preset (style × the lengths the song fits, with a real clip strip from `storyboard.preview`), 3 · Create (+ auto-fill); shown with no board and from the mode bar's + New; new boards open in the Strip view | done (2026-10-16) |
 | 6    | Scenes view (2a), Clip editor modal (1d), Manual start (3e)                                                  | —      |
 | 7    | Save / open a storyboard document (needs decision D3)                                                        | —      |
 | 8    | Tracks view (2c): text, shots and music tracks; waveform and beat grid (audio decode: opportunity O2)        | —      |
@@ -78,6 +79,57 @@ _2026-10-15 · Paul: "Text clip types: separate clip, overlay … each text clip
   the Viewer plays the intro during Watch your Cut. Generated boards style their cards by pacing:
   Calm Minimal + Fade, Cinematic Cinematic + Fade, Energetic Bold + Zoom, Trailer Bold + Rise.
 
+## Start storyboard (S1)
+
+_2026-10-16 · Paul: "we don't have any templates that are selectable … we don't give the list of music to select from … the only way to start the storyboard is from File → New Storyboard"; "the first initial action should be for the user to select a preset template, or a song … the song/music is what creates the edits and clips"; "the storyboard should init [the Strip] view by default"._
+
+| Column (width)      | Holds                                                                                       | Command                     |
+|---------------------|---------------------------------------------------------------------------------------------|-----------------------------|
+| 1 · Song (340 px)   | Analysed songs (title · length · BPM; artist and licence on hover), then not-analysed files greyed; music folder field, *Use the Organizer's folder*, ↻ | `storyboard.tracks`, `storyboard.musicFolder` |
+| 2 · Preset (centre) | Style chips (Trailer, Energetic, Cinematic, Calm) and one card per length the song fits: clips · scenes · titles · length, the audio edit, and a clip strip coloured by shot type | `storyboard.preview`        |
+| 3 · Create (300 px) | Song · style · length, Name, *Auto-fill shots from the open folder*, **Create storyboard**; *or start without a song*: Sample, Blank | `storyboard.generate` (+ `storyboard.autofill`), `storyboard.new` |
+
+- Shown whenever Storyboard mode has no board, and over an open board from the mode bar's **+ New**
+  (Cancel returns).
+- New and generated boards open in the **Strip** view (Viewer, Content panel, timeline); the view
+  switcher is a segmented Strip | Shot map | Quick fill. With nothing selected the Viewer shows the
+  clip under the playhead.
+- The music folder is saved in prefs (`music_folder`).
+- **Deviation:** a "preset" is a pacing profile at a length the song fits until the 20 preset files
+  land (A7–A8); the design's Format › Preset cascade in the mode bar waits for them too.
+- **S1b (2026-10-16, Paul: "a toggle to reduce the clip count … a slider that modifies the overall
+  tone by clip count and clip durations … a key that defines the clip colour … type, or a button to
+  find a folder"):** a **Tone** slider (`density` 0.5–2 on `storyboard.generate` and
+  `storyboard.preview`; kept when regenerating from the mode bar), the average shot length on every
+  card, a colour key for the strips, **Browse…** (native folder picker) and Enter-to-set on the music
+  folder field; text fields keep focus in Storyboard mode. Layout v2 (preset variety, Style ›
+  Preset) waits for Claude Design: [design/start-storyboard-v2-brief.md](design/start-storyboard-v2-brief.md).
+
+## Start storyboard v2 (S2), from the Claude Design mock-up
+
+_2026-10-16 · Paul: "the first mock design is clean, and a huge improvement". Mock-up:
+[design/start-storyboard-v2.dc.html](design/start-storyboard-v2.dc.html) (needs the design system bundle
+to render; the layout, sizes and behaviour are readable in the source). The mock-up invents its
+sections and timing from BPM and length; AssetCraft uses the real cue map for every number._
+
+| Step | Delivers                                                                                                   | Status |
+|------|------------------------------------------------------------------------------------------------------------|--------|
+| S2a  | **Track column:** search; tempo bands Slow < 100, Mid 100–118, Upbeat 118–135, Fast ≥ 135 with counts; sort Name / BPM / Length; rows with ▶ preview (plays the track), length, BPM, a 28-bar energy graph from the cue map's sections, band, "Suits …" presets by BPM; the selected row expands to the section strip (Chorus red, Build blue, others grey), an **Analysis** line (BPM, band, drop times, suggested presets) and artist · licence; footer "n tracks · m not analysed" | done (2026-10-16) |
+| S2b  | **Presets:** six styles with BPM ranges and a ◆ when the track's tempo fits (Trailer 115–135, Energetic 132–180, Cinematic 95–120, Calm 60–100, **Family** 95–125, **Hero** 118–145); shot-type mix per style; Cut pace (5 steps = density 2 … 0.5, readout "avg s · beats"); Transitions Cut / Crossfade / Dip / Flash; Title cards Every scene / Key moments / Opening only / None; switches Tighten into drops, End title card, Text overlays; Reset to preset. Also (Paul, 2026-10-16): **preview volume** in the track column footer (35 % default, saved; the Cut plays at full level) and **click a section** on the selected track's strip to preview from its start, with a playhead | done (2026-10-16) |
+| S2c  | **Length chips** (Paul, 2026-10-16: chips instead of cards, since the timeline shows the structure): "0:30 · 13 clips" per length the track fits; the chosen one's clips · avg · scenes · titles and the edit note under them | done (2026-10-16) |
+| S2d  | **Timeline** under the three columns: transport, timecode, title, legend, zoom (slider, −/+, Fit, Ctrl+scroll around the cursor); ruler with § scene markers; section bands; beat grid; clips by shot type (select → status bar); waveform from the decoded track's peaks. The same lane becomes the Tracks view (step 8). **Full timeline (Paul, 2026-10-16):** the lane runs the whole length at the bottom and shows the **selected storyboard** in full, or the **full audio track** (waveform, sections, drops; click to preview from there) while a track is picked and no board is chosen | S2d-1/2 done (2026-10-16); S2d-3 next |
+| S2d-1 | Full-width timeline under the three columns, above the status bar: **storyboard** lane (what Create would build, by shot type; T on title cards and overlays; fades as wedges, flashes as white bars; § per scene) over the **audio** lane (whole-track waveform from `track.peaks`, section bands, ◆ drops, the part a cut skips dimmed, fade-out ramp), one ruler in track time, fit to width. `storyboard.preview` clips gain `start`, `scene`, `text`, `in`, `out`, plus `trackSeconds` and `edit` | done (2026-10-16) |
+| S2d-2 | Click the audio lane to preview from there; playhead across both lanes | done (2026-10-16) |
+| S2d-3 | Zoom (slider, −/+, Fit, Ctrl+scroll around the cursor) and hover details per clip; the same lane in the Strip view for an open board | —      |
+| S2e  | **Output settings** on Create: aspect 16:9 / 9:16 / 1:1 / 4:5 / 2.39:1 with shape previews and output size, resolution 720p / 1080p / 4K, frame rate 24 / 25 / 30 / 60, stored on the storyboard (for the FilmCraft export) | —      |
+
+- **Decisions taken from the mock-up (Paul, 2026-10-16):** D-S2 Family and Hero as designed
+  (Family: even 4–8 beat pacing, a title every scene, crossfades, weighted to close-ups; Hero: builds
+  to a close-up at every drop, bold titles, hard cuts); D-S3 output settings on the Create column.
+- **Vocabulary:** "track", not "song" (the design system retires "song").
+- **Deviations:** the mock-up's "AI:" line is labelled **Analysis** (measured from the cue map; AI
+  stays optional); "Analyse n" waits for the built-in analyser (A2–A4).
+
 ## Decisions (Paul)
 
 | ID | Question                                                                                         | Recommendation / decision                                                                                         | Needed by |
@@ -96,3 +148,5 @@ _2026-10-15 · Paul: "Text clip types: separate clip, overlay … each text clip
 | O4 | Text clips, `textClips` track | The model's free-floating `textClips` (T1 track) overlaps with per-clip Overlays and nothing writes it | Keep per-clip Overlays as the one way for now; use `textClips` only for text that spans several clips (Tracks view, step 8), or retire it with the format bump at step 7 | Claude |
 | O5 | Text clips, outro             | Text animates in only; it leaves with the clip's transition                                       | Add an outro (fade / drop) to `TextAnimation` if Paul wants text to leave before the cut | Claude |
 | O6 | Text clips, editing           | The words are edited nowhere yet (Card text comes from the generator or the sample)               | Text field in the clip editor (step 6), running `storyboard.clip.set`                  | Claude |
+| O7 | Custom sequences (future; Paul, 2026-10-16) | Users build their own **sequences**: a group of clips with effects and text, saved and reusable. A sequence can be picked on the Start screen (alongside presets) or included in a storyboard as an option. Sequences also become an **export item** from FilmCraft and EffectCraft, so work made there drops into a storyboard | 1. Check whether FilmCraft and EffectCraft already export something like this (cite repo, file:line, commit). 2. Spec a sequence document (clips, effects, text clips, timing in ticks; validated as hostile input) shared through the interchange crate (step 10). 3. Start screen: "Sequences" next to presets; Shot map / Strip: insert a sequence. 4. FilmCraft / EffectCraft export (their own repos' rules first) | Paul (priority), Claude (spec) |
+| O8 | Themed composite shots (future; Paul, 2026-10-16) | A **theme** is a shot type of its own: a set of shots, titles, background, effects, fonts and edit styles that travel together (e.g. a Family theme: Paper titles that fade, warm grade, crossfades; a Hero theme: Bold titles that zoom, hard cuts, flash on drops). Picking a theme for a clip, a scene or the whole board applies the set; the Shot map shows it as one tile. Today the pieces exist separately: `TextTheme` + `TextAnimation` per style (TC1), `Shape` transitions and title placement (S2b), shot-type weights | 1. Spec a `Theme` document (shot list with types and durations in beats, text style, background, effects by id, font, transitions, pacing) — hostile input, validated like a storyboard. 2. Ship the six styles' current choices as the first built-in themes (no behaviour change). 3. `ShotType::Theme(id)` or a clip `theme` field (decide with Paul: D-O8). 4. Effects and fonts by id from EffectCraft / DesignCraft exports (their repos' rules first); shares O7's sequence format where it overlaps | Paul (priority, D-O8), Claude (spec) |
