@@ -26,7 +26,10 @@ pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f
     let anim = style.animation.frame(elapsed);
     let painter = painter.with_clip_rect(frame.intersect(painter.clip_rect()));
     if kind == TextKind::Card {
-        painter.rect_filled(frame, 0, rgb(look.background));
+        // Over a background asset the theme colour becomes a scrim, so the image shows through.
+        let fill =
+            if clip.background().is_some() { rgb(look.background).gamma_multiply(0.35) } else { rgb(look.background) };
+        painter.rect_filled(frame, 0, fill);
     }
     if words.trim().is_empty() {
         return;

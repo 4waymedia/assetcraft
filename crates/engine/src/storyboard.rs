@@ -7,8 +7,8 @@
 
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{
-    AssetId, Bpm, Clip, ClipId, Limits, RecutOptions, Scene, SceneId, ShotType, Storyboard, Ticks, Track, auto_fill,
-    clear, next_empty, place, recut, sample,
+    AssetId, Bpm, Clip, ClipId, Deleted, Limits, RecutOptions, Scene, SceneId, ShotType, Storyboard, Ticks, Track,
+    auto_fill, clear, delete, next_empty, place, recut, sample,
 };
 use serde_json::{Value, json};
 
@@ -86,6 +86,9 @@ pub struct Boards {
     pub(crate) transport: Transport,
     pub(crate) board: Option<Storyboard>,
     pub(crate) selected: Option<ClipId>,
+    /// Shift+click range: `(anchor, end)`. It holds only while `selected == Some(end)`, so any
+    /// command that moves the selection on its own ends the range without having to know of it.
+    pub(crate) range: Option<(ClipId, ClipId)>,
     pub(crate) undo: Vec<Snapshot>,
     pub(crate) redo: Vec<Snapshot>,
     /// What the open storyboard was generated from (`storyboard.generate`).
@@ -131,6 +134,20 @@ impl Session {
     /// The selected clip (shared by every storyboard view).
     pub fn selected_clip(&self) -> Option<ClipId> {
         self.boards.selected
+    }
+
+    /// The selected clips in Cut order: the Shift+click range, else the selected clip, else none.
+    pub fn selected_clips(&self) -> Vec<ClipId> {
+        let Some(board) = self.boards.board.as_ref() else { return Vec::new() };
+        let Some(focus) = self.boards.selected.filter(|id| board.clip(*id).is_some()) else { return Vec::new() };
+        let span = self.boards.range.filter(|(_, end)| *end == focus).and_then(|(anchor, end)| {
+            let (a, b) = (board.index_of(anchor)?, board.index_of(end)?);
+            Some((a.min(b), a.max(b)))
+        });
+        match span {
+            Some((lo, hi)) => board.clips[lo..=hi].iter().map(|c| c.id).collect(),
+            None => vec![focus],
+        }
     }
 
     /// Whether `storyboard.undo` has anything to undo.
@@ -212,8 +229,59 @@ pub(crate) fn sb_select(s: &mut Session, p: &Value) -> CmdResult {
             Some(id)
         }
     };
+    // Shift+click: from the anchor (or the clip selected before) to this one.
+    let extend = p.get("extend").and_then(Value::as_bool).unwrap_or(false);
+    let anchor =
+        s.boards.range.filter(|(_, end)| Some(*end) == s.boards.selected).map(|(a, _)| a).or(s.boards.selected);
+    s.boards.range = match (extend, anchor, clip) {
+        (true, Some(a), Some(c)) => Some((a, c)),
+        _ => None,
+    };
     s.boards.selected = clip;
-    Ok(json!({ "selected": clip.map(|c| c.0) }))
+    let range: Vec<u32> = s.selected_clips().iter().map(|c| c.0).collect();
+    Ok(json!({ "selected": clip.map(|c| c.0), "selection": range }))
+}
+
+/// Delete / Backspace (findings B2, B4; Paul, 2026-10-17: "shot first, then clip"): on the
+/// selection (or `clips`), empty the clips that hold assets; when none does, remove the clips.
+pub(crate) fn sb_delete(s: &mut Session, p: &Value) -> CmdResult {
+    let ids: Vec<ClipId> = match p.get("clips") {
+        None | Some(Value::Null) => s.selected_clips(),
+        Some(Value::Array(list)) => {
+            if list.len() > Limits::default().max_clips {
+                return Err(CmdError::BadParams("too many `clips`".into()));
+            }
+            list.iter().map(clip_id).collect::<Result<_, _>>()?
+        }
+        Some(_) => return Err(CmdError::BadParams("`clips` must be a list of clip numbers".into())),
+    };
+    if ids.is_empty() {
+        return Err(CmdError::Unavailable("select a clip first".into()));
+    }
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let first = ids.iter().filter_map(|id| board.index_of(*id)).min().unwrap_or(0);
+    let done = delete(&mut board, &ids).map_err(|e| CmdError::BadParams(e.to_string()))?;
+    s.boards.checkpoint();
+    let message = match done {
+        Deleted::Shots(n) => format!("Removed the shot from {n} clip{} (press again to remove the clips)", plural(n)),
+        Deleted::Clips(n) => {
+            // Select the clip that moved up into the gap (or the new last one); the range ends.
+            s.boards.selected = board.clips.get(first).or_else(|| board.clips.last()).map(|c| c.id);
+            s.boards.range = None;
+            format!("Removed {n} clip{} from the Cut", plural(n))
+        }
+    };
+    let (kind, n) = match done {
+        Deleted::Shots(n) => ("shots", n),
+        Deleted::Clips(n) => ("clips", n),
+    };
+    s.boards.board = Some(board);
+    let selection: Vec<u32> = s.selected_clips().iter().map(|c| c.0).collect();
+    Ok(json!({ "deleted": kind, "count": n, "selection": selection, "message": format!("{message} · Ctrl+Z undoes") }))
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
 
 pub(crate) fn sb_place(s: &mut Session, p: &Value) -> CmdResult {
@@ -234,13 +302,27 @@ pub(crate) fn sb_place(s: &mut Session, p: &Value) -> CmdResult {
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
     let placed =
         place(&mut board, AssetId(asset.to_owned()), target).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    let background = board.clip(placed).is_some_and(|c| c.shot_type == ShotType::Ttl);
     s.boards.checkpoint();
     s.boards.board = Some(board);
+    let (filled, fillable) = s.boards.board.as_ref().map(Storyboard::fill_progress).unwrap_or((0, 0));
+    if background {
+        // A title card's background: the card stays selected (the Quick fill cursor doesn't move).
+        s.boards.selected = Some(placed);
+        s.boards.range = None;
+        return Ok(json!({
+            "placed": placed.0,
+            "background": true,
+            "next": s.boards.board.as_ref().and_then(next_empty).map(|c| c.0),
+            "filled": filled,
+            "fillable": fillable,
+            "message": format!("Background set on title card #{}", placed.0),
+        }));
+    }
     // The cursor moves on to the next empty clip; once every clip is filled nothing is selected,
     // so Quick fill shows "All n clips filled" rather than offering to replace the last one.
     let next = s.boards.board.as_ref().and_then(next_empty);
     s.boards.selected = next;
-    let (filled, fillable) = s.boards.board.as_ref().map(Storyboard::fill_progress).unwrap_or((0, 0));
     Ok(json!({
         "placed": placed.0,
         "next": next.map(|c| c.0),
@@ -453,6 +535,7 @@ pub(crate) fn state(s: &Session) -> Value {
         "board": b.board.as_ref().and_then(|board| serde_json::to_value(board).ok()),
         "summary": summary,
         "selected": b.selected.map(|c| c.0),
+        "selection": s.selected_clips().iter().map(|c| c.0).collect::<Vec<_>>(),
         "canUndo": !b.undo.is_empty(),
         "canRedo": !b.redo.is_empty(),
     })

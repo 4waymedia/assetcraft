@@ -419,9 +419,32 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
             crate::text_view::inspector_section(nav, ui, &clip);
             ui.add_space(6.0);
         }
-        section(ui, "SHOT");
+        section(ui, if clip.shot_type.accepts_assets() { "SHOT" } else { "BACKGROUND" });
         if !clip.shot_type.accepts_assets() {
-            ui.weak("Title cards hold text only. Switch to Overlay to put the text over a shot.");
+            // A title card: an optional background asset under the words (finding B5).
+            match clip.background() {
+                Some(bg) => {
+                    hero_frame(nav, ui, &bg.0);
+                    ui.label(RichText::new(assetcraft_fs::display_name(Path::new(&bg.0))).small())
+                        .on_hover_text(bg.0.as_str());
+                    if ui.button("Remove background").on_hover_text("Delete key; Ctrl+Z undoes").clicked() {
+                        nav.run("storyboard.delete", json!({ "clips": [clip.id.0] }));
+                    }
+                }
+                None => {
+                    ui.weak("No background: drag an asset onto the card, or");
+                }
+            }
+            let label = if clip.background().is_some() {
+                "Replace with Organizer selection"
+            } else {
+                "Use Organizer selection"
+            };
+            if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
+                && let Some(p) = &focused
+            {
+                nav.run("storyboard.place", json!({ "asset": p.to_string_lossy(), "clip": clip.id.0 }));
+            }
         } else if let Some(hero) = clip.asset_ids.first() {
             hero_frame(nav, ui, &hero.0);
             ui.label(RichText::new(assetcraft_fs::display_name(Path::new(&hero.0))).small())

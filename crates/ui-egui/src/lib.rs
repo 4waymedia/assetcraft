@@ -334,13 +334,21 @@ impl Navigator {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo, space) = ctx.input_mut(|i| {
+            let (undo, redo, space, delete) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
+                    // Delete or Backspace, with Shift too (it is held after a Shift+click range).
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                        | i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+                        | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Delete)
+                        | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Backspace),
                 )
             });
+            if delete && !self.session.selected_clips().is_empty() {
+                self.run("storyboard.delete", json!({}));
+            }
             if space && self.session.storyboard().is_some() {
                 let at = strip_view::playhead(self, ctx);
                 strip_view::toggle_play(self, at);

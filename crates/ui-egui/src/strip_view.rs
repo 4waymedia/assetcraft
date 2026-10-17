@@ -1,8 +1,12 @@
 //! Storyboard Strip view (design 2b) and Quick fill (design 4a), plus Watch your Cut playback.
 //!
 //! Stage 4 steps 4–5. Draws only:
-//! - **Strip:** Content panel (drag assets), Viewer, Inspector, full-width timeline. Dropping an
-//!   asset on a clip or on the Viewer runs `storyboard.place {asset, clip}`.
+//! - **Strip:** Content panel, Viewer, Inspector, full-width timeline. *Clicking* (or
+//!   Shift+clicking) an asset places it in the target clip, as in Quick fill; *dragging* it onto
+//!   a clip or the Viewer runs `storyboard.place {asset, clip}` (a title card takes it as its
+//!   background). Shift+click in the timeline selects a run of clips; Delete / Backspace runs
+//!   `storyboard.delete` (shots first, then clips). Clicking or dragging on the ruler moves the
+//!   playhead (findings B1–B5, 2026-10-17).
 //! - **Quick fill:** Content panel with the NEXT card; *clicking* an asset places it in the
 //!   target clip: the selected clip when one is selected (REPLACING if it already has a shot),
 //!   else the next empty clip. The engine then selects the next empty clip, so clicks run on in
@@ -29,8 +33,9 @@ use assetcraft_storyboard::{Clip, ClipId, ShotType, Storyboard, Ticks, next_empt
 use assetcraft_thumbs::ThumbKey;
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Content panel widths (Strip, Quick fill) and grid columns.
@@ -62,6 +67,11 @@ pub(crate) struct SbUi {
     pub(crate) toast: Option<(String, Option<f64>)>,
     /// The Start storyboard screen (design 3b / 3c).
     pub(crate) start: crate::start_view::StartUi,
+    /// The open folder's modification times, built once per session generation (finding B1:
+    /// rebuilding it every frame made dragging sluggish in big folders).
+    pub(crate) index: Option<(u64, Arc<Index>)>,
+    /// Scrubbing the ruler started while the Cut was playing: play on from where it stops.
+    pub(crate) scrub_resume: bool,
 }
 
 /// Where the playhead is now. While the track plays it is the audio clock (so pictures follow
@@ -121,12 +131,28 @@ pub(crate) fn toggle_play(nav: &mut Navigator, at: Ticks) {
     }
 }
 
-type Index = HashMap<PathBuf, Option<SystemTime>>;
+pub(crate) type Index = HashMap<PathBuf, Option<SystemTime>>;
 
 /// Modification times of the open folder's files, so storyboard thumbnails share the
-/// Organizer's cache keys.
-fn modified_index(nav: &Navigator) -> Index {
-    nav.session.items().iter().filter(|e| e.kind == EntryKind::File).map(|e| (e.path.clone(), e.modified)).collect()
+/// Organizer's cache keys. Cached until the session's generation moves (any command, including
+/// the folder watcher's `nav.changed`).
+fn modified_index(nav: &mut Navigator) -> Arc<Index> {
+    let generation = nav.session.generation();
+    if let Some((g, index)) = &nav.state.storyboard.index
+        && *g == generation
+    {
+        return Arc::clone(index);
+    }
+    let index: Arc<Index> = Arc::new(
+        nav.session
+            .items()
+            .iter()
+            .filter(|e| e.kind == EntryKind::File)
+            .map(|e| (e.path.clone(), e.modified))
+            .collect(),
+    );
+    nav.state.storyboard.index = Some((generation, Arc::clone(&index)));
+    index
 }
 
 fn thumb(nav: &mut Navigator, ui: &Ui, path: &Path, side_pt: f32, index: &Index) -> Cell {
@@ -141,24 +167,25 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     let Some(board) = nav.session.storyboard().cloned() else { return };
     let fill = nav.session.board_view() == BoardView::Fill;
     let index = modified_index(nav);
+    let index = index.as_ref();
     let at = playhead(nav, ui.ctx());
     let height = if fill { TIMELINE_H + CONTROLS_H } else { TIMELINE_H };
     egui::Panel::bottom("sb-timeline").exact_size(height).resizable(false).show(ui, |ui| {
         if fill {
             fill_controls(nav, ui, &board);
         }
-        timeline(nav, ui, &board, &index, at);
+        timeline(nav, ui, &board, index, at);
     });
     let width = if fill { FILL_CONTENT_W } else { CONTENT_W };
     egui::Panel::left("sb-content").exact_size(width).resizable(false).show(ui, |ui| {
-        content_panel(nav, ui, &board, &index, fill);
+        content_panel(nav, ui, &board, index, fill);
     });
     if !fill {
         egui::Panel::right("sb-inspector").exact_size(INSPECTOR_W).resizable(false).show(ui, |ui| {
             inspector(nav, ui);
         });
     }
-    egui::CentralPanel::default().show(ui, |ui| viewer(nav, ui, &board, &index, at, fill));
+    egui::CentralPanel::default().show(ui, |ui| viewer(nav, ui, &board, index, at, fill));
     toast(nav, ui.ctx(), height);
 }
 
@@ -203,11 +230,13 @@ fn content_panel(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &I
     let gap = 6.0;
     let cell = ((ui.available_width() - gap * (CONTENT_COLS as f32 - 1.0)) / CONTENT_COLS as f32).floor().max(32.0);
     let mut clicked: Option<String> = None;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for row in files.chunks(CONTENT_COLS) {
+    let rows: Vec<&[PathBuf]> = files.chunks(CONTENT_COLS).collect();
+    // Only the rows on screen are laid out and asked for thumbnails (finding B1).
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, cell + gap, rows.len(), |ui, range| {
+        for row in &rows[range] {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                for path in row {
+                for path in row.iter() {
                     let used = usage.get(path.to_string_lossy().as_ref()).copied();
                     if asset_cell(nav, ui, path, cell, used, index, fill) {
                         clicked = Some(path.to_string_lossy().into_owned());
@@ -271,7 +300,9 @@ pub(crate) fn strip_clip_id(id: ClipId) -> egui::Id {
     egui::Id::new(("sb-strip-clip", id.0))
 }
 
-/// One asset cell. Strip: a drag source. Quick fill: a click target (returns `true` when clicked).
+/// One asset cell, in both views: click (or Shift+click) to place it in the target clip
+/// (returns `true`), or drag it onto a clip or the Viewer. The drag carries a [`DragAsset`]
+/// and a small thumbnail follows the pointer.
 fn asset_cell(
     nav: &mut Navigator,
     ui: &mut Ui,
@@ -279,14 +310,14 @@ fn asset_cell(
     side: f32,
     used: Option<usize>,
     index: &Index,
-    clickable: bool,
+    fill: bool,
 ) -> bool {
     let name = assetcraft_fs::display_name(path);
     let cell = thumb(nav, ui, path, side, index);
     let draw = |ui: &mut Ui| {
-        let (rect, hover) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
         // A stable id (the path) so tests and future keyboard focus can find the cell.
-        let response = if clickable { ui.interact(rect, asset_cell_id(path), Sense::click()) } else { hover };
+        let response = ui.interact(rect, asset_cell_id(path), Sense::click_and_drag());
         let painter = ui.painter();
         painter.rect_filled(rect, 4, Color32::from_gray(0x15));
         match &cell {
@@ -310,16 +341,30 @@ fn asset_cell(
         }
         response
     };
-    if clickable {
-        let response = draw(ui).on_hover_text(format!("{name}\nClick to place in the target clip"));
-        return response.clicked();
+    let response = draw(ui);
+    if response.dragged() {
+        response.dnd_set_drag_payload(DragAsset(path.to_string_lossy().into_owned()));
+        drag_ghost(ui.ctx(), &cell);
     }
-    let payload = DragAsset(path.to_string_lossy().into_owned());
-    let inner = ui.dnd_drag_source(egui::Id::new(("sb-asset", path)), payload, |ui| {
-        let _ = draw(ui);
-    });
-    inner.response.on_hover_text(format!("{name}\nDrag onto a clip in the timeline, or onto the Viewer"));
-    false
+    let tip = if fill {
+        format!("{name}\nClick to place in the target clip")
+    } else {
+        format!("{name}\nClick to place in the next clip, or drag onto a clip or the Viewer")
+    };
+    response.on_hover_text(tip).clicked()
+}
+
+/// The dragged asset's thumbnail beside the pointer (one image, on the tooltip layer).
+fn drag_ghost(ctx: &egui::Context, cell: &Cell) {
+    let Some(pos) = ctx.pointer_interact_pos() else { return };
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("sb-drag-ghost")));
+    let rect = Rect::from_min_size(pos + vec2(12.0, 12.0), vec2(72.0, 72.0));
+    painter.rect_filled(rect, 4, Color32::from_gray(0x15));
+    if let Cell::Ready(texture, size) = cell {
+        let target = cover(rect, *size);
+        painter.image(*texture, rect, uv_for_cover(rect, target), Color32::from_white_alpha(220));
+    }
+    painter.rect_stroke(rect, 4, Stroke::new(2.0, SELECT), StrokeKind::Outside);
 }
 
 // ---- Viewer --------------------------------------------------------------------------------
@@ -361,8 +406,8 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
         },
         Some(clip) => show_clip(nav, ui, frame, clip, index, f64::INFINITY),
     }
-    // Dropping on the Viewer places into the selected clip.
-    if let Some(clip) = selected.filter(|c| c.shot_type.accepts_assets()) {
+    // Dropping on the Viewer places into the selected clip (a title card's background).
+    if let Some(clip) = selected.filter(|c| c.shot_type.accepts_drop()) {
         if response.dnd_hover_payload::<DragAsset>().is_some() {
             ui.painter().rect_stroke(frame, 0, Stroke::new(2.0, SELECT), StrokeKind::Outside);
         }
@@ -376,6 +421,12 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
 /// hero frame (or "No shot assigned") with any Overlay text on top.
 fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: &Index, elapsed: f64) {
     if clip.shot_type == ShotType::Ttl {
+        if let Some(bg) = clip.background()
+            && let Cell::Ready(texture, size) = thumb(nav, ui, Path::new(&bg.0), 512.0, index)
+        {
+            let target = cover(frame, size);
+            ui.painter().image(texture, frame, uv_for_cover(frame, target), Color32::WHITE);
+        }
         crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
         return;
     }
@@ -516,86 +567,145 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let total = board.total().as_secs_f64() as f32;
     let track_len = board.track.as_ref().map(|t| t.duration.as_secs_f64() as f32).unwrap_or(0.0);
     let width = (total.max(track_len) * PX_PER_SEC + 80.0).max(ui.available_width());
-    let selected = nav.session.selected_clip();
+    let chosen: HashSet<ClipId> = nav.session.selected_clips().into_iter().collect();
     let playing = nav.session.transport().playing;
+    let shift = ui.input(|i| i.modifiers.shift);
     let mut select: Option<ClipId> = None;
+    let mut scrub: Option<(f64, Scrub)> = None;
     let mut drop: Option<(ClipId, String)> = None;
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let ctx = ui.ctx().clone();
-    egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
-        let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H), Sense::hover());
-        let left = area.left() + 8.0;
-        let painter = ui.painter().clone();
-        let weak = ui.visuals().weak_text_color();
-        // Ruler: a tick per second, a label every 5 s.
-        let secs = (width / PX_PER_SEC).ceil() as i32;
-        for s in 0..=secs {
-            let x = left + s as f32 * PX_PER_SEC;
-            let long = s % 5 == 0;
-            let top = area.top() + if long { 4.0 } else { 12.0 };
-            painter.line_segment([pos2(x, top), pos2(x, area.top() + RULER_H)], Stroke::new(1.0, weak));
-            if long {
-                let label = format!("{}:{:02}", s / 60, s % 60);
-                painter.text(pos2(x + 3.0, area.top()), Align2::LEFT_TOP, label, FontId::monospace(10.0), weak);
+    // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    egui::ScrollArea::horizontal()
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        .show(ui, |ui| {
+            let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H), Sense::hover());
+            let left = area.left() + 8.0;
+            // Ruler and scene-marker row: click or drag to move the playhead (finding B3).
+            let ruler = Rect::from_min_size(area.min, vec2(width, RULER_H + MARKER_H));
+            let r = ui.interact(ruler, ui.id().with("sb-ruler"), Sense::click_and_drag());
+            let r =
+                r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click or drag to move the playhead");
+            if let Some(pos) = r.interact_pointer_pos() {
+                let secs = (((pos.x - left) / PX_PER_SEC).max(0.0) as f64).min(total.max(0.0) as f64);
+                let how = if r.drag_started() {
+                    Some(Scrub::Start)
+                } else if r.drag_stopped() {
+                    Some(Scrub::Stop)
+                } else if r.dragged() {
+                    Some(Scrub::Move)
+                } else if r.clicked() {
+                    Some(Scrub::Click)
+                } else {
+                    None
+                };
+                scrub = how.map(|h| (secs, h));
             }
-        }
-        if track_len > 0.0 {
-            let x = left + track_len * PX_PER_SEC;
-            painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(1.0, ACCENT));
-        }
-        // Scene markers and clips.
-        let strip_top = area.top() + RULER_H + MARKER_H;
-        let marker_y = area.top() + RULER_H + 2.0;
-        let mut prev_scene = None;
-        let spans = clip_spans(board, left, Some(&ctx));
-        for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
-            if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
-                let title = board.scene_title(clip.scene_id).unwrap_or_default();
-                painter.text(pos2(x, marker_y), Align2::LEFT_TOP, "§", FontId::monospace(11.0), SCENE_RED);
-                let clip_rect = Rect::from_min_size(pos2(x + 10.0, area.top() + RULER_H), vec2(240.0, MARKER_H));
-                let label = painter.with_clip_rect(clip_rect);
-                label.text(pos2(x + 10.0, marker_y), Align2::LEFT_TOP, title, FontId::proportional(11.0), weak);
+            let painter = ui.painter().clone();
+            let weak = ui.visuals().weak_text_color();
+            // Ruler: a tick per second, a label every 5 s.
+            let secs = (width / PX_PER_SEC).ceil() as i32;
+            for s in 0..=secs {
+                let x = left + s as f32 * PX_PER_SEC;
+                let long = s % 5 == 0;
+                let top = area.top() + if long { 4.0 } else { 12.0 };
+                painter.line_segment([pos2(x, top), pos2(x, area.top() + RULER_H)], Stroke::new(1.0, weak));
+                if long {
+                    let label = format!("{}:{:02}", s / 60, s % 60);
+                    painter.text(pos2(x + 3.0, area.top()), Align2::LEFT_TOP, label, FontId::monospace(10.0), weak);
+                }
             }
-            prev_scene = Some(clip.scene_id);
-            let rect = Rect::from_min_size(pos2(x, strip_top), vec2(w, STRIP_H)).shrink2(vec2(1.0, 0.0));
-            if !ui.is_rect_visible(rect) {
-                continue;
+            if track_len > 0.0 {
+                let x = left + track_len * PX_PER_SEC;
+                painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(1.0, ACCENT));
             }
-            let response = ui.interact(rect, strip_clip_id(id), Sense::click());
-            paint_clip(nav, ui, rect, n + 1, clip, index);
-            let accepts = clip.shot_type.accepts_assets();
-            let hovering = accepts && response.dnd_hover_payload::<DragAsset>().is_some();
-            if selected == Some(id) || hovering {
-                ui.painter().rect_stroke(rect, 3, Stroke::new(2.0, SELECT), StrokeKind::Inside);
+            // Scene markers and clips.
+            let strip_top = area.top() + RULER_H + MARKER_H;
+            let marker_y = area.top() + RULER_H + 2.0;
+            let mut prev_scene = None;
+            let spans = clip_spans(board, left, Some(&ctx));
+            for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
+                if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
+                    let title = board.scene_title(clip.scene_id).unwrap_or_default();
+                    painter.text(pos2(x, marker_y), Align2::LEFT_TOP, "§", FontId::monospace(11.0), SCENE_RED);
+                    let clip_rect = Rect::from_min_size(pos2(x + 10.0, area.top() + RULER_H), vec2(240.0, MARKER_H));
+                    let label = painter.with_clip_rect(clip_rect);
+                    label.text(pos2(x + 10.0, marker_y), Align2::LEFT_TOP, title, FontId::proportional(11.0), weak);
+                }
+                prev_scene = Some(clip.scene_id);
+                let rect = Rect::from_min_size(pos2(x, strip_top), vec2(w, STRIP_H)).shrink2(vec2(1.0, 0.0));
+                if !ui.is_rect_visible(rect) {
+                    continue;
+                }
+                let response = ui.interact(rect, strip_clip_id(id), Sense::click());
+                paint_clip(nav, ui, rect, n + 1, clip, index);
+                let accepts = clip.shot_type.accepts_drop();
+                let hovering = accepts && response.dnd_hover_payload::<DragAsset>().is_some();
+                if chosen.contains(&id) || hovering {
+                    ui.painter().rect_stroke(rect, 3, Stroke::new(2.0, SELECT), StrokeKind::Inside);
+                }
+                if accepts && let Some(asset) = response.dnd_release_payload::<DragAsset>() {
+                    drop = Some((id, asset.0.clone()));
+                }
+                let tip = format!("#{:02} · {}\n{}", n + 1, clip.shot_type.name(), clip.description);
+                if response.on_hover_text(tip).clicked() {
+                    select = Some(id);
+                }
+                if let Some(to) = crate::text_view::kind_chip(
+                    ui,
+                    Rect::from_min_max(rect.min + vec2(0.0, 4.0), rect.max),
+                    clip,
+                    strip_clip_id(id).with("kind"),
+                ) {
+                    switch = Some((clip.clone(), to));
+                }
             }
-            if accepts && let Some(asset) = response.dnd_release_payload::<DragAsset>() {
-                drop = Some((id, asset.0.clone()));
+            let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
+            painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(2.0, SELECT));
+            if playing {
+                ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
             }
-            let tip = format!("#{:02} · {}\n{}", n + 1, clip.shot_type.name(), clip.description);
-            if response.on_hover_text(tip).clicked() {
-                select = Some(id);
-            }
-            if let Some(to) = crate::text_view::kind_chip(
-                ui,
-                Rect::from_min_max(rect.min + vec2(0.0, 4.0), rect.max),
-                clip,
-                strip_clip_id(id).with("kind"),
-            ) {
-                switch = Some((clip.clone(), to));
-            }
-        }
-        let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
-        painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(2.0, SELECT));
-        if playing {
-            ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
-        }
-    });
+        });
+    if let Some((secs, how)) = scrub {
+        scrub_to(nav, secs, how, playing);
+    }
     if let Some((clip, to)) = switch {
         crate::text_view::switch_kind(nav, &clip, to);
     } else if let Some((clip, asset)) = drop {
         nav.run("storyboard.place", json!({ "asset": asset, "clip": clip.0 }));
     } else if let Some(id) = select {
-        nav.run("storyboard.select", json!({ "clip": id.0 }));
+        nav.run("storyboard.select", json!({ "clip": id.0, "extend": shift }));
+    }
+}
+
+/// What the pointer did on the ruler this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scrub {
+    Click,
+    Start,
+    Move,
+    Stop,
+}
+
+/// Move the playhead to `secs`. A click while playing plays on from there; a drag scrubs
+/// (paused), and if it started while playing, playback resumes where it stops.
+pub(crate) fn scrub_to(nav: &mut Navigator, secs: f64, how: Scrub, playing: bool) {
+    match how {
+        Scrub::Click if playing => {
+            nav.run("storyboard.play", json!({ "from": secs }));
+        }
+        Scrub::Start => {
+            nav.state.storyboard.scrub_resume = playing;
+            nav.run("storyboard.seek", json!({ "seconds": secs }));
+        }
+        Scrub::Stop if std::mem::take(&mut nav.state.storyboard.scrub_resume) => {
+            nav.run("storyboard.play", json!({ "from": secs }));
+        }
+        _ => {
+            nav.run("storyboard.seek", json!({ "seconds": secs }));
+        }
     }
 }
 
@@ -620,6 +730,14 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
             painter.image(texture, thumb_rect, uv_for_cover(thumb_rect, target), Color32::WHITE);
             drew = true;
         }
+    }
+    if title && drew {
+        // A title over its background: darken the image so the words read.
+        painter.rect_filled(
+            Rect::from_min_size(body.min, vec2(body.width(), body.height() - 34.0)),
+            0,
+            Color32::from_black_alpha(110),
+        );
     }
     let text = if title { rgb(look.text) } else { Color32::from_gray(0xdd) };
     if !drew && !title {

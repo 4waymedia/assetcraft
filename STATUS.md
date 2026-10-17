@@ -1,10 +1,26 @@
 # STATUS
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-10-17_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
 ## Current: Stage 4 Storyboard mode (Paul, 2026-10-15), step 1 done
+
+### Bug list (Paul, 2026-10-17): Strip view and timeline
+
+Decisions (Paul, 2026-10-17): Delete takes the **shot first, then the clip**; "intensity of cuts" on a range means **re-cut that span with Tone**; click and Shift+click on an asset both place it.
+
+| ID | Scope                                         | Fix                                                                                                                                                                                                   | Owner  | Status                    |
+|----|-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|---------------------------|
+| B1 | Strip / Quick fill Content panel              | Click or Shift+click an asset places it in the next active clip in the Strip view too (`strip_view.rs` `asset_cell`, one `Sense::click_and_drag` cell for both views). Drag lag: the panel lays out only visible rows (`show_rows`), the folder's mtime index is cached per session generation (`SbUi::index`), and the drag uses `dnd_set_drag_payload` with a one-image ghost instead of re-drawing the cell | Claude | fixed, Paul to feel on Windows |
+| B2 | Timeline keys                                 | Delete / Backspace (also with Shift) run new `storyboard.delete {clips?}` (EDIT, Edit menu): shots first, then the clips when none has a shot; scenes left empty go too (`assetcraft_storyboard::delete`, `Deleted`). One undo step per press | Claude | fixed                     |
+| B3 | Timeline ruler and scroll bar                 | Click or drag on the ruler / scene-marker row moves the playhead (`storyboard.seek`); a click while playing plays on from there, a drag started while playing resumes at its end (`Scrub`, `scrub_to`). Scroll bar is solid and always visible, so clicking its track jumps there | Claude | fixed                     |
+| B4 | Timeline selection                            | Shift+click selects a run (`storyboard.select {clip, extend}`; `Boards::range` holds only while the selection is its end, so other commands end it); every clip in the run is outlined; Delete applies to the run. `storyboard.state` / `select` report `selection` | Claude | fixed (selection + delete) |
+| B4b | Range re-cut with Tone                       | Re-split only the selected span of music at a new density, rest of the Cut untouched: needs the generator to run on a sub-span of the cue map (`generate.rs`), then `storyboard.recutRange {density}` (EDIT) and a Tone slider in the Inspector when a run is selected | Claude | next                      |
+| B5 | Title cards                                   | A title card takes one background asset (drop on the card or the Viewer, or Inspector → Use Organizer selection); the card shows the image with the theme colour as a 35 % scrim; Quick fill still skips cards. `validate` allows ≤ 1 asset on a card; Overlay → Card keeps the shot as the background | Claude | fixed                     |
+
+**Verified (Linux, 2026-10-17):** `cargo xtask ci` passes: 348 tests (8 new: 2 storyboard crate, 2 engine, 4 UI with simulated clicks, Shift+clicks, keys and drags; 3 updated for title-card backgrounds), `heic` run, layers ok (15 crates). Linux builders need `libasound2-dev` (opportunity B1 of A1 still open: README note). **Paul to check on Windows:** drag feel in a big folder (B1), Delete / Backspace twice on a Shift+click run (B2/B4), click and scrub the ruler while playing (B3), a title over a video background (B5).
+
 
 Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/storyboard-mode-handoff.md](docs/design/storyboard-mode-handoff.md) (Claude Design handoff, copied verbatim; prototypes stay in Paul's Downloads).
 

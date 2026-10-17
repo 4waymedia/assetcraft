@@ -54,7 +54,6 @@ fn quick_fill_undo_and_redo() {
     assert_eq!(s.storyboard().unwrap().clip(assetcraft_storyboard::ClipId(5)).unwrap().asset_ids.len(), 1);
     // Refused placements leave no undo step.
     let before = s.boards.undo_len();
-    assert!(s.execute("storyboard.place", &json!({"asset": "/x.png", "clip": 1})).is_err());
     assert!(s.execute("storyboard.place", &json!({"asset": "/x.png", "clip": 999})).is_err());
     assert!(s.execute("storyboard.place", &json!({"asset": ""})).is_err());
     assert!(s.execute("storyboard.place", &json!({"asset": "/x.png", "clip": -1})).is_err());
@@ -179,4 +178,73 @@ fn transport_plays_pauses_and_seeks_within_the_cut() {
     assert_eq!(run(&mut s, "storyboard.state", json!({}))["transport"]["timecode"], "0:03.0");
     run(&mut s, "storyboard.new", json!({"sample": true}));
     assert_eq!(s.transport(), Transport::default(), "a new storyboard rewinds");
+}
+
+#[test]
+fn shift_click_selects_a_run_and_delete_takes_shots_then_clips() {
+    let mut s = session();
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    run(&mut s, "storyboard.place", json!({"asset": "/art/a.png", "clip": 3}));
+    run(&mut s, "storyboard.place", json!({"asset": "/art/b.png", "clip": 5}));
+    run(&mut s, "storyboard.select", json!({"clip": 3}));
+    let r = run(&mut s, "storyboard.select", json!({"clip": 6, "extend": true}));
+    assert_eq!(r["selection"], json!([3, 4, 5, 6]));
+    // Extending again keeps the anchor; backwards works too.
+    let r = run(&mut s, "storyboard.select", json!({"clip": 2, "extend": true}));
+    assert_eq!(r["selection"], json!([2, 3]));
+    run(&mut s, "storyboard.select", json!({"clip": 6, "extend": true}));
+    let total = s.storyboard().unwrap().total();
+    let clips = s.storyboard().unwrap().clips.len();
+    // First press: the shots go, the clips and the timing stay.
+    let r = run(&mut s, "storyboard.delete", json!({}));
+    assert_eq!((r["deleted"].as_str(), r["count"].as_u64()), (Some("shots"), Some(2)));
+    assert_eq!(s.storyboard().unwrap().assets_assigned(), 0);
+    assert_eq!((s.storyboard().unwrap().clips.len(), s.storyboard().unwrap().total()), (clips, total));
+    assert_eq!(run(&mut s, "storyboard.state", json!({}))["selection"], json!([3, 4, 5, 6]), "the range stays");
+    // Second press: the empty clips go, and the clip that moved up is selected.
+    let r = run(&mut s, "storyboard.delete", json!({}));
+    assert_eq!((r["deleted"].as_str(), r["count"].as_u64()), (Some("clips"), Some(4)));
+    let board = s.storyboard().unwrap();
+    assert_eq!(board.clips.len(), clips - 4);
+    assert_eq!(s.selected_clip().map(|c| c.0), Some(7));
+    assert_eq!(s.selected_clips().len(), 1);
+    // Both presses undo, one step each.
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().clips.len(), clips);
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().assets_assigned(), 2);
+    // A plain click ends the range; a command that moves the selection ends it too.
+    run(&mut s, "storyboard.select", json!({"clip": 4, "extend": true}));
+    run(&mut s, "storyboard.select", json!({"clip": 8}));
+    assert_eq!(s.selected_clips().iter().map(|c| c.0).collect::<Vec<_>>(), [8]);
+    run(&mut s, "storyboard.select", json!({"clip": 10, "extend": true}));
+    run(&mut s, "storyboard.place", json!({"asset": "/art/c.png"}));
+    assert_eq!(s.selected_clips().len(), 1, "Quick fill moved the cursor, so the range is gone");
+    // Bad input.
+    assert!(matches!(s.execute("storyboard.delete", &json!({"clips": [999]})), Err(CmdError::BadParams(_))));
+    assert!(matches!(s.execute("storyboard.delete", &json!({"clips": "x"})), Err(CmdError::BadParams(_))));
+    run(&mut s, "storyboard.select", json!({"clip": null}));
+    assert!(matches!(s.execute("storyboard.delete", &json!({})), Err(CmdError::Unavailable(_))));
+}
+
+#[test]
+fn an_asset_dropped_on_a_title_card_becomes_its_background() {
+    let mut s = session();
+    run(&mut s, "storyboard.new", json!({"sample": true}));
+    let r = run(&mut s, "storyboard.place", json!({"asset": "/art/plate.mp4", "clip": 1}));
+    assert_eq!(r["background"], true);
+    assert_eq!(s.selected_clip().map(|c| c.0), Some(1), "the card stays selected");
+    let board = s.storyboard().unwrap();
+    let card = board.clip(assetcraft_storyboard::ClipId(1)).unwrap();
+    assert_eq!(card.background().map(|a| a.0.as_str()), Some("/art/plate.mp4"));
+    assert_eq!(board.fill_progress(), (0, 19), "backgrounds aren't Quick fill shots");
+    assert_eq!(next_of(&mut s), Some(2), "Quick fill still starts at the first shot");
+    // Delete on the card removes the background first.
+    let r = run(&mut s, "storyboard.delete", json!({}));
+    assert_eq!(r["deleted"], "shots");
+    assert!(s.storyboard().unwrap().clip(assetcraft_storyboard::ClipId(1)).unwrap().background().is_none());
+}
+
+fn next_of(s: &mut Session) -> Option<u64> {
+    run(s, "storyboard.state", json!({}))["summary"]["next"].as_u64()
 }

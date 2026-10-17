@@ -271,7 +271,24 @@ static COMMANDS: &[CommandSpec] = &[
         crate::track_cmd::track_preview_volume
     ),
     cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip|fill}", storyboard::sb_view),
-    cmd!(APP, "storyboard.select", "Select Clip", "Storyboard", None, "{clip: number | null}", storyboard::sb_select),
+    cmd!(
+        APP,
+        "storyboard.select",
+        "Select Clip",
+        "Storyboard",
+        None,
+        "{clip: number | null, extend?: bool} (extend = Shift+click: select the run from the last clicked clip)",
+        storyboard::sb_select
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.delete",
+        "Delete",
+        "Edit",
+        Some("Delete"),
+        "{clips?: [number]} (default: the selection) — removes the shots; with no shot left in them, removes the clips",
+        storyboard::sb_delete
+    ),
     cmd!(
         EDIT,
         "storyboard.place",

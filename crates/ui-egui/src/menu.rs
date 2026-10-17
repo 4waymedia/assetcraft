@@ -382,6 +382,10 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             item("New Storyboard", None, true, cmd(spec.id, json!({}))),
             item("New Storyboard from Sample", None, true, cmd(spec.id, json!({ "sample": true }))),
         ],
+        "storyboard.delete" => {
+            let storyboard = s.mode() == assetcraft_engine::Mode::Storyboard;
+            simple(storyboard && !s.selected_clips().is_empty())
+        }
         "storyboard.place" => {
             let file = crate::storyboard_view::focused_file(nav);
             let has_empty = s.storyboard().and_then(assetcraft_storyboard::next_empty).is_some();

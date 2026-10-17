@@ -444,3 +444,133 @@ fn the_timeline_runs_in_cut_time_and_maps_the_song_through_the_edit() {
     // Full length: one segment, nothing moves.
     assert_eq!(to_cut(&[(0.0, 87.2)], 42.0), Some(42.0));
 }
+
+fn key(k: egui::Key, modifiers: Modifiers) -> Event {
+    Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers }
+}
+
+fn click_with(ctx: &Context, nav: &mut Navigator, at: Pos2, modifiers: Modifiers, t: &mut f64) {
+    let press = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+    let held = Event::ModifiersChanged(modifiers);
+    for events in [vec![held.clone(), Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![held]] {
+        *t += 0.05;
+        frame(ctx, nav, events, *t);
+    }
+    *t += 0.05;
+    frame(ctx, nav, vec![Event::ModifiersChanged(Modifiers::NONE)], *t);
+}
+
+fn drag(ctx: &Context, nav: &mut Navigator, from: Pos2, to: Pos2, t: &mut f64) {
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        steps.push(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 8.0))]);
+    }
+    steps.push(vec![press(to, false)]);
+    steps.push(Vec::new());
+    for events in steps {
+        *t += 0.05;
+        frame(ctx, nav, events, *t);
+    }
+}
+
+fn strip_rect(ctx: &Context, n: u32) -> Rect {
+    ctx.read_response(crate::strip_view::strip_clip_id(assetcraft_storyboard::ClipId(n)))
+        .map(|r| r.rect)
+        .expect("clip drawn")
+}
+
+#[test]
+fn b1_click_and_shift_click_place_assets_in_the_strip_view_too() {
+    let ctx = Context::default();
+    let (mut nav, files) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    assert_eq!(nav.session().board_view(), assetcraft_engine::BoardView::Strip);
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let cell = |ctx: &Context, p: &std::path::Path| {
+        ctx.read_response(crate::strip_view::asset_cell_id(p)).map(|r| r.rect).expect("asset cell drawn")
+    };
+    click(&ctx, &mut nav, cell(&ctx, &files[0]).center(), &mut t);
+    click_with(&ctx, &mut nav, cell(&ctx, &files[1]).center(), Modifiers::SHIFT, &mut t);
+    let board = nav.session().storyboard().unwrap();
+    let asset = |n: u32| board.clip(assetcraft_storyboard::ClipId(n)).unwrap().asset_ids.first().map(|a| a.0.clone());
+    assert_eq!(asset(2), Some(files[0].to_string_lossy().into_owned()), "click placed in the next clip");
+    assert_eq!(asset(3), Some(files[1].to_string_lossy().into_owned()), "Shift+click placed in the one after");
+    assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(4));
+}
+
+#[test]
+fn b2_b4_shift_click_a_run_then_delete_shots_then_backspace_clips() {
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.place", json!({ "asset": "/art/a.png", "clip": 3 }));
+    nav.run("storyboard.place", json!({ "asset": "/art/b.png", "clip": 4 }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    click(&ctx, &mut nav, strip_rect(&ctx, 3).center(), &mut t);
+    click_with(&ctx, &mut nav, strip_rect(&ctx, 5).center(), Modifiers::SHIFT, &mut t);
+    let ids = |nav: &Navigator| nav.session().selected_clips().iter().map(|c| c.0).collect::<Vec<_>>();
+    assert_eq!(ids(&nav), [3, 4, 5], "Shift+click selected the run");
+    let clips = nav.session().storyboard().unwrap().clips.len();
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::Delete, Modifiers::NONE)], t);
+    assert_eq!(nav.session().storyboard().unwrap().assets_assigned(), 0, "Delete took the shots");
+    assert_eq!(nav.session().storyboard().unwrap().clips.len(), clips);
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::Backspace, Modifiers::NONE)], t);
+    assert_eq!(nav.session().storyboard().unwrap().clips.len(), clips - 3, "Backspace took the empty clips");
+    // Ctrl+Z brings them back; in Storyboard mode Backspace never navigates the Organizer.
+    let folder = nav.session().location().clone();
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::Z, Modifiers::COMMAND)], t);
+    assert_eq!(nav.session().storyboard().unwrap().clips.len(), clips);
+    assert_eq!(nav.session().location(), &folder);
+}
+
+#[test]
+fn b3_clicking_the_ruler_moves_the_playhead() {
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let c1 = strip_rect(&ctx, 1);
+    let left = c1.left() - 1.0;
+    let ruler_y = c1.top() - 18.0 - 10.0;
+    click(&ctx, &mut nav, Pos2::new(left + 10.0 * crate::strip_view::PX_PER_SEC, ruler_y), &mut t);
+    let at = nav.session().transport().position.as_secs_f64();
+    assert!((at - 10.0).abs() < 0.1, "playhead at {at}");
+    assert!(!nav.session().transport().playing);
+    // Dragging along the ruler scrubs.
+    drag(&ctx, &mut nav, Pos2::new(left + 2.0 * 44.0, ruler_y), Pos2::new(left + 5.0 * 44.0, ruler_y), &mut t);
+    let at = nav.session().transport().position.as_secs_f64();
+    assert!((at - 5.0).abs() < 0.1, "scrubbed to {at}");
+}
+
+#[test]
+fn b5_dragging_an_asset_onto_a_title_card_sets_its_background() {
+    let ctx = Context::default();
+    let (mut nav, files) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let from = ctx.read_response(crate::strip_view::asset_cell_id(&files[0])).map(|r| r.rect.center()).unwrap();
+    drag(&ctx, &mut nav, from, strip_rect(&ctx, 1).center(), &mut t);
+    let board = nav.session().storyboard().unwrap();
+    let card = board.clip(assetcraft_storyboard::ClipId(1)).unwrap();
+    assert_eq!(card.shot_type, assetcraft_storyboard::ShotType::Ttl);
+    assert_eq!(card.background().map(|a| a.0.clone()), Some(files[0].to_string_lossy().into_owned()));
+    assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(1));
+    // It draws (Viewer and timeline) without trouble.
+    for _ in 0..3 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+}

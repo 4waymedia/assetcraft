@@ -389,7 +389,7 @@ pub struct KindChange {
     pub from: TextKind,
     /// The kind now.
     pub to: TextKind,
-    /// Images dropped because a Card holds text only.
+    /// Images dropped because a Card keeps at most one (its background).
     pub removed_assets: usize,
 }
 
@@ -417,8 +417,9 @@ pub fn set_text_kind(board: &mut Storyboard, id: ClipId, kind: TextKind) -> Resu
         (TextKind::Overlay, TextKind::Card) => {
             clip.description = clip.overlay.take().unwrap_or_default();
             clip.shot_type = ShotType::Ttl;
-            change.removed_assets = clip.asset_ids.len();
-            clip.asset_ids.clear();
+            // The shot's hero frame stays as the card's background (finding B5); extra angles go.
+            change.removed_assets = clip.asset_ids.len().saturating_sub(1);
+            clip.asset_ids.truncate(1);
         }
         _ => {}
     }

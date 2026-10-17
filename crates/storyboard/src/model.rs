@@ -93,9 +93,16 @@ impl ShotType {
         }
     }
 
-    /// Whether assets can be placed in a clip of this type (title cards hold text only).
+    /// Whether Quick fill places shots in a clip of this type (title cards are skipped: their
+    /// one optional asset is a background, set by dropping on the card).
     pub fn accepts_assets(self) -> bool {
         self != ShotType::Ttl
+    }
+
+    /// Whether an asset can be dropped on a clip of this type: a shot, or a title card's
+    /// background (Paul, 2026-10-17, finding B5: "a title over a video").
+    pub fn accepts_drop(self) -> bool {
+        true
     }
 }
 
@@ -202,6 +209,11 @@ impl Clip {
             TextKind::Card => Some(&self.description),
             TextKind::Overlay => self.overlay.as_deref(),
         }
+    }
+
+    /// A title card's background asset, if it has one.
+    pub fn background(&self) -> Option<&AssetId> {
+        if self.shot_type == ShotType::Ttl { self.asset_ids.first() } else { None }
     }
 
     /// Whether Quick fill should place an asset here.

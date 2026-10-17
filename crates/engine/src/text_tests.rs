@@ -37,14 +37,15 @@ fn switching_a_title_card_is_one_undo_step_each_way() {
     assert_eq!(r["changed"], false);
     assert_eq!(s.boards.undo_len(), undo + 1);
 
-    // An image under it, then back to a card: the image goes, and the message says so.
+    // An image under it, then back to a card: the image stays as its background (B5).
     run(&mut s, "storyboard.place", json!({"asset": "/art/a.png", "clip": 1}));
     let r = run(&mut s, "storyboard.text.kind", json!({"clip": 1, "kind": "card"}));
-    assert_eq!(r["removedAssets"], 1);
-    assert!(r["message"].as_str().unwrap().contains("removed 1 image"), "{r}");
+    assert_eq!(r["removedAssets"], 0);
+    assert!(r["message"].as_str().unwrap().contains("background"), "{r}");
     assert_eq!(first(&s).shot_type, ShotType::Ttl);
+    assert_eq!(first(&s).background().map(|a| a.0.as_str()), Some("/art/a.png"));
     run(&mut s, "storyboard.undo", json!({}));
-    assert_eq!(first(&s).asset_ids.len(), 1, "undo brings the image back");
+    assert_eq!(first(&s).asset_ids.len(), 1, "undo brings the overlay shot back");
     run(&mut s, "storyboard.undo", json!({}));
     run(&mut s, "storyboard.undo", json!({}));
     assert_eq!(s.storyboard().unwrap(), &before);

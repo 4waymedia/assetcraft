@@ -148,8 +148,8 @@ impl Storyboard {
             if !scene_ids.contains(&c.scene_id) {
                 return Err(BoardError::Invalid(format!("clip #{} names unknown scene {}", c.id.0, c.scene_id.0)));
             }
-            if c.shot_type == ShotType::Ttl && !c.asset_ids.is_empty() {
-                return Err(BoardError::Invalid(format!("title card #{} has assets", c.id.0)));
+            if c.shot_type == ShotType::Ttl && c.asset_ids.len() > 1 {
+                return Err(BoardError::Invalid(format!("title card #{} has more than one background", c.id.0)));
             }
             if c.shot_type == ShotType::Ttl && c.overlay.is_some() {
                 return Err(BoardError::Invalid(format!("title card #{} also has an overlay", c.id.0)));

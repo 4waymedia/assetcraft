@@ -41,7 +41,11 @@ pub(crate) fn sb_text_kind(s: &mut Session, p: &Value) -> CmdResult {
                 plural(change.removed_assets)
             ));
         }
-        TextKind::Card => {}
+        TextKind::Card => {
+            if board_background(s, id) {
+                message.push_str(" (its shot stays as the card's background)");
+            }
+        }
     }
     Ok(json!({
         "clip": id.0,
@@ -91,4 +95,9 @@ fn parse<T>(p: &Value, key: &str, from_id: fn(&str) -> Option<T>, ids: &str) -> 
 
 fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Whether clip `id` of the open board is a title card with a background.
+fn board_background(s: &Session, id: assetcraft_storyboard::ClipId) -> bool {
+    s.storyboard().and_then(|b| b.clip(id)).is_some_and(|c| c.background().is_some())
 }

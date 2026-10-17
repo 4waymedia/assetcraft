@@ -1,8 +1,9 @@
 //! Quick fill: click assets to place them into empty clips in order.
 //!
 //! Design (4a): clicking an asset places it in the next empty clip and the cursor advances;
-//! clicking a clip in the timeline targets it ("REPLACING") for the next click. Title cards
-//! never take assets.
+//! clicking a clip in the timeline targets it ("REPLACING") for the next click. Quick fill skips
+//! title cards; an asset placed on one *by target* becomes its background (finding B5).
+//! [`delete`] removes shots first, then clips (Paul, 2026-10-17, findings B2 / B4).
 
 use std::fmt;
 
@@ -36,19 +37,52 @@ pub fn next_empty(board: &Storyboard) -> Option<ClipId> {
     board.clips.iter().find(|c| c.is_empty_shot()).map(|c| c.id)
 }
 
-/// Place `asset` into `target` (replacing its assets, the asset becomes the hero frame) or, with
-/// no target, into the next empty clip. Returns the clip that received it.
+/// Place `asset` into `target` (replacing its assets, the asset becomes the hero frame; on a
+/// title card, its background) or, with no target, into the next empty clip. Returns the clip
+/// that received it.
 pub fn place(board: &mut Storyboard, asset: AssetId, target: Option<ClipId>) -> Result<ClipId, FillError> {
     let id = match target {
         Some(id) => id,
         None => next_empty(board).ok_or(FillError::AllFilled)?,
     };
     let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(FillError::NoSuchClip(id))?;
-    if !clip.shot_type.accepts_assets() {
+    if !clip.shot_type.accepts_drop() {
         return Err(FillError::TitleCard(id));
     }
     clip.asset_ids = vec![asset];
     Ok(id)
+}
+
+/// What [`delete`] removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Deleted {
+    /// Shots (and title-card backgrounds) taken out of this many clips; the clips stay.
+    Shots(usize),
+    /// This many clips taken out of the Cut (the later clips move up).
+    Clips(usize),
+}
+
+/// Delete key on `ids`: if any of them has an asset, empty those clips and keep them (the Cut
+/// keeps its timing); if none has, remove the clips themselves, and any scene left with no clip.
+/// Unknown ids are an error and change nothing.
+pub fn delete(board: &mut Storyboard, ids: &[ClipId]) -> Result<Deleted, FillError> {
+    if let Some(id) = ids.iter().find(|id| board.clip(**id).is_none()) {
+        return Err(FillError::NoSuchClip(*id));
+    }
+    let chosen = |c: &crate::model::Clip| ids.contains(&c.id);
+    if board.clips.iter().any(|c| chosen(c) && !c.asset_ids.is_empty()) {
+        let mut n = 0;
+        for c in board.clips.iter_mut().filter(|c| chosen(c) && !c.asset_ids.is_empty()) {
+            c.asset_ids.clear();
+            n += 1;
+        }
+        return Ok(Deleted::Shots(n));
+    }
+    let before = board.clips.len();
+    board.clips.retain(|c| !chosen(c));
+    let scenes: std::collections::HashSet<_> = board.clips.iter().map(|c| c.scene_id).collect();
+    board.scenes.retain(|s| scenes.contains(&s.id));
+    Ok(Deleted::Clips(before - board.clips.len()))
 }
 
 /// Auto-fill rest: put an asset into every empty clip, in Cut order. Assets not used anywhere

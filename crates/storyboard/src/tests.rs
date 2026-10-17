@@ -105,9 +105,51 @@ fn quick_fill_places_in_order_and_skips_title_cards() {
     // Targeting replaces.
     assert_eq!(place(&mut board, AssetId("new.png".into()), Some(ClipId(3))), Ok(ClipId(3)));
     assert_eq!(board.clip(ClipId(3)).unwrap().asset_ids, vec![AssetId("new.png".into())]);
-    assert_eq!(place(&mut board, AssetId("x".into()), Some(ClipId(1))), Err(FillError::TitleCard(ClipId(1))));
+    // Targeting a title card sets its background (B5); Quick fill progress doesn't count it.
+    assert_eq!(place(&mut board, AssetId("bg.mp4".into()), Some(ClipId(1))), Ok(ClipId(1)));
+    assert_eq!(board.clip(ClipId(1)).unwrap().background(), Some(&AssetId("bg.mp4".into())));
+    assert_eq!(board.fill_progress(), (19, 19));
     assert_eq!(place(&mut board, AssetId("x".into()), Some(ClipId(99))), Err(FillError::NoSuchClip(ClipId(99))));
-    assert_eq!(board.assets_assigned(), 19);
+    assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok());
+}
+
+#[test]
+fn a_title_card_holds_at_most_one_background() {
+    let mut board = sample();
+    board.clips[0].asset_ids = vec![AssetId("a".into()), AssetId("b".into())];
+    let err = Storyboard::from_json(board.to_json().unwrap().as_bytes()).unwrap_err();
+    assert!(err.to_string().contains("more than one background"), "{err}");
+    assert_eq!(board.clips[1].background(), None, "shots have no background");
+}
+
+#[test]
+fn delete_takes_shots_first_then_clips() {
+    let mut board = sample();
+    let total = board.total();
+    let (n_clips, n_scenes) = (board.clips.len(), board.scenes.len());
+    place(&mut board, AssetId("a".into()), Some(ClipId(2))).unwrap();
+    place(&mut board, AssetId("bg".into()), Some(ClipId(1))).unwrap();
+    // Clips 1–3 selected, two have assets: the first press empties them and keeps the timing.
+    let range = [ClipId(1), ClipId(2), ClipId(3)];
+    assert_eq!(delete(&mut board, &range), Ok(Deleted::Shots(2)));
+    assert_eq!(board.assets_assigned(), 0);
+    assert_eq!((board.clips.len(), board.total()), (n_clips, total));
+    // The second press, with nothing left in them, removes the clips.
+    assert_eq!(delete(&mut board, &range), Ok(Deleted::Clips(3)));
+    assert_eq!(board.clips.len(), n_clips - 3);
+    assert!(board.total() < total);
+    assert!(board.clip(ClipId(2)).is_none());
+    assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok());
+    // Removing a whole scene drops the scene too.
+    let first_scene = board.clips[0].scene_id;
+    let all: Vec<ClipId> = board.clips.iter().filter(|c| c.scene_id == first_scene).map(|c| c.id).collect();
+    assert_eq!(delete(&mut board, &all), Ok(Deleted::Clips(all.len())));
+    assert_eq!(board.scenes.len(), n_scenes - 1);
+    assert!(board.scenes.iter().all(|s| s.id != first_scene));
+    // Unknown ids change nothing.
+    let before = board.clone();
+    assert_eq!(delete(&mut board, &[ClipId(999)]), Err(FillError::NoSuchClip(ClipId(999))));
+    assert_eq!(board, before);
 }
 
 #[test]
@@ -187,7 +229,10 @@ fn hostile_documents_are_refused() {
     assert!(matches!(edit(&|v| v["version"] = 0.into()), Err(BoardError::Invalid(_))));
     assert!(matches!(edit(&|v| v["clips"][1]["id"] = 1.into()), Err(BoardError::Invalid(_))));
     assert!(matches!(edit(&|v| v["clips"][1]["sceneId"] = 77.into()), Err(BoardError::Invalid(_))));
-    assert!(matches!(edit(&|v| v["clips"][0]["assetIds"] = serde_json::json!(["x"])), Err(BoardError::Invalid(_))));
+    assert!(matches!(
+        edit(&|v| v["clips"][0]["assetIds"] = serde_json::json!(["x", "y"])),
+        Err(BoardError::Invalid(_))
+    ));
     assert!(matches!(edit(&|v| v["clips"][1]["duration"] = u64::MAX.into()), Err(BoardError::Limit(_))));
     assert!(matches!(edit(&|v| v["clips"][1]["duration"] = (-1).into()), Err(BoardError::Parse(_))));
     assert!(matches!(edit(&|v| v["track"]["bpm"] = 0.into()), Err(BoardError::Parse(_))));
@@ -537,15 +582,17 @@ fn a_title_card_switches_to_an_overlay_and_back_without_moving_the_cut() {
     assert_eq!(board.starts(), starts);
     assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok());
 
-    // Quick fill puts an image under it; switching back drops it, and says so.
+    // Quick fill puts an image under it; switching back keeps it as the card's background (B5).
     place(&mut board, AssetId("F:/art/a.png".into()), Some(id)).unwrap();
     let c = set_text_kind(&mut board, id, TextKind::Card).unwrap();
-    assert_eq!(c.removed_assets, 1);
+    assert_eq!(c.removed_assets, 0);
     let clip = &board.clips[0];
     assert_eq!((clip.shot_type, clip.description.as_str(), clip.overlay.as_deref()), (ShotType::Ttl, "Title 1", None));
-    assert!(clip.asset_ids.is_empty());
+    assert_eq!(clip.background().map(|a| a.0.as_str()), Some("F:/art/a.png"));
     assert_eq!(board.starts(), starts);
-    assert_eq!(board, sample(), "round trip is exact");
+    assert!(Storyboard::from_json(board.to_json().unwrap().as_bytes()).is_ok(), "a card with a background is valid");
+    board.clips[0].asset_ids.clear();
+    assert_eq!(board, sample(), "round trip is exact once the background is removed");
 
     // Same kind: nothing changes.
     assert!(!set_text_kind(&mut board, id, TextKind::Card).unwrap().changed());
