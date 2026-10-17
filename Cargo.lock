@@ -267,6 +267,7 @@ dependencies = [
 name = "assetcraft"
 version = "0.0.1"
 dependencies = [
+ "assetcraft-cache",
  "assetcraft-engine",
  "assetcraft-fs",
  "assetcraft-playback",
@@ -296,6 +297,15 @@ dependencies = [
  "serde",
  "serde_json",
  "soundcraft-audio-io",
+]
+
+[[package]]
+name = "assetcraft-cache"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "siphasher",
 ]
 
 [[package]]
@@ -365,6 +375,7 @@ dependencies = [
 name = "assetcraft-thumbs"
 version = "0.0.1"
 dependencies = [
+ "assetcraft-cache",
  "assetcraft-fs",
  "assetcraft-mesh",
  "assetcraft-probe",
@@ -376,7 +387,6 @@ dependencies = [
  "photocraft-psd",
  "png",
  "serde_json",
- "siphasher",
 ]
 
 [[package]]

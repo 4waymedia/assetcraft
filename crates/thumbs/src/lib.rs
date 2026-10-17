@@ -15,12 +15,14 @@
 pub mod cache;
 pub mod decoders;
 pub mod disk;
-pub mod hash;
+/// Cache keys (moved to the cache crate in C1; same keys).
+pub use assetcraft_cache::hash;
 pub mod model;
 mod pool;
 mod probe_pool;
 mod queue;
 
+pub use assetcraft_cache::SourceId;
 pub use cache::ThumbCache;
 pub use decoders::{Decoder, supports};
 pub use disk::{DEFAULT_DISK_BUDGET, DiskCache};

@@ -1,9 +1,10 @@
 //! Stage 1 tests: disk cache, decoder registry, background probes.
 
 use crate::decoders::{self, finish};
-use crate::disk::{self, DiskCache, cache_key, is_cache_file, key_from_parts};
+use crate::disk::{self, DiskCache, cache_key, cache_key_and_head, is_legacy_file, key_from_parts, retire_legacy};
 use crate::hash::Hash128;
 use crate::*;
+use assetcraft_cache::SourceId;
 use assetcraft_fs::{FakeFs, RealFs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -44,14 +45,27 @@ fn thumb(w: u32, h: u32) -> Thumb {
     Thumb { width: w, height: h, source_width: w * 4, source_height: h * 4, rgba: vec![200; (w * h * 4) as usize] }
 }
 
-fn cache_files(dir: &Path) -> usize {
-    let Ok(shards) = std::fs::read_dir(dir) else { return 0 };
-    shards
+/// Files with extension `ext` anywhere under `dir`.
+fn count_ext(dir: &Path, ext: &str) -> usize {
+    let Ok(items) = std::fs::read_dir(dir) else { return 0 };
+    items
         .flatten()
-        .filter(|s| s.path().is_dir())
-        .flat_map(|s| std::fs::read_dir(s.path()).into_iter().flatten().flatten())
-        .filter(|f| f.path().extension().is_some_and(|e| e == "png"))
-        .count()
+        .map(|i| {
+            let p = i.path();
+            if p.is_dir() { count_ext(&p, ext) } else { usize::from(p.extension().is_some_and(|e| e == ext)) }
+        })
+        .sum()
+}
+
+/// Cache entries under a cache root.
+fn cache_files(dir: &Path) -> usize {
+    count_ext(dir, "crft")
+}
+
+/// The on-disk size of one thumbnail entry.
+fn entry_len(t: &Thumb) -> u64 {
+    let png = disk::encode(t).unwrap();
+    assetcraft_cache::entry::encode(disk::KIND, disk::FORMAT_VERSION, &SourceId::NONE, &png).len() as u64
 }
 
 // ---- disk cache ------------------------------------------------------------------------
@@ -85,9 +99,10 @@ fn disk_cache_hits_after_restart() {
 fn corrupt_cache_file_is_re_rendered() {
     let dir = TempDir::new("corrupt");
     let file = library().join("edge-cases/TINY_ICON.JPG");
-    let hash = cache_key(&RealFs, &file, 64).unwrap();
+    let (hash, source, _) = cache_key_and_head(&RealFs, &file, 64).unwrap();
     let disk = Arc::new(DiskCache::new(&dir.0, disk::DEFAULT_DISK_BUDGET));
     let path = disk.path_for(hash);
+    assert!(path.starts_with(dir.0.join("v1").join("thumbs")), "{path:?}");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, b"\x89PNG\r\n\x1a\nnot really").unwrap();
 
@@ -97,8 +112,11 @@ fn corrupt_cache_file_is_re_rendered() {
     let t = done[0].1.clone().unwrap();
     assert_eq!((t.width, t.height), (64, 64));
     assert_eq!(disk.stats(), (0, 1, 1));
-    let rewritten = disk::decode(&std::fs::read(&path).unwrap()).unwrap();
+    let rewritten = disk.get(hash, &source, 64).unwrap();
     assert_eq!(rewritten, *t, "the bad file was replaced by a good one");
+    // The same key from a file that changed since: a miss.
+    let changed = SourceId { size: source.size + 1, ..source };
+    assert!(disk.get(hash, &changed, 64).is_none());
     // A truncated file and a foreign PNG (no source chunk) are misses too.
     let bytes = disk::encode(&t).unwrap();
     assert!(disk::decode(&bytes[..bytes.len() / 2]).is_none());
@@ -109,23 +127,23 @@ fn corrupt_cache_file_is_re_rendered() {
 #[test]
 fn prune_respects_budget_and_only_touches_its_own_files() {
     let dir = TempDir::new("prune");
-    let one = disk::encode(&thumb(32, 32)).unwrap().len() as u64;
+    let one = entry_len(&thumb(32, 32));
     let disk = DiskCache::new(&dir.0, one * 10);
     let keys: Vec<Hash128> = (0..20u128).map(|n| Hash128((n + 1) << 120 | n)).collect();
     let base = SystemTime::now() - Duration::from_secs(10_000);
     for (n, key) in keys.iter().enumerate() {
-        disk.put(*key, &thumb(32, 32));
+        disk.put(*key, &SourceId::NONE, &thumb(32, 32));
         let f = std::fs::File::options().write(true).open(disk.path_for(*key)).unwrap();
         f.set_modified(base + Duration::from_secs(n as u64 * 10)).unwrap();
     }
     // Someone else's files inside the cache folder.
     let shard = disk.path_for(keys[0]).parent().unwrap().to_path_buf();
     let foreign = [
-        dir.0.join("readme.txt"),
+        disk.dir().join("readme.txt"),
         shard.join("notes.png"),
         shard.join(format!("{}.jpg", keys[0])),
-        dir.0.join("zz").join(format!("{}.png", keys[1])),
-        dir.0.join("00").join(format!("{}.png", keys[2])), // right shape, wrong shard
+        disk.dir().join("zz").join(format!("{}.crft", keys[1])),
+        disk.dir().join("00").join(format!("{}.crft", keys[2])), // right shape, wrong shard
     ];
     for f in &foreign {
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
@@ -136,26 +154,47 @@ fn prune_respects_budget_and_only_touches_its_own_files() {
     let size = disk.size_known().unwrap();
     assert!(size <= one * 8, "pruned to 80 %: {size} > {}", one * 8);
     assert!(size >= one * 7, "but no further than needed: {size}");
-    assert!(disk.get(keys[0], 64).is_none(), "the oldest went first");
-    assert!(disk.get(keys[19], 64).is_some(), "the newest stays");
+    assert!(disk.get(keys[0], &SourceId::NONE, 64).is_none(), "the oldest went first");
+    assert!(disk.get(keys[19], &SourceId::NONE, 64).is_some(), "the newest stays");
     assert!(foreign.iter().all(|f| f.exists()), "foreign files are never deleted");
 
     disk.clear();
-    assert_eq!(cache_files(&dir.0), 3, "only the three foreign .png files are left");
+    assert_eq!(cache_files(&dir.0), 2, "only the two foreign .crft files are left");
     assert!(foreign.iter().all(|f| f.exists()));
     assert_eq!(disk.size_known(), Some(0));
+}
 
-    assert!(is_cache_file("ab", &format!("ab{}.png", "0".repeat(30))));
-    assert!(is_cache_file("ab", &format!("ab{}.tmp123x4", "0".repeat(30))));
-    assert!(!is_cache_file("ab", &format!("ab{}.tmp", "0".repeat(30))));
-    assert!(!is_cache_file("AB", &format!("AB{}.png", "0".repeat(30))));
-    assert!(!is_cache_file("ab", &format!("ab{}.png.bak", "0".repeat(30))));
+#[test]
+fn thumbnails_from_before_c1_are_retired_once_and_nothing_else_is_touched() {
+    let dir = TempDir::new("legacy");
+    let shard = dir.0.join("ab");
+    std::fs::create_dir_all(&shard).unwrap();
+    let old = [shard.join(format!("ab{}.png", "0".repeat(30))), shard.join(format!("ab{}.tmp123x4", "1".repeat(30)))];
+    let keep = [shard.join("notes.png"), dir.0.join("readme.txt")];
+    for f in old.iter().chain(&keep) {
+        std::fs::write(f, b"x").unwrap();
+    }
+    assert_eq!(retire_legacy(&dir.0), 2);
+    assert!(old.iter().all(|f| !f.exists()) && keep.iter().all(|f| f.exists()));
+    // An emptied folder goes; a missing one is fine.
+    let empty = TempDir::new("legacy-empty");
+    std::fs::create_dir_all(empty.0.join("cd")).unwrap();
+    std::fs::write(empty.0.join("cd").join(format!("cd{}.png", "2".repeat(30))), b"x").unwrap();
+    assert_eq!(retire_legacy(&empty.0), 1);
+    assert!(!empty.0.exists());
+    assert_eq!(retire_legacy(&empty.0), 0);
+
+    assert!(is_legacy_file("ab", &format!("ab{}.png", "0".repeat(30))));
+    assert!(is_legacy_file("ab", &format!("ab{}.tmp123x4", "0".repeat(30))));
+    assert!(!is_legacy_file("ab", &format!("ab{}.tmp", "0".repeat(30))));
+    assert!(!is_legacy_file("AB", &format!("AB{}.png", "0".repeat(30))));
+    assert!(!is_legacy_file("ab", &format!("ab{}.png.bak", "0".repeat(30))));
 }
 
 #[test]
 fn background_prune_and_clear_run_off_the_calling_thread() {
     let dir = TempDir::new("background");
-    let one = disk::encode(&thumb(16, 16)).unwrap().len() as u64;
+    let one = entry_len(&thumb(16, 16));
     let disk = DiskCache::open(&dir.0, one * 4);
     let deadline = Instant::now() + Duration::from_secs(10);
     while disk.size_known().is_none() && Instant::now() < deadline {
@@ -164,7 +203,7 @@ fn background_prune_and_clear_run_off_the_calling_thread() {
     assert_eq!(disk.size_known(), Some(0), "open() scans in the background");
     let mut over = false;
     for n in 0..6u128 {
-        over |= disk.put(Hash128(n << 120 | n), &thumb(16, 16));
+        over |= disk.put(Hash128(n << 120 | n), &SourceId::NONE, &thumb(16, 16));
     }
     assert!(over, "put reports crossing the budget");
     disk.prune_in_background();

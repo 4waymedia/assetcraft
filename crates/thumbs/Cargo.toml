@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+assetcraft-cache = { workspace = true }
 assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }
 assetcraft-mesh = { workspace = true }
@@ -19,7 +20,6 @@ image = { workspace = true }
 pdfcraft-render = { workspace = true }
 png = { workspace = true }
 serde_json = { workspace = true }
-siphasher = { workspace = true }
 photocraft-psd = { workspace = true }
 lightcraft-raw = { workspace = true }
 lightcraft-meta = { workspace = true }

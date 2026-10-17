@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 assetcraft-ui-egui = { workspace = true }
 assetcraft-engine = { workspace = true }
+assetcraft-cache = { workspace = true }
 assetcraft-fs = { workspace = true }
 assetcraft-thumbs = { workspace = true }
 assetcraft-watch = { workspace = true }

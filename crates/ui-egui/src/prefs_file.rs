@@ -37,13 +37,14 @@ pub fn config_path() -> Option<PathBuf> {
     Some(dir.join(FILE_NAME))
 }
 
-/// The disk thumbnail cache folder for this platform (AssetCraft's own, disposable data):
+/// Where thumbnails were cached before the suite cache (C1, 2026-10-16), so the app can delete
+/// them once (`assetcraft_thumbs::disk::retire_legacy`):
 /// - Windows: `%LOCALAPPDATA%\AssetCraft\thumbs`
 /// - macOS: `~/Library/Caches/AssetCraft/thumbs`
 /// - elsewhere: `$XDG_CACHE_HOME/assetcraft/thumbs`, else `~/.cache/assetcraft/thumbs`
 ///
-/// The thumbs crate never computes OS paths; the app passes this in.
-pub fn thumb_cache_dir() -> Option<PathBuf> {
+/// The cache itself now lives where `assetcraft_cache::root` says.
+pub fn legacy_thumb_dir() -> Option<PathBuf> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     let os = if cfg!(windows) {
         Os::Windows
@@ -66,7 +67,7 @@ pub enum Os {
     Other,
 }
 
-/// [`thumb_cache_dir`] for `os` with environment lookups from `var` (pure, for tests).
+/// [`legacy_thumb_dir`] for `os` with environment lookups from `var` (pure, for tests).
 pub fn cache_dir_for(os: Os, var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     let base = match os {
         Os::Windows => var("LOCALAPPDATA").filter(|p| p.is_absolute())?.join("AssetCraft"),

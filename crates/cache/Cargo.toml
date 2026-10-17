@@ -1,0 +1,19 @@
+[package]
+name = "assetcraft-cache"
+description = "The suite cache (docs/design/cache.md): roots per platform, versioned kind folders, content keys, checked entries, atomic writes, budgets. Std only; the first user of what is meant to become craft-cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+siphasher = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

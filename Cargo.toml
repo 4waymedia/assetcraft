@@ -24,6 +24,7 @@ assetcraft-storyboard = { path = "crates/storyboard" }
 assetcraft-audio = { path = "crates/audio" }
 assetcraft-playback = { path = "crates/playback" }
 assetcraft-analysis = { path = "crates/analysis" }
+assetcraft-cache = { path = "crates/cache" }
 # external
 # SoundCraft's audio file I/O (MIT OR Apache-2.0; symphonia inside, MPL-2.0 by decision AD1).
 # Pinned to SoundCraft 0.7.0, the commit docs/track-analysis.md was written against.

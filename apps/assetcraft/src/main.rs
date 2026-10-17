@@ -3,8 +3,10 @@
 //! `assetcraft [FOLDER]` opens FOLDER (else the last folder, else Pictures, else home).
 //! Prefs live in the per-user config folder (see `assetcraft_ui_egui::prefs_file::config_path`)
 //! and are saved when favorites, view settings or the panel layout change, and on exit.
-//! Thumbnails are cached on disk in the per-user cache folder (see
-//! `assetcraft_ui_egui::prefs_file::thumb_cache_dir`), up to 1 GiB.
+//! Thumbnails are cached on disk in the suite cache (`docs/design/cache.md`; the folder from
+//! `assetcraft_cache::root`: `%LOCALAPPDATA%\AssetCraft\Cache`, `~/Library/Caches/AssetCraft`,
+//! `~/.cache/assetcraft`, or `ASSETCRAFT_CACHE_DIR`), up to 1 GiB. Thumbnails from before C1 are
+//! deleted once, in the background (`assetcraft_thumbs::disk::retire_legacy`).
 //! The open folder is watched (`assetcraft-watch`); where watching fails, F5 still refreshes.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -47,8 +49,14 @@ fn main() -> ExitCode {
     let prefs = path.as_deref().map(prefs_file::load).unwrap_or_default();
     let store = PrefsStore::new(path, prefs.clone());
     let mut session = Session::new(Arc::new(RealFs::new()), Arc::new(SystemLauncher), prefs);
-    if let Some(dir) = prefs_file::thumb_cache_dir() {
-        session = session.with_thumb_cache(DiskCache::open(dir, DEFAULT_DISK_BUDGET));
+    let cache_root = assetcraft_cache::root::resolve_here(&assetcraft_cache::root::ASSETCRAFT, None);
+    if let Some(root) = cache_root.dir {
+        session = session.with_thumb_cache(DiskCache::open(root, DEFAULT_DISK_BUDGET));
+    }
+    if let Some(old) = prefs_file::legacy_thumb_dir() {
+        let _ = std::thread::Builder::new()
+            .name("assetcraft-retire-thumbs".into())
+            .spawn(move || assetcraft_thumbs::disk::retire_legacy(&old));
     }
     // Watch your Cut plays the track on the default output device (opened on the first ▶).
     session.set_player(Arc::new(assetcraft_playback::DevicePlayer::new()));

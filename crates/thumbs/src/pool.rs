@@ -308,7 +308,9 @@ fn job(
 ) -> Result<Thumb, ThumbError> {
     let render = |services: &dyn Services, key: &ThumbKey| render_with(services, key, options);
     let Some(disk) = disk else { return render(services, key) };
-    let Ok((hash, head)) = cache_key_and_head(services, &key.path, key.max_side) else { return render(services, key) };
+    let Ok((hash, source, head)) = cache_key_and_head(services, &key.path, key.max_side) else {
+        return render(services, key);
+    };
     let ext = key.path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase());
     let (sniffed, _, _) = assetcraft_probe::probe_bytes(&head, ext.as_deref());
     if !options.allows(sniffed) {
@@ -316,12 +318,13 @@ fn job(
     }
     // Cache files are our own, but a damaged one is still untrusted input to the PNG decoder.
     let max_side = key.max_side;
-    let hit = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| disk.get(hash, max_side))).ok().flatten();
+    let hit =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| disk.get(hash, &source, max_side))).ok().flatten();
     if let Some(thumb) = hit {
         return Ok(thumb);
     }
     let thumb = render(services, key)?;
-    if disk.put(hash, &thumb) {
+    if disk.put(hash, &source, &thumb) {
         disk.prune_in_background();
     }
     Ok(thumb)

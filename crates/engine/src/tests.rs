@@ -441,7 +441,7 @@ fn cache_clear_needs_a_cache_and_empties_it_in_the_background() {
     let cache = Arc::new(DiskCache::new(&dir, 1 << 20));
     let thumb = assetcraft_thumbs::Thumb { width: 2, height: 2, source_width: 2, source_height: 2, rgba: vec![1; 16] };
     let key = assetcraft_thumbs::hash::Hash128(0xab << 120);
-    cache.put(key, &thumb);
+    cache.put(key, &assetcraft_thumbs::SourceId::NONE, &thumb);
     assert!(cache.path_for(key).exists());
     let mut s = s.with_thumb_cache(Arc::clone(&cache));
     let state = run(&mut s, "app.state", json!({}));

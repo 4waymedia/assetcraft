@@ -72,7 +72,7 @@ here with repository, path and revision.
   (`is_cache_file`) are adapted from LightCraft crates/preview/src/disk.rs (storytold/lightcraft,
   rev 701f78e, MIT OR Apache-2.0). Changed: PNG via the `png` crate instead of JPEG, a source-size
   text chunk, a head/tail content key, background prune and clear.
-- crates/thumbs/src/hash.rs: SipHash-1-3-128 streaming hasher with fixed keys, adapted from
+- crates/cache/src/hash.rs (moved from crates/thumbs/src/hash.rs in C1): SipHash-1-3-128 streaming hasher with fixed keys, adapted from
   LightCraft crates/preview/src/hash.rs (storytold/lightcraft, rev 701f78e, MIT OR Apache-2.0);
   different keys and length-prefixed byte input.
 - crates/analysis/src/curves.rs: the onset-strength curve (log-magnitude triangular bands 24 to

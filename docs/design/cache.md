@@ -1,6 +1,6 @@
 # Suite cache and app storage: requirements for Windows, macOS, Linux and the web
 
-_2026-10-16 · Stage 4 (Storyboard mode, analysis A2c) · spec v2, decisions open (supersedes
+_2026-10-16 · Stage 4 (Storyboard mode, analysis A2c) · spec v2.1: C1 built; D-C1, D-C2, D-C4 decided (supersedes
 [archive/cache-proposal-v1.md](../archive/cache-proposal-v1.md))_
 
 - **Scope:** where every Crafting app keeps the data it owns (settings, recovery, caches, and
@@ -97,7 +97,7 @@ name), hash (FNV-1a vs SipHash), eviction target (100 % vs 80 %), command ids (`
 ### 3.2 Layout
 
 ```
-<cache root>/v<N>/<kind>/<2 hex>/<32 hex>.<ext>        (+ CACHEDIR.TAG at <cache root>)
+<cache root>/v<N>/<kind>/<2 hex>/<32 hex>.crft        (+ CACHEDIR.TAG at <cache root>)
 ```
 
 - **R4** `<kind>`: `thumbs`, `previews`, `waveforms`, `analysis`, `frames`, `layers`, `mattes`, …;
@@ -105,6 +105,9 @@ name), hash (FNV-1a vs SipHash), eviction target (100 % vs 80 %), command ids (`
   folder; the old one is deleted whole on the next prune.
 - **R5** `CACHEDIR.TAG` (the Cache Directory Tagging spec, as LightCraft does) at every cache root
   on desktop, so backup tools skip it.
+- **R5a** Every entry is a `.crft` file (§3.3's entry format); what the payload is (a PNG, JSON)
+  is the kind's business, recorded in the kind's format version (C1, 2026-10-16: one extension
+  keeps the own-files-only rule simple for every kind).
 - **R6** Names stay short (≤ 60 characters under the root), which keeps Windows under `MAX_PATH`
   even below a long `%LOCALAPPDATA%`; names are lower-case hex, so case-insensitive file systems
   (Windows, macOS default) and case-sensitive ones agree.
@@ -234,7 +237,7 @@ pub struct SourceId { pub size: u64, pub mtime_ns: i64, pub head_tail: [u8; 16] 
 
 | Phase | Delivers                                                                                                           | Owner                    |
 |-------|--------------------------------------------------------------------------------------------------------------------|--------------------------|
-| C1    | `assetcraft-cache` (desktop + memory backends, R1–R18), AssetCraft thumbnails moved onto it (the old `thumbs/` folder cleared once) | Claude                   |
+| C1    | **Built 2026-10-16.** `assetcraft-cache` (L1; desktop + memory backends; roots R1–R3, layout R4–R6, entries R7–R9, writes R10–R14, budgets R15–R16); AssetCraft thumbnails moved onto it (kind `thumbs` v1), the old `thumbs/` folder retired once in the background. Commands (R17) stay `cache.clear` / `app.state` until C3 | Claude                   |
 | C2    | `analysis` and `waveforms` kinds for A2c, in the shared cache (R19–R22)                                            | Claude                   |
 | C3    | Settings ▸ Cache page and the `cache.*` commands                                                                   | Claude                   |
 | C4    | OPFS and IndexedDB backends (R23–R27), tested in a headless browser                                                | Claude                   |
@@ -244,10 +247,10 @@ pub struct SourceId { pub size: u64, pub mtime_ns: i64, pub head_tail: [u8; 16] 
 
 | ID   | Question                                                                                                  | Recommendation                                                                                                   | Needed by |
 |------|-----------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|-----------|
-| D-C1 | Shared cache for app-neutral results (§3.6)?                                                              | **Yes**, with the sandbox fallback (R21): analyse a track once for the whole suite; no app depends on it         | C2 (A2c)  |
-| D-C2 | Folder names: app id (`assetcraft`, craft-libs policy) or display name (`AssetCraft`, what most apps do on Windows and macOS)? | **Display name on Windows and macOS, lower-case id on Linux**: what users see in Explorer and Finder, and what EffectCraft, PdfCraft, PhotoCraft and FilmCraft already do | C1        |
+| D-C1 | Shared cache for app-neutral results (§3.6)?                                                              | **Decided (Paul, 2026-10-16): yes**, with the sandbox fallback (R21); FilmCraft is the next app to read it ("I want to implement a very similar feature into FilmCraft. So, we want to share the cache") | C2 (A2c)  |
+| D-C2 | Folder names: app id (`assetcraft`, craft-libs policy) or display name (`AssetCraft`, what most apps do on Windows and macOS)? | **Decided (Paul, 2026-10-16, "build C1" on the recommendations): display name on Windows and macOS, lower-case id on Linux** | C1        |
 | D-C3 | Web backends OPFS → IndexedDB → memory, all from Rust through `web-sys` (no JS glue)?                    | **Yes**; EffectCraft's `host.js` storage becomes an upstream opportunity (G6)                                   | C4        |
-| D-C4 | Shared cache folder name: `Crafting`?                                                                     | **`Crafting`** (`crafting` on Linux): neutral, matches "Crafting Apps"                                           | C2        |
+| D-C4 | Shared cache folder name: `Crafting`?                                                                     | **Decided (Paul, 2026-10-16): `Crafting`** (`crafting` on Linux)                                                  | C2        |
 | D-C5 | `cache.*` and `storage.*` as the suite's command ids, with the existing ids as aliases?                   | **Yes**                                                                                                          | C3        |
 | D-C6 | Cache beside the media (R28)                                                                              | **Later, opt-in, after Stage 2**                                                                                 | Stage 2   |
 
