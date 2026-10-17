@@ -7,6 +7,7 @@
 
 mod audio_out;
 mod commands;
+mod decode;
 pub mod effect;
 pub mod generate_cmd;
 pub mod launch;
@@ -174,6 +175,7 @@ pub struct Session {
     audio: audio_out::TrackAudio,
     /// Waveform overviews for the Start screen's timeline (`track.peaks`).
     waveforms: waveform::Waveforms,
+    decodes: decode::Decodes,
     /// Where Storyboard mode's Start screen looks for music (`storyboard.musicFolder`).
     music_folder: Option<PathBuf>,
     /// Track preview volume, 0–1 (`track.previewVolume`).
@@ -214,6 +216,7 @@ impl Session {
             boards: storyboard::Boards::default(),
             audio: audio_out::TrackAudio::default(),
             waveforms: waveform::Waveforms::default(),
+            decodes: decode::Decodes::default(),
             music_folder: prefs.music_folder.clone(),
             preview_volume: prefs.preview_volume.map_or(audio_out::DEFAULT_PREVIEW_VOLUME, |p| f32::from(p) / 100.0),
         };

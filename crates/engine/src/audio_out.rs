@@ -5,7 +5,9 @@
 //! audio). When a storyboard has a track:
 //! - **Decoding** runs on a background thread, started by `storyboard.play` or, once the app
 //!   has given a real player, by [`Session::poll_audio`] as soon as the board shows, so the
-//!   track is usually ready before the first ▶.
+//!   track is usually ready before the first ▶. The decode is the shared one in
+//!   [`crate::decode`], so the Start screen's waveform, its preview and the Cut never decode the
+//!   same file twice.
 //! - **`storyboard.play`** starts the track at the playhead through the board's audio edit (Fit
 //!   to length); pause, seek, new, generate, undo and redo stop it. If the decode isn't done,
 //!   the Cut starts silent and [`Session::poll_audio`] (called every frame by the window) brings
@@ -17,10 +19,11 @@
 //! silent and `storyboard.state` says why (`transport.audio`).
 
 use crate::Session;
-use assetcraft_audio::{Audio, Edit, Player, Program, SilentPlayer};
+use crate::decode::{Load, Slot};
+use assetcraft_audio::{Edit, Player, Program, SilentPlayer};
 use assetcraft_storyboard::{Ticks, TrackEdit};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Preview volume until the user sets one: a quick, quiet sample (Paul, 2026-10-16: "most people
@@ -33,22 +36,11 @@ pub fn volume_gain(volume: f32) -> f32 {
     v * v
 }
 
-/// A background decode.
-#[derive(Debug, Clone)]
-enum Load {
-    Loading,
-    Ready(Arc<Audio>),
-    Failed(String),
-}
-
-type Slot = Arc<Mutex<Load>>;
-
 /// The session's track audio: player, decode, current program.
 pub(crate) struct TrackAudio {
     player: Arc<dyn Player>,
     /// A real output was given: decode ahead of the first ▶.
     prefetch: bool,
-    load: Option<(PathBuf, Slot)>,
     program: Option<(PathBuf, Option<TrackEdit>, Arc<Program>)>,
     /// What the player was last started with (`None` = stopped).
     playing: Option<Arc<Program>>,
@@ -71,7 +63,6 @@ impl Default for TrackAudio {
         TrackAudio {
             player: Arc::new(SilentPlayer),
             prefetch: false,
-            load: None,
             program: None,
             playing: None,
             failed: None,
@@ -108,32 +99,13 @@ impl Session {
         path.has_root().then(|| (path, t.edit.clone()))
     }
 
-    /// The decode slot for `path`, starting the decode if it isn't loading or loaded.
-    fn load_slot(&mut self, path: &PathBuf) -> Slot {
-        if let Some((p, slot)) = &self.audio.load
-            && p == path
-        {
-            return Arc::clone(slot);
-        }
-        let slot: Slot = Arc::new(Mutex::new(Load::Loading));
-        let (services, file, out) = (Arc::clone(&self.services), path.clone(), Arc::clone(&slot));
-        let spawned = std::thread::Builder::new().name("assetcraft-track-decode".into()).spawn(move || {
-            let result = match assetcraft_audio::load(services.as_ref(), &file) {
-                Ok(a) => Load::Ready(Arc::new(a)),
-                Err(e) => Load::Failed(e.to_string()),
-            };
-            *out.lock().unwrap_or_else(PoisonError::into_inner) = result;
-        });
-        if let Err(e) = spawned {
-            *slot.lock().unwrap_or_else(PoisonError::into_inner) = Load::Failed(format!("can't start decoding: {e}"));
-        }
-        self.audio.load = Some((path.clone(), Arc::clone(&slot)));
-        slot
+    /// The shared decode slot for `path`, starting the decode if it isn't kept.
+    pub(crate) fn load_slot(&mut self, path: &Path) -> Slot {
+        self.decodes.slot(&self.services, path)
     }
 
-    fn load_state(&self, path: &PathBuf) -> Option<Load> {
-        let (p, slot) = self.audio.load.as_ref()?;
-        (p == path).then(|| slot.lock().unwrap_or_else(PoisonError::into_inner).clone())
+    pub(crate) fn load_state(&self, path: &Path) -> Option<Load> {
+        self.decodes.state(path)
     }
 
     /// The program for the board's track, if decoded (cached per file and edit).
@@ -145,8 +117,8 @@ impl Session {
         {
             return Some(Arc::clone(prog));
         }
-        let Some(Load::Ready(audio)) = self.load_state(&path) else { return None };
-        let prog = Arc::new(Program::new(audio, edit_now.as_ref().map(edit).as_ref()));
+        let Some(Load::Ready(decoded)) = self.load_state(&path) else { return None };
+        let prog = Arc::new(Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref()));
         self.audio.program = Some((path, edit_now, Arc::clone(&prog)));
         Some(prog)
     }
@@ -227,8 +199,9 @@ impl Session {
         self.load_slot(&path);
         self.audio.preview =
             Some(Preview { path, from: if from.is_finite() { from.max(0.0) } else { 0.0 }, started: false });
+        let path = self.audio.preview.as_ref().map(|p| p.path.clone());
         self.poll_preview();
-        self.preview_status()
+        self.preview_status(path.as_deref())
     }
 
     /// Stop a preview (no-op when none).
@@ -247,8 +220,8 @@ impl Session {
             return true;
         }
         match self.load_state(&p.path) {
-            Some(Load::Ready(audio)) => {
-                let program = Arc::new(Program::new(audio, None));
+            Some(Load::Ready(decoded)) => {
+                let program = Arc::new(Program::new(Arc::clone(&decoded.audio), None));
                 self.audio.player.set_volume(volume_gain(self.preview_volume));
                 let ok = self.audio.player.play(program, p.from).is_ok();
                 match &mut self.audio.preview {
@@ -289,16 +262,23 @@ impl Session {
         self.audio.preview.as_ref().filter(|p| p.started).and_then(|_| self.audio.player.position())
     }
 
-    fn preview_status(&self) -> String {
+    /// Seconds into `audio` being heard now, when the playing preview is that track (the one
+    /// question both the track column and the timeline ask).
+    pub fn preview_heard(&self, audio: &str) -> Option<f64> {
+        match self.preview_state() {
+            Some((p, false)) if p.to_string_lossy() == audio => self.preview_position(),
+            _ => None,
+        }
+    }
+
+    fn preview_status(&self, path: Option<&Path>) -> String {
         match &self.audio.preview {
             Some(p) if p.started => "playing".into(),
             Some(_) => "loading".into(),
-            None => {
-                match self.audio.load.as_ref().map(|(_, s)| s.lock().unwrap_or_else(PoisonError::into_inner).clone()) {
-                    Some(Load::Failed(e)) => format!("failed: {e}"),
-                    _ => "stopped".into(),
-                }
-            }
+            None => match path.and_then(|p| self.load_state(p)) {
+                Some(Load::Failed(e)) => format!("failed: {e}"),
+                _ => "stopped".into(),
+            },
         }
     }
 

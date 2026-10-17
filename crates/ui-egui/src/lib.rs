@@ -25,6 +25,7 @@ mod strip_view;
 mod text_view;
 pub mod theme;
 mod thumbnails;
+mod timebar;
 mod widgets;
 
 pub use dock::{Panel, default_layout};

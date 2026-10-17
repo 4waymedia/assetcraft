@@ -133,7 +133,6 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
     });
     ui.separator();
     let previewing = nav.session.preview_state().map(|(p, loading)| (p.to_string_lossy().into_owned(), loading));
-    let heard = nav.session.preview_position();
     let footer_h = 28.0;
     let list_h = (ui.available_height() - footer_h).max(80.0);
     let mut preview: Option<Value> = None;
@@ -145,7 +144,7 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
                 let selected = chosen == Some(cue.as_str());
                 let audio = t["audio"].as_str().unwrap_or("").to_owned();
                 let state = previewing.as_ref().filter(|(p, _)| *p == audio).map(|(_, loading)| *loading);
-                let at = if state == Some(false) { heard } else { None };
+                let at = nav.session.preview_heard(&audio);
                 let (clicked, play, seek) = row(ui, t, selected, state, at);
                 if let Some(from) = seek {
                     preview = Some(json!({ "path": audio, "from": from }));

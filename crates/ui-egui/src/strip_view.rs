@@ -571,7 +571,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let playing = nav.session.transport().playing;
     let shift = ui.input(|i| i.modifiers.shift);
     let mut select: Option<ClipId> = None;
-    let mut scrub: Option<(f64, Scrub)> = None;
+    let mut scrub: Option<(f64, crate::timebar::Scrub)> = None;
     let mut drop: Option<(ClipId, String)> = None;
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let ctx = ui.ctx().clone();
@@ -583,40 +583,18 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
         .show(ui, |ui| {
             let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H), Sense::hover());
             let left = area.left() + 8.0;
+            let to_secs = |x: f32| (((x - left) / PX_PER_SEC).max(0.0) as f64).min(total.max(0.0) as f64);
             // Ruler and scene-marker row: click or drag to move the playhead (finding B3).
             let ruler = Rect::from_min_size(area.min, vec2(width, RULER_H + MARKER_H));
-            let r = ui.interact(ruler, ui.id().with("sb-ruler"), Sense::click_and_drag());
-            let r =
-                r.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Click or drag to move the playhead");
-            if let Some(pos) = r.interact_pointer_pos() {
-                let secs = (((pos.x - left) / PX_PER_SEC).max(0.0) as f64).min(total.max(0.0) as f64);
-                let how = if r.drag_started() {
-                    Some(Scrub::Start)
-                } else if r.drag_stopped() {
-                    Some(Scrub::Stop)
-                } else if r.dragged() {
-                    Some(Scrub::Move)
-                } else if r.clicked() {
-                    Some(Scrub::Click)
-                } else {
-                    None
-                };
-                scrub = how.map(|h| (secs, h));
+            let tip = "Click or drag to move the playhead";
+            if let Some((x, how)) = crate::timebar::scrub_area(ui, ruler, ui.id().with("sb-ruler"), tip) {
+                scrub = Some((to_secs(x), how));
             }
             let painter = ui.painter().clone();
             let weak = ui.visuals().weak_text_color();
-            // Ruler: a tick per second, a label every 5 s.
-            let secs = (width / PX_PER_SEC).ceil() as i32;
-            for s in 0..=secs {
-                let x = left + s as f32 * PX_PER_SEC;
-                let long = s % 5 == 0;
-                let top = area.top() + if long { 4.0 } else { 12.0 };
-                painter.line_segment([pos2(x, top), pos2(x, area.top() + RULER_H)], Stroke::new(1.0, weak));
-                if long {
-                    let label = format!("{}:{:02}", s / 60, s % 60);
-                    painter.text(pos2(x + 3.0, area.top()), Align2::LEFT_TOP, label, FontId::monospace(10.0), weak);
-                }
-            }
+            let ruler_line = Rect::from_min_size(area.min, vec2(width, RULER_H));
+            let len = f64::from((width - 8.0) / PX_PER_SEC);
+            crate::timebar::paint_ruler(&painter, ruler_line, PX_PER_SEC, len, |t| left + t as f32 * PX_PER_SEC, weak);
             if track_len > 0.0 {
                 let x = left + track_len * PX_PER_SEC;
                 painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(1.0, ACCENT));
@@ -663,7 +641,12 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 }
             }
             let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
-            painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(2.0, SELECT));
+            crate::timebar::paint_playhead(&painter, x, area.top(), area.bottom(), SELECT);
+            // Grab the playhead anywhere along it (over the clips too) and drag to scrub.
+            let grab = crate::timebar::playhead_handle(ui, x, area.top(), area.bottom(), ui.id().with("sb-playhead"));
+            if let Some((x, how)) = grab {
+                scrub = Some((to_secs(x), how));
+            }
             if playing {
                 ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
             }
@@ -680,18 +663,10 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     }
 }
 
-/// What the pointer did on the ruler this frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Scrub {
-    Click,
-    Start,
-    Move,
-    Stop,
-}
-
-/// Move the playhead to `secs`. A click while playing plays on from there; a drag scrubs
+/// Move the Cut's playhead to `secs`. A click while playing plays on from there; a drag scrubs
 /// (paused), and if it started while playing, playback resumes where it stops.
-pub(crate) fn scrub_to(nav: &mut Navigator, secs: f64, how: Scrub, playing: bool) {
+pub(crate) fn scrub_to(nav: &mut Navigator, secs: f64, how: crate::timebar::Scrub, playing: bool) {
+    use crate::timebar::Scrub;
     match how {
         Scrub::Click if playing => {
             nav.run("storyboard.play", json!({ "from": secs }));

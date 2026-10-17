@@ -574,3 +574,164 @@ fn b5_dragging_an_asset_onto_a_title_card_sets_its_background() {
         frame(&ctx, &mut nav, Vec::new(), t);
     }
 }
+
+/// A 16-bit mono WAV, `secs` long at 8 kHz, of a quiet square wave.
+fn wav(secs: u32) -> Vec<u8> {
+    let (rate, frames) = (8_000u32, secs * 8_000);
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + frames * 2).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 2).to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(frames * 2).to_le_bytes());
+    for i in 0..frames {
+        let s: i16 = if (i / 40) % 2 == 0 { 2000 } else { -2000 };
+        b.extend_from_slice(&s.to_le_bytes());
+    }
+    b
+}
+
+/// A music folder with two analysed 64 s songs, a.wav and b.wav, on the Start screen with a
+/// recording player. Returns the cue maps and audio paths.
+fn two_songs(tag: &str) -> (Navigator, Arc<assetcraft_engine::RecordingPlayer>, [(String, String); 2]) {
+    let dir = std::env::temp_dir().join(format!("ac-two-{tag}-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let rate = 8_000u64;
+    let mut out = Vec::new();
+    for name in ["a", "b"] {
+        let cue = json!({
+            "version": 1, "analyzer": "test",
+            "track": { "file": format!("{name}.wav"), "title": name.to_uppercase(), "artist": "Me", "license": "CC0-1.0", "credit": "" },
+            "sampleRate": rate, "durationFrames": 64 * rate, "bpm": 120.0, "beatsPerBar": 4, "pulseClarity": 0.9,
+            "beats": (0..128).map(|i| i * rate / 2).collect::<Vec<u64>>(),
+            "downbeats": (0..32).map(|i| i * 2 * rate).collect::<Vec<u64>>(),
+            "sections": [{ "start": 0, "end": 32 * rate, "label": "Verse", "energy": 0.4 },
+                         { "start": 32 * rate, "end": 64 * rate, "label": "Chorus", "energy": 0.9 }],
+            "hits": [], "fits": {}
+        });
+        let cue_path = dir.join(format!("{name}.cuemap.json"));
+        assert!(std::fs::write(&cue_path, cue.to_string()).is_ok());
+        assert!(std::fs::write(dir.join(format!("{name}.wav")), wav(64)).is_ok());
+        out.push((
+            cue_path.to_string_lossy().into_owned(),
+            dir.join(format!("{name}.wav")).to_string_lossy().into_owned(),
+        ));
+    }
+    let mut nav = nav();
+    let player = Arc::new(assetcraft_engine::RecordingPlayer::default());
+    nav.session.set_player(player.clone());
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    let pair = [out[0].clone(), out[1].clone()];
+    (nav, player, pair)
+}
+
+/// Run frames until `done` or about 10 s.
+fn frames_until(ctx: &Context, nav: &mut Navigator, t: &mut f64, done: impl Fn(&Navigator) -> bool) -> bool {
+    for _ in 0..2000 {
+        *t += 0.005;
+        frame(ctx, nav, Vec::new(), *t);
+        if done(nav) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    false
+}
+
+#[test]
+fn picking_another_song_stops_the_previous_preview() {
+    let ctx = Context::default();
+    let (mut nav, player, [(cue_a, audio_a), (cue_b, audio_b)]) = two_songs("pick");
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    crate::start_view::pick_track(&mut nav, cue_a.clone());
+    nav.run("track.preview", json!({ "path": audio_a, "from": 32.0 }));
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a).is_some()), "A plays");
+    // Same song again: keeps playing. Another song: A stops.
+    crate::start_view::pick_track(&mut nav, cue_a);
+    assert!(nav.session().preview_state().is_some());
+    crate::start_view::pick_track(&mut nav, cue_b.clone());
+    assert!(nav.session().preview_state().is_none(), "A stopped when B was picked");
+    assert_eq!(player.log().last().map(String::as_str), Some("stop"));
+    assert_eq!(nav.state.storyboard.start.track.as_deref(), Some(cue_b.as_str()));
+    // B's waveform decode is the one its preview uses: once drawn, a section click plays at once.
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n
+        .state
+        .storyboard
+        .start
+        .waveform
+        .as_ref()
+        .is_some_and(|(p, _)| *p == audio_b)));
+    let r = nav.run("track.preview", json!({ "path": audio_b, "from": 0.0 })).unwrap_or_default();
+    assert_eq!(r["preview"], "playing", "no second decode: {r}");
+}
+
+#[test]
+fn dragging_on_the_start_timeline_scrubs_then_previews_from_the_release() {
+    let ctx = Context::default();
+    let (mut nav, player, [(cue_a, audio_a), _]) = two_songs("scrub");
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    crate::start_view::pick_track(&mut nav, cue_a);
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.state.storyboard.start.waveform.is_some()));
+    // Mid-height of the audio lane, near the bottom of the window.
+    let y = 860.0 - crate::start_timeline::TIMELINE_H + 140.0;
+    let (from, to) = (Pos2::new(300.0, y), Pos2::new(700.0, y));
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    for events in [
+        vec![Event::PointerMoved(from)],
+        vec![press(from, true)],
+        vec![Event::PointerMoved(from + egui::vec2(40.0, 0.0))],
+    ] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    assert!(nav.state.storyboard.start.scrub.is_some(), "the playhead is held while dragging");
+    assert!(nav.session().preview_state().is_none(), "silent while held");
+    for events in [vec![Event::PointerMoved(to)], vec![press(to, false)], Vec::new()] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    assert!(nav.state.storyboard.start.scrub.is_none());
+    assert!(
+        frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a).is_some()),
+        "previews from the release"
+    );
+    let started = player.log().iter().rev().find(|l| l.starts_with("play")).cloned().unwrap_or_default();
+    let secs: f64 = started.rsplit("from ").next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+    assert!(secs > 10.0 && secs < 60.0, "released mid-song: {started}");
+}
+
+#[test]
+fn dragging_the_strip_playhead_scrubs_the_cut() {
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let c1 = strip_rect(&ctx, 1);
+    let x0 = c1.left() - 1.0; // the playhead at 0:00
+    drag(
+        &ctx,
+        &mut nav,
+        Pos2::new(x0, c1.center().y),
+        Pos2::new(x0 + 6.0 * crate::strip_view::PX_PER_SEC, c1.center().y),
+        &mut t,
+    );
+    let at = nav.session().transport().position.as_secs_f64();
+    assert!((at - 6.0).abs() < 0.2, "playhead dragged to {at}");
+    assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(2), "grabbing the playhead didn't click a clip");
+}

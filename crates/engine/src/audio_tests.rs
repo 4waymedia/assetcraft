@@ -198,3 +198,33 @@ fn preview_plays_the_whole_track_and_the_cut_takes_over() {
         assert!(matches!(s.execute("track.preview", &bad), Err(CmdError::BadParams(_))), "{bad}");
     }
 }
+
+#[test]
+fn the_waveform_preview_and_cut_share_one_decode_per_track() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    let song = music("track.wav");
+    // The timeline asks for the waveform first (picking a song): that starts the one decode.
+    let mut peaks = json!(null);
+    for _ in 0..2000 {
+        peaks = run(&mut s, "track.peaks", json!({ "path": song, "buckets": 64 }));
+        if peaks["status"] != "loading" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(peaks["status"], "ready", "{peaks}");
+    assert_eq!(s.decodes.len(), 1);
+    // A section click on the same song plays at once: no second decode, no "loading".
+    let r = run(&mut s, "track.preview", json!({ "path": song, "from": 8.0 }));
+    assert_eq!(r["preview"], "playing", "{r}");
+    assert_eq!(s.decodes.len(), 1, "reused, not decoded again");
+    assert_eq!(s.preview_heard(&song), Some(8.0));
+    assert_eq!(s.preview_heard("/music/other.wav"), None);
+    // The Cut's own track stays decoded while other songs are previewed (up to decode::KEEP).
+    run(&mut s, "track.preview", json!({ "path": null }));
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
+    run(&mut s, "storyboard.play", json!({}));
+    assert_eq!(s.decodes.len(), 1, "the board's track is the same file");
+    assert_eq!(s.audio_status(), "playing", "and it starts at once");
+}

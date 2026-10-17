@@ -1,42 +1,33 @@
 //! Waveform overviews for the Start screen's full-width timeline (S2d-1; Paul, 2026-10-16: "the
 //! full audio is placed in the bottom track"): `track.peaks`.
 //!
-//! The overview is decoded on a background thread (an MP3 takes about a second) and kept for the
-//! last few tracks, apart from the playback decode slot, so a Cut playing behind the Start screen
-//! and the timeline never evict each other. The first call answers `loading`; the window asks
-//! again on its next frames.
+//! The overview comes from the shared track decode ([`crate::decode`]), which computes it on its
+//! background thread, so drawing a song's waveform also gets it ready to preview and play. Overviews
+//! are kept for the last [`KEEP`] tracks, longer than the decoded audio itself. The first call
+//! answers `loading`; the window asks again on its next frames.
 
+use crate::decode::{Load, OVERVIEW_BUCKETS};
 use crate::{CmdError, CmdResult, Session};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
-/// Buckets kept per track; requests are merged down from these.
-pub(crate) const OVERVIEW_BUCKETS: usize = 4096;
-/// Tracks kept.
+/// Overviews kept.
 const KEEP: usize = 8;
 /// What `buckets` may ask for.
-pub(crate) const BUCKETS_RANGE: std::ops::RangeInclusive<u64> = 16..=4096;
+pub(crate) const BUCKETS_RANGE: std::ops::RangeInclusive<u64> = 16..=OVERVIEW_BUCKETS as u64;
 
+/// A finished overview: the track's length and its peaks, or why it couldn't be read.
 #[derive(Debug, Clone)]
-enum WaveLoad {
-    Loading,
-    Ready(Arc<Overview>),
+enum Overview {
+    Ready { seconds: f64, peaks: Arc<Vec<(f32, f32)>> },
     Failed(String),
 }
 
-#[derive(Debug)]
-struct Overview {
-    seconds: f64,
-    peaks: Vec<(f32, f32)>,
-}
-
-type Slot = Arc<Mutex<WaveLoad>>;
-
-/// Overviews by track, the most recently asked last.
+/// Finished overviews by track, the most recently asked last.
 #[derive(Debug, Default)]
 pub(crate) struct Waveforms {
-    slots: Vec<(PathBuf, Slot)>,
+    kept: Vec<(PathBuf, Overview)>,
 }
 
 /// `peaks` merged down to `buckets` (`(min, max)` of each run).
@@ -58,36 +49,30 @@ fn round3(v: f32) -> f64 {
 }
 
 impl Session {
-    /// The overview slot for `path`, starting its decode if it isn't kept.
-    fn waveform_slot(&mut self, path: &PathBuf) -> Slot {
+    /// `path`'s overview, if finished; otherwise starts (or keeps waiting on) the shared decode.
+    fn overview(&mut self, path: &PathBuf) -> Option<Overview> {
         let w = &mut self.waveforms;
-        if let Some(i) = w.slots.iter().position(|(p, _)| p == path) {
-            let kept = w.slots.remove(i);
-            let slot = Arc::clone(&kept.1);
-            w.slots.push(kept);
-            return slot;
+        if let Some(i) = w.kept.iter().position(|(p, _)| p == path) {
+            let kept = w.kept.remove(i);
+            let o = kept.1.clone();
+            w.kept.push(kept);
+            return Some(o);
         }
-        let slot: Slot = Arc::new(Mutex::new(WaveLoad::Loading));
-        let (services, file, out) = (Arc::clone(&self.services), path.clone(), Arc::clone(&slot));
-        let spawned = std::thread::Builder::new().name("assetcraft-waveform".into()).spawn(move || {
-            let result = match assetcraft_audio::load(services.as_ref(), &file) {
-                Ok(a) => {
-                    WaveLoad::Ready(Arc::new(Overview { seconds: a.seconds(), peaks: a.overview(OVERVIEW_BUCKETS) }))
-                }
-                Err(e) => WaveLoad::Failed(e.to_string()),
-            };
-            *out.lock().unwrap_or_else(PoisonError::into_inner) = result;
-        });
-        if let Err(e) = spawned {
-            *slot.lock().unwrap_or_else(PoisonError::into_inner) =
-                WaveLoad::Failed(format!("can't start decoding: {e}"));
-        }
+        let state = match self.load_state(path) {
+            Some(state) => state,
+            None => self.load_slot(path).lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(),
+        };
+        let done = match state {
+            Load::Loading => return None,
+            Load::Ready(d) => Overview::Ready { seconds: d.audio.seconds(), peaks: Arc::clone(&d.overview) },
+            Load::Failed(e) => Overview::Failed(e),
+        };
         let w = &mut self.waveforms;
-        if w.slots.len() >= KEEP {
-            w.slots.remove(0);
+        if w.kept.len() >= KEEP {
+            w.kept.remove(0);
         }
-        w.slots.push((path.clone(), Arc::clone(&slot)));
-        slot
+        w.kept.push((path.clone(), done.clone()));
+        Some(done)
     }
 }
 
@@ -103,16 +88,14 @@ pub(crate) fn track_peaks(s: &mut Session, p: &Value) -> CmdResult {
             .filter(|b| BUCKETS_RANGE.contains(b))
             .ok_or_else(|| CmdError::BadParams("`buckets` must be a whole number from 16 to 4096".into()))?,
     } as usize;
-    let slot = s.waveform_slot(&path);
-    let state = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
-    let shown = path.to_string_lossy();
-    Ok(match state {
-        WaveLoad::Loading => json!({ "path": shown, "status": "loading" }),
-        WaveLoad::Failed(e) => json!({ "path": shown, "status": "failed", "error": e }),
-        WaveLoad::Ready(o) => {
+    let shown = path.to_string_lossy().into_owned();
+    Ok(match s.overview(&path) {
+        None => json!({ "path": shown, "status": "loading" }),
+        Some(Overview::Failed(e)) => json!({ "path": shown, "status": "failed", "error": e }),
+        Some(Overview::Ready { seconds, peaks }) => {
             let peaks: Vec<[f64; 2]> =
-                rebucket(&o.peaks, buckets).into_iter().map(|(a, b)| [round3(a), round3(b)]).collect();
-            json!({ "path": shown, "status": "ready", "seconds": (o.seconds * 1000.0).round() / 1000.0, "peaks": peaks })
+                rebucket(&peaks, buckets).into_iter().map(|(a, b)| [round3(a), round3(b)]).collect();
+            json!({ "path": shown, "status": "ready", "seconds": (seconds * 1000.0).round() / 1000.0, "peaks": peaks })
         }
     })
 }
