@@ -431,18 +431,13 @@ fn a_click_on_a_section_previews_from_its_start() {
 
 #[test]
 fn the_timeline_runs_in_cut_time_and_maps_the_song_through_the_edit() {
-    use crate::start_timeline::{to_cut, to_track};
+    use crate::start_timeline::to_track;
     // A 1:00 cut of a 1:27 track: 0–49.3 then 76.5–87.2 (the ending).
     let segs = [(0.0, 49.3), (76.5, 87.2)];
     assert!((to_track(&segs, 10.0) - 10.0).abs() < 1e-9);
     assert!((to_track(&segs, 50.0) - 77.2).abs() < 1e-9, "after the splice: the ending");
     assert!((to_track(&segs, 500.0) - 87.2).abs() < 1e-9, "past the end");
-    // The preview's playhead (song time) back into the cut.
-    assert_eq!(to_cut(&segs, 10.0), Some(10.0));
-    assert!((to_cut(&segs, 77.2).unwrap_or(0.0) - 50.0).abs() < 1e-9);
-    assert_eq!(to_cut(&segs, 60.0), None, "skipped by the cut: no playhead");
-    // Full length: one segment, nothing moves.
-    assert_eq!(to_cut(&[(0.0, 87.2)], 42.0), Some(42.0));
+    // The timeline's playhead is in cut time (Cut mode plays the edit), so nothing maps back.
 }
 
 fn key(k: egui::Key, modifiers: Modifiers) -> Event {
@@ -654,7 +649,13 @@ fn picking_another_song_stops_the_previous_preview() {
     frame(&ctx, &mut nav, Vec::new(), t);
     crate::start_view::pick_track(&mut nav, cue_a.clone());
     nav.run("track.preview", json!({ "path": audio_a, "from": 32.0 }));
-    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a).is_some()), "A plays");
+    assert!(
+        frames_until(&ctx, &mut nav, &mut t, |n| n
+            .session()
+            .preview_heard(&audio_a, assetcraft_engine::PreviewMode::Song)
+            .is_some()),
+        "A plays"
+    );
     // Same song again: keeps playing. Another song: A stops.
     crate::start_view::pick_track(&mut nav, cue_a);
     assert!(nav.session().preview_state().is_some());
@@ -681,6 +682,7 @@ fn dragging_on_the_start_timeline_scrubs_then_previews_from_the_release() {
     let mut t = 0.0;
     frame(&ctx, &mut nav, Vec::new(), t);
     crate::start_view::pick_track(&mut nav, cue_a);
+    crate::start_view::set_length(&mut nav, None); // full length: the cut is the whole song
     assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.state.storyboard.start.waveform.is_some()));
     // Mid-height of the audio lane, near the bottom of the window.
     let y = 860.0 - crate::start_timeline::TIMELINE_H + 140.0;
@@ -707,7 +709,10 @@ fn dragging_on_the_start_timeline_scrubs_then_previews_from_the_release() {
     }
     assert!(nav.state.storyboard.start.scrub.is_none());
     assert!(
-        frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a).is_some()),
+        frames_until(&ctx, &mut nav, &mut t, |n| n
+            .session()
+            .preview_heard(&audio_a, assetcraft_engine::PreviewMode::Cut)
+            .is_some()),
         "previews from the release"
     );
     let started = player.log().iter().rev().find(|l| l.starts_with("play")).cloned().unwrap_or_default();
@@ -734,4 +739,46 @@ fn dragging_the_strip_playhead_scrubs_the_cut() {
     let at = nav.session().transport().position.as_secs_f64();
     assert!((at - 6.0).abs() < 0.2, "playhead dragged to {at}");
     assert_eq!(nav.session().selected_clip().map(|c| c.0), Some(2), "grabbing the playhead didn't click a clip");
+}
+
+#[test]
+fn space_plays_and_pauses_the_cut_from_the_playhead_and_a_new_track_starts_at_zero() {
+    use assetcraft_engine::PreviewMode;
+    let ctx = Context::default();
+    let (mut nav, player, [(cue_a, audio_a), (cue_b, audio_b)]) = two_songs("space");
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    crate::start_view::pick_track(&mut nav, cue_a.clone());
+    crate::start_view::set_length(&mut nav, None);
+    assert_eq!(nav.state.storyboard.start.cursor, 0.0);
+    let space = |nav: &mut Navigator, t: &mut f64| {
+        *t += 0.05;
+        frame(&ctx, nav, vec![key(egui::Key::Space, Modifiers::NONE)], *t);
+    };
+    // Space: the cut plays from the playhead (0:00).
+    space(&mut nav, &mut t);
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a, PreviewMode::Cut).is_some()));
+    assert_eq!(player.log().last().map(String::as_str), Some("play 64.0s from 0.0"));
+    // Space again: paused, and the playhead rests where it was.
+    space(&mut nav, &mut t);
+    assert!(nav.session().preview_state().is_none());
+    // A section click in the track column (Song mode), then Space: the cut takes over again.
+    nav.run("track.preview", json!({ "path": audio_a, "from": 40.0 }));
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a, PreviewMode::Song).is_some()));
+    assert_eq!(nav.session().preview_heard(&audio_a, PreviewMode::Cut), None, "the timeline's playhead stays put");
+    space(&mut nav, &mut t);
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_mode() == Some(PreviewMode::Cut)));
+    // Pick song B: everything stops and its timeline starts at 0:00.
+    nav.state.storyboard.start.cursor = 12.0;
+    crate::start_view::pick_track(&mut nav, cue_b);
+    assert!(nav.session().preview_state().is_none());
+    assert_eq!(nav.state.storyboard.start.cursor, 0.0, "new track: playhead at the start");
+    space(&mut nav, &mut t);
+    assert!(frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_b, PreviewMode::Cut).is_some()));
+    assert_eq!(player.log().last().map(String::as_str), Some("play 64.0s from 0.0"));
+    // A new length also goes back to 0:00 and stops the old cut.
+    nav.state.storyboard.start.cursor = 20.0;
+    crate::start_view::set_length(&mut nav, None);
+    assert!(nav.session().preview_state().is_none());
+    assert_eq!(nav.state.storyboard.start.cursor, 0.0);
 }

@@ -9,10 +9,14 @@
 //! - **Audio:** the music the cut plays: the kept parts of the track (`edit.segments`) butted
 //!   together, each with its waveform (`track.peaks`), section bands and ◆ drops; a splice mark
 //!   where the music jumps (crossfaded), the fade-out as a ramp. At full length this is the whole
-//!   track. A click anywhere on the timeline previews from that point of the song
-//!   (`track.preview {from}`); dragging there, or dragging the playhead, scrubs, and the preview
-//!   starts where the drag ends. The playhead is `Session::preview_heard` mapped into the cut.
-//!   Ruler, playhead and scrub reading are the shared [`crate::timebar`] ones.
+//!   track.
+//!
+//! The timeline plays the **cut** (Paul, 2026-10-17, "two modes"): ▶ / Space play the song
+//! through the chosen length's edit from the playhead (`track.preview {cut}`), a click plays the
+//! cut from there, and dragging there or dragging the playhead scrubs (the cut plays from where
+//! the drag ends). Everything here is in cut time, so the playhead runs straight across the
+//! splices. The track column's ▶ and section clicks play the **song** instead; starting either
+//! stops the other. Ruler, playhead and scrub reading are the shared [`crate::timebar`] ones.
 
 use crate::Navigator;
 use crate::start_tracks::{mmss, section_tint};
@@ -38,18 +42,23 @@ pub(crate) struct Lanes<'a> {
     pub preview: Option<&'a Value>,
     /// `track.peaks` once ready.
     pub peaks: Option<&'a Value>,
-    /// Seconds into this track a playing preview is at.
+    /// Cut seconds a playing Cut preview of this track is at.
     pub heard: Option<f64>,
     /// While a scrub drag is held: where it is, in cut seconds (drawn instead of `heard`).
     pub scrub: Option<f64>,
+    /// Where the paused playhead rests, in cut seconds (0 for a newly picked track or length).
+    pub cursor: f64,
+    /// A Cut preview of this track is playing or loading (▶ shows ⏸).
+    pub playing: bool,
 }
 
-/// A scrub on the timeline: where (cut and track seconds) and what the pointer did.
+/// What the user did on the timeline.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Scrubbed {
-    pub cut: f64,
-    pub track: f64,
-    pub how: crate::timebar::Scrub,
+pub(crate) enum Action {
+    /// ▶ / ⏸.
+    Toggle,
+    /// A click or drag at `cut` seconds.
+    Scrub { cut: f64, how: crate::timebar::Scrub },
 }
 
 /// Cut time → track time through the edit's segments (`[[start, end]]` in track seconds, played
@@ -64,18 +73,6 @@ pub(crate) fn to_track(segments: &[(f64, f64)], t: f64) -> f64 {
         off += len;
     }
     segments.last().map_or(t, |s| s.1)
-}
-
-/// Track time → cut time; `None` when the cut skips that moment.
-pub(crate) fn to_cut(segments: &[(f64, f64)], t: f64) -> Option<f64> {
-    let mut off = 0.0;
-    for &(a, b) in segments {
-        if t >= a && t < b {
-            return Some(off + t - a);
-        }
-        off += (b - a).max(0.0);
-    }
-    None
 }
 
 /// Each segment as `(track start, track end, cut offset)`.
@@ -104,8 +101,8 @@ fn ink_on(fill: Color32) -> Color32 {
     if l > 150.0 { Color32::from_gray(0x16) } else { Color32::from_gray(0xd8) }
 }
 
-/// The timeline panel. Returns a scrub (click or drag) on it, if any.
-pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Scrubbed> {
+/// The timeline panel. Returns what the user did on it, if anything.
+pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Action> {
     let Some(l) = lanes else {
         ui.add_space(30.0);
         ui.vertical_centered(|ui| {
@@ -123,9 +120,17 @@ pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Scrubbed> {
     let clips_end =
         clips.last().map_or(0.0, |c| c["start"].as_f64().unwrap_or(0.0) + c["seconds"].as_f64().unwrap_or(0.0));
     let cut_len = pieces.last().map_or(total, |(a, b, o)| o + (b - a)).max(clips_end).max(0.1);
-    // Header.
+    // Header: transport, timecode, what plays.
+    let mut action = None;
+    let at = l.scrub.or(l.heard).unwrap_or(l.cursor).clamp(0.0, cut_len);
     ui.add_space(4.0);
     ui.horizontal(|ui| {
+        let (icon, tip) =
+            if l.playing { ("⏸", "Pause (Space)") } else { ("▶", "Play the cut from the playhead (Space)") };
+        if ui.small_button(icon).on_hover_text(tip).clicked() {
+            action = Some(Action::Toggle);
+        }
+        ui.label(RichText::new(format!("{} / {}", mmss(at), mmss(cut_len))).monospace().small());
         ui.label(RichText::new("TIMELINE").small().color(ui.visuals().weak_text_color()));
         let title = l.track["title"].as_str().unwrap_or("Track");
         let what = match l.preview {
@@ -349,30 +354,25 @@ pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Scrubbed> {
             Color32::from_gray(0x77),
         );
     }
-    // Click or drag anywhere on the ruler and both lanes; the preview plays the song, so map
-    // the cut time under the pointer through the edit.
+    // Click or drag anywhere on the ruler and both lanes (cut time).
     let cut_at = |x: f32| f64::from((x - lane_x) / pps).clamp(0.0, cut_len);
     let lanes_rect = Rect::from_min_max(pos2(lane_x, rect.top()), pos2(lane_x + lane_w, audio.bottom()));
     let tip = match ui.input(|i| i.pointer.hover_pos()).filter(|p| lanes_rect.contains(*p)) {
         Some(p) => {
-            format!("Click to preview from {} in the song, or drag to scrub", mmss(to_track(&segs, cut_at(p.x))))
+            let t = cut_at(p.x);
+            format!("Click to play the cut from {} (song {}), or drag to scrub", mmss(t), mmss(to_track(&segs, t)))
         }
         None => String::new(),
     };
     let mut scrub = crate::timebar::scrub_area(ui, lanes_rect, ui.id().with("sb-timeline-scrub"), &tip);
-    let shown = l.scrub.or_else(|| l.heard.and_then(|t| to_cut(&segs, t)));
-    if let Some(at) = shown {
-        let x = x_of(at);
-        crate::timebar::paint_playhead(&painter, x, board.top(), audio.bottom(), Color32::WHITE);
-        let id = ui.id().with("sb-timeline-playhead");
-        if let Some(grab) = crate::timebar::playhead_handle(ui, x, board.top(), audio.bottom(), id) {
-            scrub = Some(grab);
-        }
+    // The playhead is always shown: at the cursor when paused, following the cut when playing.
+    let x = x_of(at);
+    crate::timebar::paint_playhead(&painter, x, board.top(), audio.bottom(), Color32::WHITE);
+    let id = ui.id().with("sb-timeline-playhead");
+    if let Some(grab) = crate::timebar::playhead_handle(ui, x, board.top(), audio.bottom(), id) {
+        scrub = Some(grab);
     }
-    scrub.map(|(x, how)| {
-        let cut = cut_at(x);
-        Scrubbed { cut, track: to_track(&segs, cut), how }
-    })
+    action.or_else(|| scrub.map(|(x, how)| Action::Scrub { cut: cut_at(x), how }))
 }
 
 /// The waveform of `audio` (`track.peaks`), kept on the Start screen once ready or failed;

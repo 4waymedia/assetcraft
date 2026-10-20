@@ -25,6 +25,7 @@ mod waveform;
 
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_thumbs::DiskCache;
+pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
 pub use effect::{EffectClass, Effects};
 pub use generate_cmd::{CUEMAP_SUFFIX, GeneratedFrom, LENGTHS, cue_map_label};

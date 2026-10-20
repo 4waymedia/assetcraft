@@ -50,10 +50,24 @@ pub(crate) struct TrackAudio {
     preview: Option<Preview>,
 }
 
-/// A Start screen preview: the track, where to start, and whether it is sounding yet.
+/// What a Start screen preview plays (Paul, 2026-10-17: "two modes … pause the one that is not
+/// playing"). Starting either one replaces the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewMode {
+    /// The whole song file, in song time: the track column's ▶ and section clicks.
+    Song,
+    /// The song through the chosen length's audio edit, in cut time: the timeline's ▶, Space,
+    /// clicks and scrubs. The same edit Create gives the storyboard.
+    Cut,
+}
+
+/// A Start screen preview: the track, its edit (Cut mode), where to start, and whether it is
+/// sounding yet.
 #[derive(Debug, Clone)]
 struct Preview {
     path: PathBuf,
+    edit: Option<TrackEdit>,
+    mode: PreviewMode,
     from: f64,
     started: bool,
 }
@@ -191,14 +205,21 @@ impl Session {
     }
 
     /// Preview a track from the Start screen: decode it (if needed) and play it from `from`
-    /// seconds through the whole file. Replaces any preview; stops the Cut's music. Returns
-    /// `loading`, `playing` or `failed: …`.
-    pub(crate) fn preview_start(&mut self, path: PathBuf, from: f64) -> String {
+    /// seconds, through the whole file (Song mode, `edit` = `None` with `mode` Song) or through
+    /// `edit` (Cut mode; without an edit the cut is the whole track). Replaces any preview, so
+    /// the other mode stops; stops the Cut's music. Returns `loading`, `playing` or `failed: …`.
+    pub(crate) fn preview_start(
+        &mut self,
+        path: PathBuf,
+        from: f64,
+        mode: PreviewMode,
+        edit: Option<TrackEdit>,
+    ) -> String {
         self.preview_stop();
         self.audio_stop();
         self.load_slot(&path);
-        self.audio.preview =
-            Some(Preview { path, from: if from.is_finite() { from.max(0.0) } else { 0.0 }, started: false });
+        let from = if from.is_finite() { from.max(0.0) } else { 0.0 };
+        self.audio.preview = Some(Preview { path, edit, mode, from, started: false });
         let path = self.audio.preview.as_ref().map(|p| p.path.clone());
         self.poll_preview();
         self.preview_status(path.as_deref())
@@ -221,7 +242,7 @@ impl Session {
         }
         match self.load_state(&p.path) {
             Some(Load::Ready(decoded)) => {
-                let program = Arc::new(Program::new(Arc::clone(&decoded.audio), None));
+                let program = Arc::new(Program::new(Arc::clone(&decoded.audio), p.edit.as_ref().map(edit).as_ref()));
                 self.audio.player.set_volume(volume_gain(self.preview_volume));
                 let ok = self.audio.player.play(program, p.from).is_ok();
                 match &mut self.audio.preview {
@@ -262,11 +283,17 @@ impl Session {
         self.audio.preview.as_ref().filter(|p| p.started).and_then(|_| self.audio.player.position())
     }
 
-    /// Seconds into `audio` being heard now, when the playing preview is that track (the one
-    /// question both the track column and the timeline ask).
-    pub fn preview_heard(&self, audio: &str) -> Option<f64> {
-        match self.preview_state() {
-            Some((p, false)) if p.to_string_lossy() == audio => self.preview_position(),
+    /// Which mode the current preview plays, if any.
+    pub fn preview_mode(&self) -> Option<PreviewMode> {
+        self.audio.preview.as_ref().map(|p| p.mode)
+    }
+
+    /// Seconds being heard now when the playing preview is `audio` in `mode` (song seconds in
+    /// Song mode, cut seconds in Cut mode); `None` otherwise. The track column asks for Song,
+    /// the timeline for Cut, so each shows its own playhead only while it is the one playing.
+    pub fn preview_heard(&self, audio: &str, mode: PreviewMode) -> Option<f64> {
+        match (self.preview_state(), self.preview_mode()) {
+            (Some((p, false)), Some(m)) if m == mode && p.to_string_lossy() == audio => self.preview_position(),
             _ => None,
         }
     }

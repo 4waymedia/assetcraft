@@ -219,12 +219,57 @@ fn the_waveform_preview_and_cut_share_one_decode_per_track() {
     let r = run(&mut s, "track.preview", json!({ "path": song, "from": 8.0 }));
     assert_eq!(r["preview"], "playing", "{r}");
     assert_eq!(s.decodes.len(), 1, "reused, not decoded again");
-    assert_eq!(s.preview_heard(&song), Some(8.0));
-    assert_eq!(s.preview_heard("/music/other.wav"), None);
+    assert_eq!(s.preview_heard(&song, crate::PreviewMode::Song), Some(8.0));
+    assert_eq!(s.preview_heard(&song, crate::PreviewMode::Cut), None, "the timeline's playhead stays put");
+    assert_eq!(s.preview_heard("/music/other.wav", crate::PreviewMode::Song), None);
     // The Cut's own track stays decoded while other songs are previewed (up to decode::KEEP).
     run(&mut s, "track.preview", json!({ "path": null }));
     run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
     run(&mut s, "storyboard.play", json!({}));
     assert_eq!(s.decodes.len(), 1, "the board's track is the same file");
     assert_eq!(s.audio_status(), "playing", "and it starts at once");
+}
+
+#[test]
+fn the_timeline_previews_the_cut_and_the_track_column_the_song() {
+    use crate::PreviewMode::{Cut, Song};
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    let song = music("track.wav");
+    let cut = json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 });
+    // Cut mode: the 30 s length's edit (a 10 s fade fit here), `from` in cut seconds.
+    let mut r = json!(null);
+    for _ in 0..2000 {
+        r = run(&mut s, "track.preview", json!({ "path": song, "from": 4.0, "cut": cut }));
+        if r["preview"] == "playing" {
+            break;
+        }
+        s.poll_audio(Ticks::ZERO);
+        if s.preview_heard(&song, Cut).is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(r["mode"], "cut");
+    assert_eq!(s.preview_mode(), Some(Cut));
+    assert_eq!(player.log().last().map(String::as_str), Some("play 10.0s from 4.0"), "the edit, not the 64 s file");
+    assert_eq!(s.preview_heard(&song, Cut), Some(4.0));
+    assert_eq!(s.preview_heard(&song, Song), None, "the track column's playhead stays put");
+    // A section click in the track column: Song mode replaces it (the cut stops first).
+    let r = run(&mut s, "track.preview", json!({ "path": song, "from": 40.0 }));
+    assert_eq!((r["mode"].as_str(), r["preview"].as_str()), (Some("song"), Some("playing")));
+    assert_eq!(player.log()[player.log().len() - 2..], ["stop".to_owned(), "play 64.0s from 40.0".to_owned()]);
+    assert_eq!(s.preview_heard(&song, Song), Some(40.0));
+    assert_eq!(s.preview_heard(&song, Cut), None);
+    // Full length is the whole track in cut mode too; bad cut params are refused.
+    let r = run(&mut s, "track.preview", json!({ "path": song, "cut": { "cueMap": music("track.cuemap.json") } }));
+    assert_eq!(r["mode"], "cut");
+    assert_eq!(player.log().last().map(String::as_str), Some("play 64.0s from 0.0"));
+    for bad in [
+        json!({ "cueMap": music("track.cuemap.json"), "seconds": 45 }),
+        json!("x"),
+        json!({ "cueMap": music("track.cuemap.json"), "fit": "x" }),
+    ] {
+        assert!(s.execute("track.preview", &json!({ "path": song, "cut": bad })).is_err(), "{bad}");
+    }
 }

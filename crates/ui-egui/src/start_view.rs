@@ -13,6 +13,7 @@
 
 use crate::Navigator;
 use crate::storyboard_view::{ACCENT, INSPECTOR_W, SELECT, rgb, section};
+use assetcraft_engine::PreviewMode;
 use assetcraft_storyboard::{Pacing, SceneTransition, Shape, ShotType, Titles};
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use serde_json::{Value, json};
@@ -66,6 +67,8 @@ pub(crate) struct StartUi {
     pub(crate) waveform: Option<(String, Value)>,
     /// A scrub drag held on the timeline: where, in cut seconds.
     pub(crate) scrub: Option<f64>,
+    /// The timeline's paused playhead, in cut seconds.
+    pub(crate) cursor: f64,
     /// Track column search, tempo filter and sort.
     pub(crate) filter: crate::start_tracks::TrackFilter,
 }
@@ -86,6 +89,7 @@ impl Default for StartUi {
             previews: HashMap::new(),
             waveform: None,
             scrub: None,
+            cursor: 0.0,
             filter: crate::start_tracks::TrackFilter::default(),
         }
     }
@@ -213,6 +217,52 @@ pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     });
 }
 
+/// Whether a Cut preview of `audio` is playing or loading.
+fn cut_playing(nav: &Navigator, audio: &str) -> bool {
+    nav.session.preview_mode() == Some(PreviewMode::Cut)
+        && nav.session.preview_state().is_some_and(|(p, _)| p.to_string_lossy() == audio)
+}
+
+/// Play the selected track's cut from `from` cut seconds (`track.preview {cut}`), and rest the
+/// playhead there. Stops a Song preview (one preview at a time).
+pub(crate) fn play_cut(nav: &mut Navigator, from: f64) {
+    let Some(track) = selected_track(nav) else { return };
+    let (Some(audio), Some(cue)) = (track["audio"].as_str(), track["cueMap"].as_str()) else { return };
+    let start = &mut nav.state.storyboard.start;
+    start.cursor = from.max(0.0);
+    let cut = json!({ "cueMap": cue, "seconds": start.length });
+    nav.run("track.preview", json!({ "path": audio, "from": from.max(0.0), "cut": cut }));
+}
+
+/// ▶ / ⏸ on the timeline, and Space on the Start screen: play the selected track's cut from the
+/// playhead, or pause it there.
+pub(crate) fn toggle_play(nav: &mut Navigator) {
+    let Some(audio) = selected_track(nav).and_then(|t| t["audio"].as_str().map(str::to_owned)) else { return };
+    if cut_playing(nav, &audio) {
+        if let Some(at) = nav.session.preview_heard(&audio, PreviewMode::Cut) {
+            nav.state.storyboard.start.cursor = at;
+        }
+        nav.run("track.preview", json!({ "path": null }));
+        return;
+    }
+    // From the end: start over.
+    let end = nav.state.storyboard.start.length.map(f64::from);
+    let from = nav.state.storyboard.start.cursor;
+    play_cut(nav, if end.is_some_and(|e| from >= e - 0.1) { 0.0 } else { from });
+}
+
+/// Choose a length. The timeline shows a new cut, so its playhead goes back to 0:00 and a Cut
+/// preview of the old length stops.
+pub(crate) fn set_length(nav: &mut Navigator, seconds: Option<u32>) {
+    if nav.session.preview_mode() == Some(PreviewMode::Cut) {
+        nav.run("track.preview", json!({ "path": null }));
+    }
+    let start = &mut nav.state.storyboard.start;
+    start.length = seconds;
+    start.cursor = 0.0;
+    start.scrub = None;
+}
+
 /// Choose the track whose cue map is `cue`. A preview of another song stops (Paul, 2026-10-17:
 /// "when the user clicks another song we need to stop the preview of the previous song"); a held
 /// scrub ends.
@@ -223,6 +273,10 @@ pub(crate) fn pick_track(nav: &mut Navigator, cue: String) {
         nav.run("track.preview", json!({ "path": null }));
     }
     let start = &mut nav.state.storyboard.start;
+    if start.track.as_deref() != Some(cue.as_str()) {
+        // A newly picked track's timeline starts at 0:00 (Paul, 2026-10-17).
+        start.cursor = 0.0;
+    }
     start.scrub = None;
     start.track = Some(cue);
     if !matches!(start.style, Style::Pacing(_)) {
@@ -248,28 +302,40 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui) {
     if peaks.is_none() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(80));
     }
-    let heard = nav.session.preview_heard(&audio);
-    let scrub = nav.state.storyboard.start.scrub;
-    let lanes =
-        crate::start_timeline::Lanes { track: &track, preview: preview.as_ref(), peaks: peaks.as_ref(), heard, scrub };
-    if let Some(s) = crate::start_timeline::show(ui, Some(lanes)) {
-        use crate::timebar::Scrub;
-        match s.how {
-            // A drag holds the playhead (silent) and the preview starts where it is let go.
-            Scrub::Start => {
-                nav.state.storyboard.start.scrub = Some(s.cut);
-                if nav.session.preview_state().is_some() {
-                    nav.run("track.preview", json!({ "path": null }));
+    let heard = nav.session.preview_heard(&audio, PreviewMode::Cut);
+    let playing = cut_playing(nav, &audio);
+    let start = &nav.state.storyboard.start;
+    let lanes = crate::start_timeline::Lanes {
+        track: &track,
+        preview: preview.as_ref(),
+        peaks: peaks.as_ref(),
+        heard,
+        scrub: start.scrub,
+        cursor: start.cursor,
+        playing,
+    };
+    match crate::start_timeline::show(ui, Some(lanes)) {
+        Some(crate::start_timeline::Action::Toggle) => toggle_play(nav),
+        Some(crate::start_timeline::Action::Scrub { cut, how }) => {
+            use crate::timebar::Scrub;
+            match how {
+                // A drag holds the playhead (silent) and the cut plays from where it is let go.
+                Scrub::Start => {
+                    nav.state.storyboard.start.scrub = Some(cut);
+                    if nav.session.preview_state().is_some() {
+                        nav.run("track.preview", json!({ "path": null }));
+                    }
+                }
+                Scrub::Move => nav.state.storyboard.start.scrub = Some(cut),
+                Scrub::Click | Scrub::Stop => {
+                    nav.state.storyboard.start.scrub = None;
+                    play_cut(nav, cut);
                 }
             }
-            Scrub::Move => nav.state.storyboard.start.scrub = Some(s.cut),
-            Scrub::Click | Scrub::Stop => {
-                nav.state.storyboard.start.scrub = None;
-                nav.run("track.preview", json!({ "path": audio, "from": s.track }));
-            }
         }
+        None => {}
     }
-    if heard.is_some() {
+    if heard.is_some() || playing {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
 }
@@ -552,7 +618,7 @@ fn cards(nav: &mut Navigator, ui: &mut Ui) {
                 None => format!("{} · can't build", length_label(*secs, track_secs)),
             };
             if ui.selectable_label(chosen, text).clicked() && !chosen {
-                nav.state.storyboard.start.length = *secs;
+                set_length(nav, *secs);
             }
         }
     });

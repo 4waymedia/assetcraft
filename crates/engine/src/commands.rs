@@ -258,7 +258,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Preview Track",
         "Storyboard",
         None,
-        "{path: audio file | null, from?: seconds} (plays the track on the output device; null stops; the Cut's ▶ stops it)",
+        "{path: audio file | null, from?: seconds, cut?: {cueMap, seconds?, fit?: fade|edit}} (null stops; without `cut` plays the whole song, from = song seconds; with `cut` plays it through that length's edit, from = cut seconds; one preview at a time; the Cut's ▶ stops it)",
         crate::track_cmd::track_preview
     ),
     cmd!(

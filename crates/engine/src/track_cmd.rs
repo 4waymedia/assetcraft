@@ -3,6 +3,7 @@
 //! Decoding is `assetcraft-audio` (SoundCraft's decoder, with Storyboard's limits). A1 answers
 //! `track.summary`; analysis (`track.analyze`) and playback build on the same decode.
 
+use crate::audio_out::PreviewMode;
 use crate::{CmdError, CmdResult, Session};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -31,7 +32,10 @@ pub(crate) fn track_summary(s: &mut Session, p: &Value) -> CmdResult {
     Ok(v)
 }
 
-/// `track.preview {path | null, from?}`: play a track from the Start screen (null stops).
+/// `track.preview {path | null, from?, cut?: {cueMap, seconds?, fit?}}`: play a track from the
+/// Start screen (null stops). Without `cut`: the whole song, `from` in song seconds (Song mode).
+/// With `cut`: the song through the edit the cue map's fit for `seconds` gives (the same one
+/// `storyboard.generate` puts on the board), `from` in cut seconds (Cut mode).
 pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
     let path = match p.get("path") {
         None => return Err(CmdError::BadParams("need `path` (an audio file, or null to stop)".into())),
@@ -56,8 +60,25 @@ pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
             .filter(|f| f.is_finite() && *f >= 0.0)
             .ok_or_else(|| CmdError::BadParams("`from` must be seconds, 0 or more".into()))?,
     };
-    let status = s.preview_start(path.clone(), from);
-    Ok(json!({ "preview": status, "path": path.to_string_lossy(), "from": from }))
+    let (mode, edit) = match p.get("cut") {
+        None | Some(Value::Null) => (PreviewMode::Song, None),
+        Some(c @ Value::Object(_)) => {
+            let cue_path = crate::generate_cmd::cue_map_param(c)?;
+            let cue = crate::generate_cmd::read_cue(s, &cue_path)?;
+            let seconds = crate::generate_cmd::seconds_param(c)?;
+            let fit_mode = crate::generate_cmd::fit_mode_param(c)?;
+            let fit = assetcraft_storyboard::fit_for(&cue, seconds, fit_mode)
+                .map_err(|e| CmdError::Unavailable(e.to_string()))?;
+            (PreviewMode::Cut, assetcraft_storyboard::track_edit(&cue, fit))
+        }
+        Some(_) => return Err(CmdError::BadParams("`cut` must be {cueMap, seconds?, fit?}".into())),
+    };
+    let status = s.preview_start(path.clone(), from, mode, edit);
+    let mode = match mode {
+        PreviewMode::Song => "song",
+        PreviewMode::Cut => "cut",
+    };
+    Ok(json!({ "preview": status, "mode": mode, "path": path.to_string_lossy(), "from": from }))
 }
 
 /// `track.previewVolume {volume: 0..1}`: the Start screen preview's level (saved).

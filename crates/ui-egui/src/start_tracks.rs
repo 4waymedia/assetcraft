@@ -132,7 +132,14 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
         });
     });
     ui.separator();
-    let previewing = nav.session.preview_state().map(|(p, loading)| (p.to_string_lossy().into_owned(), loading));
+    // The track column plays the song (Song mode); a Cut preview playing on the timeline isn't
+    // this column's, so its rows show ▶.
+    let song_mode = nav.session.preview_mode() == Some(assetcraft_engine::PreviewMode::Song);
+    let previewing = nav
+        .session
+        .preview_state()
+        .filter(|_| song_mode)
+        .map(|(p, loading)| (p.to_string_lossy().into_owned(), loading));
     let footer_h = 28.0;
     let list_h = (ui.available_height() - footer_h).max(80.0);
     let mut preview: Option<Value> = None;
@@ -144,7 +151,7 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
                 let selected = chosen == Some(cue.as_str());
                 let audio = t["audio"].as_str().unwrap_or("").to_owned();
                 let state = previewing.as_ref().filter(|(p, _)| *p == audio).map(|(_, loading)| *loading);
-                let at = nav.session.preview_heard(&audio);
+                let at = nav.session.preview_heard(&audio, assetcraft_engine::PreviewMode::Song);
                 let (clicked, play, seek) = row(ui, t, selected, state, at);
                 if let Some(from) = seek {
                     preview = Some(json!({ "path": audio, "from": from }));

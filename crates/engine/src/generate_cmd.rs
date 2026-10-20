@@ -129,6 +129,16 @@ pub(crate) fn shape_param(
     }
 }
 
+/// The `fit` param: `fade` or `edit` (default: the cue map's chosen one).
+pub(crate) fn fit_mode_param(p: &Value) -> Result<Option<FitMode>, CmdError> {
+    match p.get("fit").and_then(Value::as_str) {
+        None => Ok(None),
+        Some("fade") => Ok(Some(FitMode::Fade)),
+        Some("edit") => Ok(Some(FitMode::Edit)),
+        Some(_) => Err(CmdError::BadParams("`fit`: fade|edit".into())),
+    }
+}
+
 /// Read and validate a cue map (size-capped, hostile input).
 pub(crate) fn read_cue(s: &Session, path: &Path) -> Result<CueMap, CmdError> {
     let bytes = s.services.read_head(path, MAX_CUEMAP_BYTES + 1).map_err(CmdError::Fs)?;
@@ -160,12 +170,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     let seconds = seconds_param(p)?;
     let density = density_param(p, s.boards.generated.as_ref().map_or(1.0, |g| g.density))?;
     let shape = shape_param(p, s.boards.generated.as_ref().map(|g| g.shape).unwrap_or_default())?;
-    let fit_mode = match p.get("fit").and_then(Value::as_str) {
-        None => None,
-        Some("fade") => Some(FitMode::Fade),
-        Some("edit") => Some(FitMode::Edit),
-        Some(_) => return Err(CmdError::BadParams("`fit`: fade|edit".into())),
-    };
+    let fit_mode = fit_mode_param(p)?;
     let cue = read_cue(s, &path)?;
     let track_path = track_path(&path, &cue);
     let name = match p.get("name").and_then(Value::as_str).map(str::trim) {

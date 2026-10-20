@@ -350,7 +350,11 @@ impl Navigator {
             if delete && !self.session.selected_clips().is_empty() {
                 self.run("storyboard.delete", json!({}));
             }
-            if space && self.session.storyboard().is_some() {
+            // Space: on the Start screen, the selected track's cut (timeline); else the Cut.
+            let starting = self.session.storyboard().is_none() || self.state.storyboard.start.open;
+            if space && starting {
+                start_view::toggle_play(self);
+            } else if space {
                 let at = strip_view::playhead(self, ctx);
                 strip_view::toggle_play(self, at);
             }

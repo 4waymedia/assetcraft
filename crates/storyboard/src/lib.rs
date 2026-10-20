@@ -33,7 +33,9 @@ pub mod validate;
 
 pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
-pub use generate::{DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, generate};
+pub use generate::{
+    DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, fit_for, generate, track_edit,
+};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
     Transition,

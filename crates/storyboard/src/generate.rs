@@ -20,7 +20,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::cuemap::{CueMap, FitMode, Timeline};
+use crate::cuemap::{CueMap, Fit, FitMode, Timeline};
 use crate::model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Storyboard, Track, TrackEdit, Transition,
 };
@@ -315,21 +315,43 @@ struct Span {
     on_hit: Option<String>,
 }
 
-/// Generate a storyboard from a cue map.
-pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, GenerateReport), GenerateError> {
+/// The cue map's fit for a `seconds` length (`None` = the full track, or a length within 2 s of
+/// it). The one place that picks it: [`generate`] and the Start screen's Cut preview both use it.
+pub fn fit_for(cue: &CueMap, seconds: Option<u32>, mode: Option<FitMode>) -> Result<Option<&Fit>, GenerateError> {
     let sr = u64::from(cue.sample_rate.max(1));
     let full_secs = cue.duration_frames / sr;
-    let fit = match opts.seconds {
+    match seconds {
         Some(s) if u64::from(s) + 2 < full_secs => {
             let available: Vec<String> = cue.fits.keys().cloned().collect();
             let choice = cue
                 .fits
                 .get(&s.to_string())
                 .ok_or(GenerateError::NoFit { seconds: s, available: available.clone() })?;
-            Some(choice.get(opts.fit_mode).ok_or(GenerateError::NoFit { seconds: s, available })?)
+            Ok(Some(choice.get(mode).ok_or(GenerateError::NoFit { seconds: s, available })?))
         }
-        _ => None,
-    };
+        _ => Ok(None),
+    }
+}
+
+/// The audio edit that plays `fit` of the track (`None` = the whole track, unedited).
+pub fn track_edit(cue: &CueMap, fit: Option<&Fit>) -> Option<TrackEdit> {
+    edit_of(cue, fit, &cue.timeline(fit))
+}
+
+fn edit_of(cue: &CueMap, fit: Option<&Fit>, tl: &Timeline) -> Option<TrackEdit> {
+    fit.map(|f| TrackEdit {
+        sample_rate: cue.sample_rate,
+        segments: f.segments.clone(),
+        crossfade_frames: f.crossfade_frames,
+        fade_out: tl.fade_out.as_ref().map(|o| [o.start, o.frames]),
+        length_frames: tl.length,
+    })
+}
+
+/// Generate a storyboard from a cue map.
+pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, GenerateReport), GenerateError> {
+    let sr = u64::from(cue.sample_rate.max(1));
+    let fit = fit_for(cue, opts.seconds, opts.fit_mode)?;
     let tl = cue.timeline(fit);
     let p = opts.pacing.params().at_density(opts.density);
     let shape = opts.shape.resolve(opts.pacing);
@@ -533,13 +555,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             .iter()
             .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
             .collect(),
-        edit: fit.map(|f| TrackEdit {
-            sample_rate: cue.sample_rate,
-            segments: f.segments.clone(),
-            crossfade_frames: f.crossfade_frames,
-            fade_out: tl.fade_out.as_ref().map(|o| [o.start, o.frames]),
-            length_frames: tl.length,
-        }),
+        edit: edit_of(cue, fit, &tl),
     });
     board.validate(&Limits::default()).map_err(|e| GenerateError::Invalid(e.to_string()))?;
     if board.total() != report.length {
