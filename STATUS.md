@@ -4,6 +4,51 @@ _Last updated: 2026-10-20_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
+## 3D viewer V0 (Paul, 2026-10-20): the AssetCraft side of ModelCraft
+
+- **Scope:** the Preview panel's 3D viewer and the mesh crates it rests on. Behaviour reference: gltf-viewer.donmccurdy.com (MIT; behaviour only, no code). **Goal served:** AssetCraft as the viewer for Paul's TRELLIS exports, and `crates/mesh` + the renderer as the shared crates ModelCraft (its own cowork; plan in the project doc `modelcraft-plan.md` §9) will depend on. **Immediate area:** V0.1 (textures and normals in `crates/mesh`).
+- **Decision (Paul, 2026-10-20):** ModelCraft is built in a separate cowork; this repo only builds the viewer (V0–V2) and the shared crates.
+- **Corpus:** five `trellis.cpp v0.8.1` GLBs in `_dev-data\modelcraft\trellis\` (24k–50k tris, 1 primitive, `POSITION`/`NORMAL`/`TEXCOORD_0`, u32 indices, base colour + metallic-roughness PNG 2048²/4096², 15–43 MB, Y up, normalized to a 1-unit box); `measurements.json` beside them is the reference for `asset.meshInfo`; `_previews\` holds stills from a Python reference renderer (`tools\glb_render.py`: fit to 92 % of the frame, 3-point light 1.0 / 0.55 / 0.4 + 0.42 ambient, gamma 1.25).
+
+### Pre-read (2026-10-20, read-only): what Stage 1 step 7b already gives V0
+
+| Have (file)                                                                 | Covers                                                                                   | Missing for V0                                                                 |
+|-----------------------------------------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| `crates/mesh/src/gltf.rs`, `obj.rs`, `lib.rs` (`Mesh`, `Limits`, `MeshError`) | GLB / glTF / OBJ, node transforms, quantized positions, hostile input, `baseColorFactor` | `NORMAL`, `TEXCOORD_0`, images / textures / samplers, per-primitive materials (`gltf.rs:608–616` skips `baseColorTexture`) |
+| `crates/mesh/src/raster.rs` (`render`, `RenderOptions`, `View`)             | z-buffer, flat Lambert key + headlight, 2× supersampling, fitted orbit camera, pixel-test budget | smooth normals, texture sampling, light rig / exposure, background, wireframe, grid |
+| `crates/thumbs/src/model.rs` (`ModelView`, `render_view`, `PREVIEW_MAX_TRIANGLES`) | background render thread, coalesced requests, fast frames with stride decimation         | nothing structural; a frame carries display options                            |
+| `crates/ui-egui/src/model_preview.rs`                                       | drag to orbit, scroll to zoom, double-click reset, texture upload                        | turntable, display-mode controls, full-window (Space) orbit                    |
+| `apps/assetcraft-cli` (`thumb`), engine `item.probe`                        | one still per file                                                                       | `info` / `asset.meshInfo`, `view.model*` commands                              |
+| `docs/assetcraft-plan.md:144` says "a small wgpu renderer"                  | —                                                                                        | Stage 1 deviation stands: CPU raster (headless, web-safe). See D-V1            |
+
+### V0 steps (one at a time; each ends with `cargo xtask ci` on Windows and a commit block)
+
+| Step | Change                                                                                                                                                                                                                                  | Tests / exit                                                                                              | Status |
+|------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|--------|
+| V0.1 | `crates/mesh`: read `NORMAL` and `TEXCOORD_0` into `Mesh.normals` / `Mesh.uvs` (per vertex, optional); `Mesh.materials` (`baseColorFactor`, `baseColorTexture` → image index, `doubleSided`, `alphaMode`); `Mesh.images` as undecoded bytes + MIME (GLB bufferView or data URI, bounded by `Limits.max_image_bytes`, new); `triangle_material` replaces `triangle_color`. No new deps in L1: decoding stays in `thumbs` (L2, `image` crate, existing `MAX_DECODE_ALLOC` and caught panics) as `Textures::decode(&Mesh)` | mesh: normals/uvs round trip on the fixtures, hostile image refs (bad bufferView, oversize, unknown MIME → `Unsupported`, never a panic); thumbs: decode one texture; `test_data/make_model_fixtures.py` gains a textured cube | next |
+| V0.2 | `raster.rs`: smooth shading from vertex normals (face normal fallback), bilinear texture sampling with wrap, `Lighting {key, fill, rim, ambient, exposure}` with the reference rig as default, `Background` (transparent / solid), `DisplayMode { Shaded, Wireframe, Normals, UvChecker }` | render fixtures: textured cube pixel checks, wireframe draws edges only, normals mode colours; the contact sheet re-rendered from the CLI matches the Python stills by eye | |
+| V0.3 | Preview panel + commands: `view.model {turntable?, mode?, background?, lighting?}` (APP, saved in prefs), `view.modelState` (READ); turntable on egui's clock; a small overlay bar (mode, turntable, reset); full-window (Space) preview orbits too | UI: command round trip, turntable advances yaw on a simulated clock, Space preview takes drag | |
+| V0.4 | `asset.meshInfo {path}` (READ, `crates/engine`) → counts, bounds, materials, images (size, MIME, bytes), warnings; `assetcraft-cli info <model>... [--json]` | engine + CLI tests; on the five orc GLBs the counts equal `measurements.json` (`totalVertices`, `totalTriangles`, `images[].w/h`) | |
+| V0.5 | Web gate: `cargo check -p assetcraft-mesh --target wasm32-unknown-unknown` in `cargo xtask ci` (skipped with a message when the target isn't installed, like `deny`) | ci passes with and without the target                                                                     | |
+
+### Decisions for Paul
+
+| ID   | Decision                                           | Recommendation                                                                                                                          | Needed by |
+|------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|-----------|
+| D-V1 | CPU rasterizer vs the plan's wgpu renderer         | **Keep the CPU rasterizer for V0–V1**: headless CI, thumbnail workers and the web build all work without a GPU device; 50k-tri textured frames at panel size are well inside budget. wgpu only if the 2048 px full-window preview drags on Windows (measure in V0.3) | V0.1 |
+| D-V2 | Where decoded textures live                        | **`thumbs` (L2)**, so `crates/mesh` stays dependency-free and ModelCraft can take it as is; decoded textures are handed to `render` as a slice | V0.1 |
+| D-V3 | Metallic-roughness map                             | **Read and keep it, draw it in V1** (needs an environment term to look right); V0 draws base colour only, like the Python stills | V0.1 |
+
+**Next action (Paul, Windows):** confirm the five orc GLBs load today (flat grey, textures ignored), which also checks `Limits` against a 43 MB GLB with a 41 MB BIN chunk:
+
+```powershell
+Set-Location F:\Script-Projects\ArtCrafting\assetcraft
+cargo build -p assetcraft-cli --release
+Get-ChildItem F:\Script-Projects\ArtCrafting\_dev-data\modelcraft\trellis\*.glb | ForEach-Object { .\target\release\assetcraft-cli.exe thumb $_.FullName --size 512 --out "F:\Script-Projects\ArtCrafting\_dev-data\modelcraft\trellis\_previews\$($_.BaseName)-v0-flat.png" --force }
+```
+
+Then Claude writes V0.1.
+
 ## Current: Stage 4 Storyboard mode (Paul, 2026-10-15), step 1 done
 
 ### Bug list (Paul, 2026-10-17): Strip view and timeline
