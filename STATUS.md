@@ -131,6 +131,12 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 
 **Decisions (Paul, 2026-10-15):** storyboard plan D1 (Clip replaces block): yes. D3 (save AssetCraft's own storyboard files before Stage 2, atomically, never the user's assets): agreed; lands with step 7. (Plan IDs; not the D1 finding row below.)
 
+## Suite opportunities (2026-10-20)
+
+| ID  | Scope                                   | Opportunity                                                                                                                                                                                                                                       | Owner                         | Status |
+| --- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------ |
+| SF1 | Favorites across the Crafting apps      | Paul (2026-10-20): FilmCraft's media browser doesn't show AssetCraft's favorites. One shared favorites file for the suite (folders only, versioned JSON in the OS config dir, atomic write, each app reads and may add; unknown fields kept), instead of one list per app. AssetCraft writes it first; FilmCraft reads it in its media browser | Claude (spec), Paul to decide | logged |
+
 ## EffectCraft in AssetCraft (Paul, 2026-10-16: "now")
 
 - **Scope:** Open In and the thumbnail grid. **Goal served:** AssetCraft as the one place to browse Paul's work, motion-graphics projects included (`.ecproj` showed as a generic icon with no way to open it). **Immediate area:** E1 done; E2 next.
