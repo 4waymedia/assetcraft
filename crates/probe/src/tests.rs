@@ -302,6 +302,7 @@ fn library_models_probe_as_3d() {
         ("props/models/soul_orb_icosphere.glb", Format::Glb),
         ("props/models/scythe_ring.gltf", Format::Gltf),
         ("props/models/tombstone.obj", Format::Obj),
+        ("props/models/rune_crate_textured.glb", Format::Glb),
     ] {
         let p = probe(&RealFs, &library().join(rel)).unwrap();
         assert_eq!((p.format, p.status, p.category()), (format, Status::Ok, Category::Model3d), "{rel}");

@@ -26,9 +26,12 @@ fn opaque_pixels(t: &crate::Thumb) -> usize {
 
 #[test]
 fn library_models_render_cropped_shaded_thumbnails() {
-    for (name, format) in
-        [("soul_orb_icosphere.glb", Format::Glb), ("scythe_ring.gltf", Format::Gltf), ("tombstone.obj", Format::Obj)]
-    {
+    for (name, format) in [
+        ("soul_orb_icosphere.glb", Format::Glb),
+        ("scythe_ring.gltf", Format::Gltf),
+        ("tombstone.obj", Format::Obj),
+        ("rune_crate_textured.glb", Format::Glb),
+    ] {
         let path = models().join(name);
         let probe = assetcraft_probe::probe(&RealFs, &path).unwrap();
         assert_eq!((probe.format, probe.status), (format, Status::Ok), "{name}");

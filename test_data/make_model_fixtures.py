@@ -5,10 +5,13 @@ Writes into <library>/props/models/:
                            two baseColorFactor materials, u16 indices, BIN chunk)
   scythe_ring.gltf         glTF JSON with an embedded base64 data-URI buffer (torus)
   tombstone.obj            Wavefront OBJ: quads, a pentagon, negative indices, v/vt/vn faces
+  rune_crate_textured.glb  GLB: a cube with per-face NORMAL and TEXCOORD_0, a 64x64 PNG base
+                           colour and a 16x16 metallic-roughness PNG embedded as bufferViews
+                           (the shape TRELLIS exports have), u16 indices, BIN chunk
 
 Standard library only, deterministic output. Usage: python make_model_fixtures.py library
 """
-import base64, json, math, os, struct, sys
+import base64, json, math, os, struct, sys, zlib
 
 
 def icosphere(subdiv):
@@ -92,6 +95,88 @@ def document(parts, buffer_uri=None):
     return doc, blob
 
 
+def cube_faces():
+    """A cube as 6 quads with their own corners: positions, outward normals, UVs, triangles."""
+    faces = [((0, 0, 1), ((-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1))),
+             ((0, 0, -1), ((1, -1, -1), (-1, -1, -1), (-1, 1, -1), (1, 1, -1))),
+             ((1, 0, 0), ((1, -1, 1), (1, -1, -1), (1, 1, -1), (1, 1, 1))),
+             ((-1, 0, 0), ((-1, -1, -1), (-1, -1, 1), (-1, 1, 1), (-1, 1, -1))),
+             ((0, 1, 0), ((-1, 1, 1), (1, 1, 1), (1, 1, -1), (-1, 1, -1))),
+             ((0, -1, 0), ((-1, -1, -1), (1, -1, -1), (1, -1, 1), (-1, -1, 1)))]
+    pos, nrm, uv, tri = [], [], [], []
+    for k, (n, corners) in enumerate(faces):
+        base = len(pos)
+        # Each face gets its own column of a 6-wide atlas strip.
+        u0, u1 = k / 6, (k + 1) / 6
+        for c, (u, v) in zip(corners, ((u0, 1), (u1, 1), (u1, 0), (u0, 0))):
+            pos.append(c)
+            nrm.append(n)
+            uv.append((u, v))
+        tri += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    return pos, nrm, uv, tri
+
+
+def png_rgb(width, height, pixel):
+    """A deterministic RGB PNG (standard library only); pixel(x, y) -> (r, g, b)."""
+    raw = b"".join(b"\0" + b"".join(bytes(pixel(x, y)) for x in range(width)) for y in range(height))
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def textured_cube_document():
+    """One primitive with POSITION, NORMAL, TEXCOORD_0, a base colour PNG and a metallic-roughness PNG."""
+    pos, nrm, uv, tri = cube_faces()
+    palette = [(178, 92, 48), (92, 120, 64), (70, 90, 140), (160, 150, 60), (120, 70, 130), (90, 90, 90)]
+
+    def base_pixel(x, y):
+        face = min(x * 6 // 64, 5)
+        r, g, b = palette[face]
+        rune = (x % 11 == y % 11) or (x + y) % 16 == 0
+        return (min(r + 60, 255), min(g + 60, 255), min(b + 60, 255)) if rune else (r, g, b)
+
+    base_png = png_rgb(64, 64, base_pixel)
+    mr_png = png_rgb(16, 16, lambda x, y: (0, 140 + 6 * (x % 4), 40 if x < 8 else 200))   # G roughness, B metalness
+    blob = b""
+    views, accessors = [], []
+
+    def add(data, target=None):
+        nonlocal blob
+        view = {"buffer": 0, "byteOffset": len(blob), "byteLength": len(data)}
+        if target:
+            view["target"] = target
+        views.append(view)
+        blob += data + b"\0" * (-len(data) % 4)
+        return len(views) - 1
+
+    def vec(values, n, kind):
+        data = b"".join(struct.pack("<%df" % n, *v) for v in values)
+        lo = [min(v[k] for v in values) for k in range(n)]
+        hi = [max(v[k] for v in values) for k in range(n)]
+        accessors.append({"bufferView": add(data, 34962), "componentType": 5126, "count": len(values), "type": kind, "min": lo, "max": hi})
+        return len(accessors) - 1
+
+    a_pos, a_nrm, a_uv = vec(pos, 3, "VEC3"), vec(nrm, 3, "VEC3"), vec(uv, 2, "VEC2")
+    idx = b"".join(struct.pack("<3H", *t) for t in tri)
+    accessors.append({"bufferView": add(idx, 34963), "componentType": 5123, "count": len(tri) * 3, "type": "SCALAR"})
+    a_idx = len(accessors) - 1
+    v_base, v_mr = add(base_png), add(mr_png)
+    doc = {"asset": {"version": "2.0", "generator": "AssetCraft make_model_fixtures.py"},
+           "scene": 0, "scenes": [{"nodes": [0]}],
+           "nodes": [{"name": "crate", "mesh": 0, "rotation": [0, 0.2588190, 0, 0.9659258]}],
+           "meshes": [{"primitives": [{"attributes": {"POSITION": a_pos, "NORMAL": a_nrm, "TEXCOORD_0": a_uv}, "indices": a_idx, "material": 0}]}],
+           "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicRoughnessTexture": {"index": 1}, "metallicFactor": 1.0, "roughnessFactor": 1.0}}],
+           "textures": [{"source": 0, "sampler": 0}, {"source": 1, "sampler": 0}],
+           "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
+           "images": [{"bufferView": v_base, "mimeType": "image/png"}, {"bufferView": v_mr, "mimeType": "image/png"}],
+           "buffers": [{"byteLength": len(blob)}], "bufferViews": views, "accessors": accessors}
+    return doc, blob
+
+
 def write_glb(path, doc, blob):
     j = json.dumps(doc, separators=(",", ":")).encode()
     j += b" " * (-len(j) % 4)
@@ -113,6 +198,9 @@ def main(root):
         (*cube(), (0.42, 0.40, 0.38, 1.0), {"name": "pedestal", "scale": [0.8, 0.5, 0.8], "rotation": [0, 0.3826834, 0, 0.9238795]}),
     ])
     write_glb(os.path.join(out, "soul_orb_icosphere.glb"), doc, blob)
+
+    doc, blob = textured_cube_document()
+    write_glb(os.path.join(out, "rune_crate_textured.glb"), doc, blob)
 
     doc, _ = document([(*torus(1.0, 0.28, 32, 12), (0.8, 0.78, 0.72, 1.0), {"name": "ring", "rotation": [0.3826834, 0, 0, 0.9238795]})],
                       buffer_uri=lambda b: "data:application/octet-stream;base64," + base64.b64encode(b).decode())

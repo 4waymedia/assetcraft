@@ -25,7 +25,7 @@ _Last updated: 2026-10-20_
 
 | Step | Change                                                                                                                                                                                                                                  | Tests / exit                                                                                              | Status |
 |------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|--------|
-| V0.1 | `crates/mesh`: read `NORMAL` and `TEXCOORD_0` into `Mesh.normals` / `Mesh.uvs` (per vertex, optional); `Mesh.materials` (`baseColorFactor`, `baseColorTexture` → image index, `doubleSided`, `alphaMode`); `Mesh.images` as undecoded bytes + MIME (GLB bufferView or data URI, bounded by `Limits.max_image_bytes`, new); `triangle_material` replaces `triangle_color`. No new deps in L1: decoding stays in `thumbs` (L2, `image` crate, existing `MAX_DECODE_ALLOC` and caught panics) as `Textures::decode(&Mesh)` | mesh: normals/uvs round trip on the fixtures, hostile image refs (bad bufferView, oversize, unknown MIME → `Unsupported`, never a panic); thumbs: decode one texture; `test_data/make_model_fixtures.py` gains a textured cube | next |
+| V0.1 | `crates/mesh`: read `NORMAL` and `TEXCOORD_0` into `Mesh.normals` / `Mesh.uvs` (per vertex, optional); `Mesh.materials` (`baseColorFactor`, `baseColorTexture` → image index, `doubleSided`, `alphaMode`); `Mesh.images` as undecoded bytes + MIME (GLB bufferView or data URI, bounded by `Limits.max_image_bytes`, new); `triangle_material` replaces `triangle_color`. No new deps in L1: decoding stays in `thumbs` (L2, `image` crate, existing `MAX_DECODE_ALLOC` and caught panics) as `Textures::decode(&Mesh)` | mesh: normals/uvs round trip on the fixtures, hostile image refs (bad bufferView, oversize, unknown MIME → `Unsupported`, never a panic); thumbs: decode one texture; `test_data/make_model_fixtures.py` gains a textured cube | **built (2026-10-20), Paul to run CI** |
 | V0.2 | `raster.rs`: smooth shading from vertex normals (face normal fallback), bilinear texture sampling with wrap, `Lighting {key, fill, rim, ambient, exposure}` with the reference rig as default, `Background` (transparent / solid), `DisplayMode { Shaded, Wireframe, Normals, UvChecker }` | render fixtures: textured cube pixel checks, wireframe draws edges only, normals mode colours; the contact sheet re-rendered from the CLI matches the Python stills by eye | |
 | V0.3 | Preview panel + commands: `view.model {turntable?, mode?, background?, lighting?}` (APP, saved in prefs), `view.modelState` (READ); turntable on egui's clock; a small overlay bar (mode, turntable, reset); full-window (Space) preview orbits too | UI: command round trip, turntable advances yaw on a simulated clock, Space preview takes drag | |
 | V0.4 | `asset.meshInfo {path}` (READ, `crates/engine`) → counts, bounds, materials, images (size, MIME, bytes), warnings; `assetcraft-cli info <model>... [--json]` | engine + CLI tests; on the five orc GLBs the counts equal `measurements.json` (`totalVertices`, `totalTriangles`, `images[].w/h`) | |
@@ -39,15 +39,25 @@ _Last updated: 2026-10-20_
 | D-V2 | Where decoded textures live                        | **`thumbs` (L2)**, so `crates/mesh` stays dependency-free and ModelCraft can take it as is; decoded textures are handed to `render` as a slice | V0.1 |
 | D-V3 | Metallic-roughness map                             | **Read and keep it, draw it in V1** (needs an environment term to look right); V0 draws base colour only, like the Python stills | V0.1 |
 
-**Next action (Paul, Windows):** confirm the five orc GLBs load today (flat grey, textures ignored), which also checks `Limits` against a 43 MB GLB with a 41 MB BIN chunk:
+**Verified (Paul, Windows, 2026-10-20, before V0.1):** all five orc GLBs load and render flat grey through `assetcraft-cli thumb` (`_previews\*-v0-flat.png`); `Limits` holds for a 43 MB GLB with a 41 MB BIN chunk.
+
+**V0.1 as built (Linux container, Rust 1.97, `crates/mesh` alone):** `Mesh` gains `normals`, `uvs`, `materials` (`Material { base_color_image, metallic_roughness_image, double_sided }`, parallel to `colors`) and `images` (`ImageData { mime, bytes }`, encoded, never decoded in L1); `Limits.max_image_bytes` (96 MiB, per image and total; an image over it is dropped, the geometry still draws); `Mesh::material_of`, `image_bytes`, `cost` counts the new data; `slot_index` replaces `color_index` (dedup by colour + material). `gltf.rs`: `read_vec::<N>` replaces `read_positions`; `NORMAL` / `TEXCOORD_0` read per primitive (float or normalized integers), a count mismatch or malformed accessor drops the attribute instead of failing the primitive; normals go through the node's 3×3 and are re-normalized (`[0,0,0]` = none); mixed primitives keep both vectors parallel to positions; `materials → textures → images` resolve `baseColorTexture` and `metallicRoughnessTexture` (`texCoord` ≠ 0 ignored); images from a `bufferView`, a base64 data URI (MIME from the URI when the image has none) or a relative external file through the resolver, each copied once. **Pixel-identical to before:** the colour slot stays grey for "texture over white factor" until V0.2 samples the texture, so `RENDERER_VERSION` and the disk cache are untouched. `raster.rs` unchanged. Tests: 14 in `crates/mesh` (5 new: transform + embedded image, bounded and bad image refs incl. escaping URI and `texCoord` 1, mismatched attributes dropped, mixed primitives in both orders, the fixture); probe and thumbs library lists gain the fixture. New sample `rune_crate_textured.glb` (3.4 KB: cube with per-face normals/UVs, 64² base colour + 16² MR PNG as bufferViews, the orc files' shape); the other three samples are byte-identical. On the warg pup: 44,824 / 48,052 / images 8,343,620 + 4,252,427 bytes, exactly `measurements.json`; parse 9 ms, flat 512² render 30 ms (release).
+
+**Next action (Paul, Windows):** `cargo xtask ci` (expect 14 mesh tests, the probe and thumbs model tests green, layers unchanged), then commit:
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
-cargo build -p assetcraft-cli --release
-Get-ChildItem F:\Script-Projects\ArtCrafting\_dev-data\modelcraft\trellis\*.glb | ForEach-Object { .\target\release\assetcraft-cli.exe thumb $_.FullName --size 512 --out "F:\Script-Projects\ArtCrafting\_dev-data\modelcraft\trellis\_previews\$($_.BaseName)-v0-flat.png" --force }
+cargo xtask ci
 ```
 
-Then Claude writes V0.1.
+```powershell
+Set-Location F:\Script-Projects\ArtCrafting\assetcraft
+git add -A
+git commit -m "3D viewer V0.1: mesh reads normals, UVs, materials and embedded images (not drawn yet); textured cube fixture"
+git push
+```
+
+Then Claude writes V0.2 (draw them).
 
 ## Current: Stage 4 Storyboard mode (Paul, 2026-10-15), step 1 done
 
@@ -130,6 +140,15 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 - [ ] 6–10. See plan
 
 **Decisions (Paul, 2026-10-15):** storyboard plan D1 (Clip replaces block): yes. D3 (save AssetCraft's own storyboard files before Stage 2, atomically, never the user's assets): agreed; lands with step 7. (Plan IDs; not the D1 finding row below.)
+
+## App icon (Paul, 2026-10-20): elephant, to the FilmCraft icon standard
+
+| ID  | Step                         | What                                                                                                                                                                      | Owner                       | Status |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------ |
+| I1  | `assets/app-icon/`           | Same files and sidecars as FilmCraft's: `assetcraft.svg` (2048 px trace), `-small.svg`, `-1024.png`, `-macos-512.png`, `.ico`, `.icns`, `hicolor/` (8 sizes + scalable), README, LICENSE.txt; ATTRIBUTION.md row. Garnet `#9d354b`, ink `#0b0b0c`, paper `#efe9dc`. Sources (elephant + raven) in `_dev-data\assetcraft\app-icon\` | Claude writes, Paul commits | done, `7383a5e` |
+| I1a | Tools                        | `tools/vectorize_icon.py` (three-colour key + vtracer, MIT/Apache tool, not bundled; replaces craftrules' potrace-based `vectorize_tile.py`) and `packaging/icons.py` (resvg + Pillow; packs `.ico`/`.icns` on Windows too) | Claude                      | done   |
+| I2  | Wire it in                   | `apps/assetcraft/build.rs` embeds `assetcraft.ico` (as FilmCraft `apps/filmcraft/build.rs`); `ViewportBuilder::with_icon` from the 256 px / macOS 512 PNG; `with_app_id` on Linux | Claude                      | next   |
+| I3  | App id                       | Using `ai.storyteller.assetcraft` (kept 2026-10-20 with the elephant) for suite parity (file names in `hicolor/`, future `with_app_id`). If AssetCraft should carry its own reverse-DNS id, rename before I2 | Paul (decide)               | open   |
 
 ## Suite opportunities (2026-10-20)
 

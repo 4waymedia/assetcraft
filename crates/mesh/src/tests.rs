@@ -291,3 +291,180 @@ fn instances_times_primitives_are_a_bounded_amount_of_work() {
     let (empty, zeros) = degenerate(&shared_accessor_json(30, 15), &bin);
     assert_eq!(parse_glb(&glb(&empty, &zeros), &small, &mut no_files), Err(MeshError::Empty));
 }
+
+// ---- V0.1: normals, texture coordinates, materials and images --------------------------------
+
+/// The generated textured cube (`test_data/make_model_fixtures.py`).
+fn rune_crate() -> Vec<u8> {
+    std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_data/library/props/models/rune_crate_textured.glb"))
+        .unwrap()
+}
+
+/// A triangle with NORMAL and TEXCOORD_0 (float), a base colour PNG in the BIN chunk and
+/// `doubleSided`, in the layout TRELLIS exports use. Positions 0..36, normals 36..72,
+/// UVs 72..96, indices 96..102 (+2 pad), image at 104.
+fn textured_triangle(image: &[u8], image_json: &str, material_extra: &str) -> (String, Vec<u8>) {
+    let mut bin = Vec::new();
+    for v in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0] {
+        bin.extend_from_slice(&v.to_le_bytes());
+    }
+    for v in [0.0f32, 0.0, 2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0] {
+        bin.extend_from_slice(&v.to_le_bytes()); // unnormalized, and one zero normal
+    }
+    for v in [0.0f32, 0.0, 1.0, 0.0, 0.0, 1.0] {
+        bin.extend_from_slice(&v.to_le_bytes());
+    }
+    for i in [0u16, 1, 2, 0] {
+        bin.extend_from_slice(&i.to_le_bytes());
+    }
+    bin.extend_from_slice(image);
+    let json = format!(
+        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],
+        "nodes":[{{"mesh":0,"rotation":[0,0.7071068,0,0.7071068]}}],
+        "meshes":[{{"primitives":[{{"attributes":{{"POSITION":0,"NORMAL":2,"TEXCOORD_0":3}},"indices":1,"material":0}}]}}],
+        "materials":[{{"pbrMetallicRoughness":{{"baseColorTexture":{{"index":0}},"metallicRoughnessTexture":{{"index":0}},"metallicFactor":1,"roughnessFactor":1}}{material_extra}}}],
+        "textures":[{{"source":0}}],
+        "images":[{image_json}],
+        "buffers":[{{"byteLength":{len}}}],
+        "bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":96,"byteLength":6}},
+                       {{"buffer":0,"byteOffset":36,"byteLength":36}},{{"buffer":0,"byteOffset":72,"byteLength":24}},
+                       {{"buffer":0,"byteOffset":104,"byteLength":{ilen}}}],
+        "accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}},
+                     {{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}},
+                     {{"bufferView":2,"componentType":5126,"count":3,"type":"VEC3"}},
+                     {{"bufferView":3,"componentType":5126,"count":3,"type":"VEC2"}}]}}"#,
+        len = bin.len(),
+        ilen = image.len(),
+    );
+    (json, bin)
+}
+
+#[test]
+fn normals_uvs_and_embedded_images_are_read_and_transformed() {
+    let png = b"\x89PNG\r\n\x1a\nfake-but-bounded";
+    let (json, bin) = textured_triangle(png, r#"{"bufferView":4,"mimeType":"image/png"}"#, r#","doubleSided":true"#);
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.normals.len(), 3);
+    assert_eq!(mesh.uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+    // +Z rotated 90° about Y is +X; the unnormalized [0,0,2] came out unit length.
+    let n = mesh.normals[0];
+    assert!((n[0] - 1.0).abs() < 1e-5 && n[1].abs() < 1e-5 && n[2].abs() < 1e-5, "{n:?}");
+    assert_eq!(mesh.normals[2], [0.0; 3], "a zero normal stays 'none'");
+    assert_eq!(mesh.images.len(), 1, "the image is copied once though two textures use it");
+    assert_eq!(mesh.images[0].mime, "image/png");
+    assert_eq!(mesh.images[0].bytes, png);
+    let m = mesh.material_of(0);
+    assert_eq!(m, Material { base_color_image: Some(0), metallic_roughness_image: Some(0), double_sided: true });
+    assert_eq!(
+        mesh.colors[0],
+        [NEUTRAL_GREY[0], NEUTRAL_GREY[1], NEUTRAL_GREY[2], 1.0],
+        "grey until V0.2 samples the texture"
+    );
+    assert_eq!(mesh.materials.len(), mesh.colors.len());
+    assert!(mesh.cost() >= mesh.image_bytes() + 3 * 12 + 3 * 8);
+    // Still renders, pixel-identical to before V0.1 (the texture isn't sampled yet).
+    let image = render(&mesh, View::default(), &RenderOptions::new(24, 24)).unwrap();
+    assert!(image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
+}
+
+#[test]
+fn images_are_bounded_and_bad_image_references_leave_the_geometry() {
+    let png = b"\x89PNG\r\n\x1a\nfake";
+    let cases: [(&str, &str, Limits); 5] = [
+        (
+            "over the image limit",
+            r#"{"bufferView":4,"mimeType":"image/png"}"#,
+            Limits { max_image_bytes: 4, ..Limits::default() },
+        ),
+        ("missing bufferView", r#"{"bufferView":9,"mimeType":"image/png"}"#, Limits::default()),
+        ("external file refused by the resolver", r#"{"uri":"tex.png"}"#, Limits::default()),
+        ("escaping uri", r#"{"uri":"../tex.png"}"#, Limits::default()),
+        ("non-base64 data uri", r#"{"uri":"data:image/png,raw"}"#, Limits::default()),
+    ];
+    for (name, image_json, limits) in cases {
+        let (json, bin) = textured_triangle(png, image_json, "");
+        let mesh = parse_glb(&glb(&json, &bin), &limits, &mut no_files).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(mesh.triangles.len(), 1, "{name}");
+        assert!(mesh.images.is_empty(), "{name}");
+        assert_eq!(mesh.material_of(0).base_color_image, None, "{name}");
+        assert_eq!(
+            mesh.colors[0],
+            [NEUTRAL_GREY[0], NEUTRAL_GREY[1], NEUTRAL_GREY[2], 1.0],
+            "{name}: untextured → grey"
+        );
+    }
+    // A data-URI image works and takes its MIME type from the URI.
+    let (json, bin) = textured_triangle(png, &format!(r#"{{"uri":"data:image/jpeg;base64,{}"}}"#, b64(png)), "");
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.images[0].mime, "image/jpeg");
+    assert_eq!(mesh.images[0].bytes, png);
+    // A texture on another UV set is not used (we read TEXCOORD_0 only).
+    let (json, bin) = textured_triangle(png, r#"{"bufferView":4,"mimeType":"image/png"}"#, "");
+    let json = json.replace(r#""baseColorTexture":{"index":0}"#, r#""baseColorTexture":{"index":0,"texCoord":1}"#);
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.material_of(0).base_color_image, None);
+    assert_eq!(mesh.material_of(0).metallic_roughness_image, Some(0));
+}
+
+#[test]
+fn attributes_that_do_not_match_positions_are_dropped_not_fatal() {
+    let png = b"\x89PNG\r\n\x1a\nfake";
+    let (json, bin) = textured_triangle(png, r#"{"bufferView":4,"mimeType":"image/png"}"#, "");
+    // NORMAL with 2 elements instead of 3, TEXCOORD_0 pointing at the indices (SCALAR u16).
+    let json = json
+        .replace(
+            r#"{"bufferView":2,"componentType":5126,"count":3,"type":"VEC3"}"#,
+            r#"{"bufferView":2,"componentType":5126,"count":2,"type":"VEC3"}"#,
+        )
+        .replace(r#""TEXCOORD_0":3"#, r#""TEXCOORD_0":1"#);
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.triangles.len(), 1);
+    assert!(mesh.normals.is_empty() && mesh.uvs.is_empty());
+}
+
+#[test]
+fn mixed_primitives_keep_normals_and_uvs_parallel_to_positions() {
+    // The textured triangle plus a second, bare triangle instance of the plain mesh.
+    let png = b"\x89PNG\r\n\x1a\nfake";
+    let (json, bin) = textured_triangle(png, r#"{"bufferView":4,"mimeType":"image/png"}"#, "");
+    let json = json
+        .replace(r#""scenes":[{"nodes":[0]}]"#, r#""scenes":[{"nodes":[0,1]}]"#)
+        .replace(r#""nodes":[{"mesh":0,"rotation":[0,0.7071068,0,0.7071068]}]"#, r#""nodes":[{"mesh":0},{"mesh":1,"translation":[3,0,0]}]"#)
+        .replace(
+            r#""meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":2,"TEXCOORD_0":3},"indices":1,"material":0}]}]"#,
+            r#""meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":2,"TEXCOORD_0":3},"indices":1,"material":0}]},{"primitives":[{"attributes":{"POSITION":0},"indices":1}]}]"#,
+        );
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.positions.len(), 6);
+    assert_eq!(mesh.normals.len(), 6);
+    assert_eq!(mesh.uvs.len(), 6);
+    assert_eq!(mesh.normals[3..], [[0.0; 3]; 3], "the bare primitive has 'none' normals");
+    assert_eq!(mesh.uvs[3..], [[0.0; 2]; 3]);
+    assert_eq!(mesh.colors.len(), 2, "textured and untextured slots are distinct");
+    assert_eq!(mesh.material_of(0).base_color_image, Some(0));
+    assert_eq!(mesh.material_of(1), Material::default());
+    // Reverse order: the bare mesh first, then the textured one, still parallel.
+    let json = json.replace(r#""scenes":[{"nodes":[0,1]}]"#, r#""scenes":[{"nodes":[1,0]}]"#);
+    let mesh = parse_glb(&glb(&json, &bin), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!((mesh.normals.len(), mesh.uvs.len()), (6, 6));
+    assert_eq!(mesh.normals[..3], [[0.0; 3]; 3]);
+    assert!(mesh.normals[3..].iter().all(|n| n[2] > 0.9 || *n == [0.0; 3]), "{:?}", &mesh.normals[3..]);
+}
+
+#[test]
+fn the_textured_cube_fixture_has_everything_v0_2_will_draw() {
+    let mesh = parse_glb(&rune_crate(), &Limits::default(), &mut no_files).unwrap();
+    assert_eq!(mesh.positions.len(), 24);
+    assert_eq!(mesh.triangles.len(), 12);
+    assert_eq!(mesh.normals.len(), 24);
+    assert_eq!(mesh.uvs.len(), 24);
+    assert!(mesh.normals.iter().all(|n| (n[0] * n[0] + n[1] * n[1] + n[2] * n[2] - 1.0).abs() < 1e-4));
+    assert_eq!(mesh.images.len(), 2);
+    assert!(mesh.images.iter().all(|i| i.mime == "image/png" && i.bytes.starts_with(b"\x89PNG")));
+    assert_eq!(
+        mesh.material_of(0),
+        Material { base_color_image: Some(0), metallic_roughness_image: Some(1), double_sided: false }
+    );
+    let image = render(&mesh, View::default(), &RenderOptions::new(48, 48)).unwrap();
+    assert!(image.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count() > 200);
+}

@@ -5,14 +5,19 @@
 //! external `.bin` buffers) through `Services` and hands the bytes in.
 //!
 //! - [`parse_glb`], [`parse_gltf`] and [`parse_obj`] turn a file into a [`Mesh`]: world-space
-//!   positions (node transforms applied), triangles and one flat colour per triangle. Every
-//!   count and size read from the file is checked against [`Limits`] before anything is
-//!   allocated; bad data is a [`MeshError`], never a panic.
+//!   positions (node transforms applied), triangles, one material slot per triangle (a flat
+//!   colour plus, for glTF, the material's textures), and per-vertex normals and texture
+//!   coordinates when the file has them. Images stay as the encoded bytes found in the file
+//!   ([`ImageData`]); decoding them is the caller's job (`assetcraft-thumbs`, which has the image
+//!   decoders and their allocation limits). Every count and size read from the file is checked
+//!   against [`Limits`] before anything is allocated; bad data is a [`MeshError`], never a panic.
 //! - [`render`] draws a [`Mesh`] with a z-buffered, flat-shaded (Lambert) software rasterizer
 //!   from an orbit [`View`] fitted to the mesh's bounds, onto a transparent background.
 //!
-//! Not drawn yet: textures, vertex colours, smooth normals, sparse accessors, Draco/meshopt
-//! compression (reported as [`MeshError::Unsupported`]) and OBJ `.mtl` materials.
+//! Not drawn yet (V0.2 draws normals and textures): textures, vertex colours, smooth normals.
+//! Not read: sparse accessors, Draco/meshopt compression (reported as
+//! [`MeshError::Unsupported`]), OBJ `vn` / `vt` / `.mtl`, glTF samplers (wrap is assumed) and
+//! texture coordinate sets other than `TEXCOORD_0`.
 
 mod gltf;
 mod obj;
@@ -44,10 +49,15 @@ pub struct Limits {
     /// Most nodes visited while walking the scene graph (cycles and huge DAGs stop here). Also
     /// caps mesh instances × primitives placed, empty ones included.
     pub max_node_visits: usize,
+    /// Most bytes of encoded images kept (each one, and all of them together). Images over it
+    /// are dropped from the mesh (the material keeps no texture), not an error: the geometry
+    /// still draws.
+    pub max_image_bytes: usize,
 }
 
 impl Default for Limits {
-    /// 2 M vertices / 2 M triangles (≈ 48 MiB of mesh), 128 MiB of buffers, 16 MiB of JSON.
+    /// 2 M vertices / 2 M triangles (≈ 48 MiB of mesh), 128 MiB of buffers, 16 MiB of JSON,
+    /// 96 MiB of encoded images.
     fn default() -> Self {
         Self {
             max_vertices: 2_000_000,
@@ -55,6 +65,7 @@ impl Default for Limits {
             max_buffer_bytes: 128 * 1024 * 1024,
             max_json_bytes: 16 * 1024 * 1024,
             max_node_visits: 100_000,
+            max_image_bytes: 96 * 1024 * 1024,
         }
     }
 }
@@ -93,23 +104,77 @@ pub(crate) fn bad(message: impl Into<String>) -> MeshError {
     MeshError::Malformed(message.into())
 }
 
-/// A triangle soup ready to draw: world-space positions, triangles, one colour per triangle.
+/// A material slot's textures and flags. Its base colour is the same-index entry of
+/// [`Mesh::colors`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Material {
+    /// Index into [`Mesh::images`] of the base colour texture (`TEXCOORD_0`), multiplied by the
+    /// colour.
+    pub base_color_image: Option<u32>,
+    /// Index into [`Mesh::images`] of the metallic-roughness texture (glTF packs roughness in
+    /// G and metalness in B).
+    pub metallic_roughness_image: Option<u32>,
+    /// Draw both faces (glTF `doubleSided`).
+    pub double_sided: bool,
+}
+
+/// An image as encoded in the file (PNG, JPEG, …). Nothing here decodes it: the bytes are
+/// bounded by [`Limits::max_image_bytes`] and handed to the caller's image decoder.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImageData {
+    /// The file's declared MIME type (`image/png`, `image/jpeg`), or empty when unknown.
+    pub mime: String,
+    /// The encoded bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl fmt::Debug for ImageData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ImageData({:?}, {} bytes)", self.mime, self.bytes.len())
+    }
+}
+
+/// A triangle soup ready to draw: world-space positions, triangles, one material slot per
+/// triangle, and optional per-vertex normals and texture coordinates.
+///
+/// Invariants: `normals` and `uvs` are each empty or exactly `positions.len()` long;
+/// `materials.len() == colors.len()`; every image index in `materials` is in range.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mesh {
     /// Vertex positions (finite).
     pub positions: Vec<[f32; 3]>,
     /// Triangles as indices into `positions` (all in range).
     pub triangles: Vec<[u32; 3]>,
-    /// Index into `colors` for each triangle.
+    /// Index into `colors` / `materials` for each triangle.
     pub triangle_color: Vec<u16>,
-    /// Linear RGBA colours (at most `u16::MAX + 1`).
+    /// Linear RGBA colours (at most `u16::MAX + 1`), one per material slot.
     pub colors: Vec<[f32; 4]>,
+    /// World-space unit normals, one per vertex, when the file has them (empty otherwise).
+    /// `[0.0; 3]` marks a vertex whose primitive had none; draw it with its face normal.
+    pub normals: Vec<[f32; 3]>,
+    /// `TEXCOORD_0`, one per vertex, when the file has them (empty otherwise). Values outside
+    /// `0..=1` wrap.
+    pub uvs: Vec<[f32; 2]>,
+    /// Textures and flags, one per `colors` entry.
+    pub materials: Vec<Material>,
+    /// Encoded images referenced by `materials`.
+    pub images: Vec<ImageData>,
 }
 
 impl Mesh {
     /// Number of triangles.
     pub fn triangle_count(&self) -> usize {
         self.triangles.len()
+    }
+
+    /// The material slot of triangle `t`, or the default (no textures) when out of range.
+    pub fn material_of(&self, t: usize) -> Material {
+        self.triangle_color.get(t).and_then(|i| self.materials.get(*i as usize)).copied().unwrap_or_default()
+    }
+
+    /// Bytes of encoded images held.
+    pub fn image_bytes(&self) -> usize {
+        self.images.iter().map(|i| i.bytes.len()).sum()
     }
 
     /// Axis-aligned bounds `(min, max)`, or `None` for an empty mesh.
@@ -122,22 +187,30 @@ impl Mesh {
 
     /// Bytes this mesh holds, for memory budgets.
     pub fn cost(&self) -> usize {
-        self.positions.len() * 12 + self.triangles.len() * 14 + self.colors.len() * 16
+        self.positions.len() * 12
+            + self.triangles.len() * 14
+            + self.colors.len() * (16 + std::mem::size_of::<Material>())
+            + self.normals.len() * 12
+            + self.uvs.len() * 8
+            + self.image_bytes()
     }
 
-    /// Add a colour (deduplicated through `lookup`, keyed by the bit patterns) and return its
-    /// index. A hash lookup, so many instances over up to 65,536 colours stay linear.
-    pub(crate) fn color_index(
+    /// Add a material slot (a colour plus textures and flags, deduplicated through `lookup`,
+    /// keyed by the colour's bit patterns and the material) and return its index. A hash
+    /// lookup, so many instances over up to 65,536 slots stay linear.
+    pub(crate) fn slot_index(
         &mut self,
-        lookup: &mut std::collections::HashMap<[u32; 4], u16>,
+        lookup: &mut std::collections::HashMap<([u32; 4], Material), u16>,
         color: [f32; 4],
+        material: Material,
     ) -> Result<u16, MeshError> {
-        let key = color.map(f32::to_bits);
+        let key = (color.map(f32::to_bits), material);
         if let Some(i) = lookup.get(&key) {
             return Ok(*i);
         }
         let i = u16::try_from(self.colors.len()).map_err(|_| MeshError::TooLarge)?;
         self.colors.push(color);
+        self.materials.push(material);
         lookup.insert(key, i);
         Ok(i)
     }

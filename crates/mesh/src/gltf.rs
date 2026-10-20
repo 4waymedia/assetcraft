@@ -1,12 +1,15 @@
-//! glTF 2.0 (JSON and binary GLB): a small reader for triangle geometry and base colours.
+//! glTF 2.0 (JSON and binary GLB): a small reader for triangle geometry, normals, texture
+//! coordinates, base colours and the material's images.
 //!
 //! Reads `scenes` → `nodes` (matrix or TRS, nested) → `meshes` → `primitives` with a `POSITION`
-//! accessor (float, or integer per `KHR_mesh_quantization`), optional `indices` (u8/u16/u32)
-//! and modes triangles / strip / fan. Buffers come from the GLB `BIN` chunk, base64 `data:`
-//! URIs, or the caller's resolver for relative external files. Every offset, stride and count
-//! is checked against the actual bytes and the [`Limits`] before use.
+//! accessor (float, or integer per `KHR_mesh_quantization`), optional `NORMAL` and `TEXCOORD_0`
+//! (float or normalized integers), optional `indices` (u8/u16/u32) and modes triangles / strip /
+//! fan; `materials` → `textures` → `images` for the base colour and metallic-roughness maps,
+//! whose encoded bytes come out as [`crate::ImageData`]. Buffers and images come from the GLB
+//! `BIN` chunk, base64 `data:` URIs, or the caller's resolver for relative external files. Every
+//! offset, stride and count is checked against the actual bytes and the [`Limits`] before use.
 
-use crate::{Limits, Mesh, MeshError, NEUTRAL_GREY, bad};
+use crate::{ImageData, Limits, Material, Mesh, MeshError, NEUTRAL_GREY, bad};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -89,6 +92,7 @@ fn parse_document(
     let instances = instances(&root, limits)?;
     let mut mesh = Mesh::default();
     let mut colors = HashMap::new();
+    let mut images = Images { loaded: HashMap::new(), total: 0 };
     let mut cache: HashMap<usize, Vec<Primitive>> = HashMap::new();
     // Budgets over everything cached (shared accessors are re-read per primitive) and over the
     // work of placing instances, so neither huge shared index buffers nor thousands of empty
@@ -105,7 +109,7 @@ fn parse_document(
                 if work > limits.max_node_visits {
                     return Err(MeshError::TooLarge);
                 }
-                match read_primitive(&root, &mut buffers, prim, limits) {
+                match read_primitive(&root, &mut buffers, &mut images, &mut mesh, prim, limits) {
                     Ok(Some(p)) if p.triangles.is_empty() => {} // nothing to draw: not cached
                     Ok(Some(p)) => {
                         cached_vertices = cached_vertices.saturating_add(p.positions.len());
@@ -268,6 +272,70 @@ fn instances(root: &Value, limits: &Limits) -> Result<Vec<(usize, Mat4)>, MeshEr
         }
     }
     Ok(out)
+}
+
+// ---- images --------------------------------------------------------------------------------
+
+/// Which glTF images have been copied into [`Mesh::images`], and how many bytes they hold.
+struct Images {
+    /// glTF image index → `Mesh::images` index, or `None` when it was refused (over the limit,
+    /// unreadable); a refusal is remembered so it isn't retried per primitive.
+    loaded: HashMap<usize, Option<u32>>,
+    total: usize,
+}
+
+impl Images {
+    /// Copy glTF image `i` into `mesh.images` once and return its index there. An image that
+    /// is missing, malformed, over [`Limits::max_image_bytes`] or unreadable yields `None`: the
+    /// geometry still draws, untextured.
+    fn get(&mut self, root: &Value, buffers: &mut Buffers<'_, '_>, mesh: &mut Mesh, i: usize) -> Option<u32> {
+        if let Some(found) = self.loaded.get(&i) {
+            return *found;
+        }
+        let limit = buffers.limits.max_image_bytes;
+        let loaded = array(root, "images").get(i).and_then(|img| {
+            let mime = img.get("mimeType").and_then(Value::as_str).unwrap_or_default().to_string();
+            let bytes: Vec<u8> = if let Some(view_index) = index(img, "bufferView") {
+                let view = array(root, "bufferViews").get(view_index)?;
+                let len = index(view, "byteLength")?;
+                if len > limit || self.total.saturating_add(len) > limit {
+                    return None;
+                }
+                let offset = index(view, "byteOffset").unwrap_or(0);
+                let data = buffers.get(index(view, "buffer")?).ok()?;
+                data.get(offset..offset.checked_add(len)?)?.to_vec()
+            } else {
+                let uri = img.get("uri").and_then(Value::as_str)?;
+                if let Some(rest) = uri.strip_prefix("data:") {
+                    let (head, payload) = rest.split_once(";base64,")?;
+                    if payload.len() / 4 * 3 > limit || self.total.saturating_add(payload.len() / 4 * 3) > limit {
+                        return None;
+                    }
+                    let decoded = base64(payload)?;
+                    if decoded.len() > limit || self.total.saturating_add(decoded.len()) > limit {
+                        return None;
+                    }
+                    let mime = if mime.is_empty() { head.to_string() } else { mime };
+                    self.total += decoded.len();
+                    let n = u32::try_from(mesh.images.len()).ok()?;
+                    mesh.images.push(ImageData { mime, bytes: decoded });
+                    return Some(n);
+                }
+                let path = relative_path(uri)?;
+                let data = (buffers.resolve)(&path, limit).ok()?;
+                if data.len() > limit || self.total.saturating_add(data.len()) > limit {
+                    return None;
+                }
+                data
+            };
+            self.total += bytes.len();
+            let n = u32::try_from(mesh.images.len()).ok()?;
+            mesh.images.push(ImageData { mime, bytes });
+            Some(n)
+        });
+        self.loaded.insert(i, loaded);
+        loaded
+    }
 }
 
 // ---- buffers -------------------------------------------------------------------------------
@@ -496,30 +564,54 @@ fn component(bytes: &[u8], at: usize, component: u64, normalized: bool) -> Optio
     })
 }
 
-fn read_positions(
+/// Read a `VEC<N>` vertex attribute of floats or (normalized) small integers.
+fn read_vec<const N: usize>(
     root: &Value,
     buffers: &mut Buffers<'_, '_>,
     i: usize,
     limits: &Limits,
-) -> Result<Vec<[f32; 3]>, MeshError> {
+    name: &str,
+) -> Result<Vec<[f32; N]>, MeshError> {
     let acc = accessor(root, i, limits.max_vertices)?;
     buffers.charge(acc.count)?;
-    if acc.components != 3 || acc.component == 5125 {
-        return Err(bad("POSITION must be a VEC3 of floats or small integers"));
+    if acc.components != N || acc.component == 5125 {
+        return Err(bad(format!("{name} must be a VEC{N} of floats or small integers")));
     }
     let bytes = view_bytes(&acc, buffers)?;
     let size = component_size(acc.component).unwrap_or(4);
     let mut out = Vec::with_capacity(acc.count);
     for n in 0..acc.count {
         let base = acc.offset + n * acc.stride;
-        let mut p = [0.0f32; 3];
+        let mut p = [0.0f32; N];
         for (j, v) in p.iter_mut().enumerate() {
-            *v =
-                component(bytes, base + j * size, acc.component, acc.normalized).ok_or_else(|| bad("POSITION read"))?;
+            *v = component(bytes, base + j * size, acc.component, acc.normalized)
+                .ok_or_else(|| bad(format!("{name} read")))?;
         }
         out.push(p);
     }
     Ok(out)
+}
+
+/// A per-vertex attribute that must match `POSITION`'s count; a mismatch or a read error
+/// drops the attribute (geometry still draws) rather than failing the primitive.
+fn read_attribute<const N: usize>(
+    root: &Value,
+    buffers: &mut Buffers<'_, '_>,
+    prim: &Value,
+    name: &str,
+    count: usize,
+    limits: &Limits,
+) -> Result<Option<Vec<[f32; N]>>, MeshError> {
+    let Some(i) =
+        prim.pointer(&format!("/attributes/{name}")).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())
+    else {
+        return Ok(None);
+    };
+    match read_vec::<N>(root, buffers, i, limits, name) {
+        Ok(v) if v.len() == count => Ok(Some(v)),
+        Ok(_) | Err(MeshError::Malformed(_) | MeshError::Unsupported(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 fn read_indices(root: &Value, buffers: &mut Buffers<'_, '_>, i: usize, limits: &Limits) -> Result<Vec<u32>, MeshError> {
@@ -546,13 +638,19 @@ fn read_indices(root: &Value, buffers: &mut Buffers<'_, '_>, i: usize, limits: &
 
 struct Primitive {
     positions: Vec<[f32; 3]>,
+    /// Object-space unit normals, one per position, when the file has them.
+    normals: Option<Vec<[f32; 3]>>,
+    uvs: Option<Vec<[f32; 2]>>,
     triangles: Vec<[u32; 3]>,
     color: [f32; 4],
+    material: Material,
 }
 
 fn read_primitive(
     root: &Value,
     buffers: &mut Buffers<'_, '_>,
+    images: &mut Images,
+    mesh: &mut Mesh,
     prim: &Value,
     limits: &Limits,
 ) -> Result<Option<Primitive>, MeshError> {
@@ -566,7 +664,11 @@ fn read_primitive(
     }
     let pos = prim.pointer("/attributes/POSITION").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
     let Some(pos) = pos else { return Ok(None) };
-    let positions = read_positions(root, buffers, pos, limits)?;
+    let positions = read_vec::<3>(root, buffers, pos, limits, "POSITION")?;
+    let normals = read_attribute::<3>(root, buffers, prim, "NORMAL", positions.len(), limits)?
+        .map(|v| v.into_iter().map(unit_or_zero).collect());
+    let uvs = read_attribute::<2>(root, buffers, prim, "TEXCOORD_0", positions.len(), limits)?
+        .map(|v| v.into_iter().map(|[u, w]| [finite_or_zero(u), finite_or_zero(w)]).collect());
     let indices = match index(prim, "indices") {
         Some(i) => read_indices(root, buffers, i, limits)?,
         None => (0..u32::try_from(positions.len()).map_err(|_| MeshError::TooLarge)?).collect(),
@@ -601,26 +703,69 @@ fn read_primitive(
     if triangles.len() > limits.max_triangles {
         return Err(MeshError::TooLarge);
     }
-    Ok(Some(Primitive { positions, triangles, color: material_color(root, index(prim, "material")) }))
+    let (color, material) = material_of(root, buffers, images, mesh, index(prim, "material"));
+    Ok(Some(Primitive { positions, normals, uvs, triangles, color, material }))
 }
 
-/// The material's base colour factor, or [`NEUTRAL_GREY`] when it has none (or only a
-/// texture, which we don't draw, over a white factor).
-fn material_color(root: &Value, material: Option<usize>) -> [f32; 4] {
+fn finite_or_zero(v: f32) -> f32 {
+    if v.is_finite() { v } else { 0.0 }
+}
+
+/// Normalize, or `[0.0; 3]` ("no normal") for zero, huge or non-finite input.
+fn unit_or_zero(n: [f32; 3]) -> [f32; 3] {
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if len > 1e-20 && len.is_finite() { [n[0] / len, n[1] / len, n[2] / len] } else { [0.0; 3] }
+}
+
+/// The glTF image behind `textures[texture.index]`, when the texture uses `TEXCOORD_0`.
+fn texture_image(
+    root: &Value,
+    buffers: &mut Buffers<'_, '_>,
+    images: &mut Images,
+    mesh: &mut Mesh,
+    texture: Option<&Value>,
+) -> Option<u32> {
+    let texture = texture?;
+    if index(texture, "texCoord").unwrap_or(0) != 0 {
+        return None;
+    }
+    let source = index(array(root, "textures").get(index(texture, "index")?)?, "source")?;
+    images.get(root, buffers, mesh, source)
+}
+
+/// The material's base colour factor and textures. Without a material, or with only a texture
+/// (which [`crate::render`] doesn't sample yet) over a white factor: [`NEUTRAL_GREY`], so an
+/// untextured render doesn't glare. V0.2 turns that white once the texture is drawn.
+fn material_of(
+    root: &Value,
+    buffers: &mut Buffers<'_, '_>,
+    images: &mut Images,
+    mesh: &mut Mesh,
+    material: Option<usize>,
+) -> ([f32; 4], Material) {
     let grey = [NEUTRAL_GREY[0], NEUTRAL_GREY[1], NEUTRAL_GREY[2], 1.0];
-    let Some(m) = material.and_then(|m| array(root, "materials").get(m)) else { return grey };
+    let Some(m) = material.and_then(|m| array(root, "materials").get(m)) else { return (grey, Material::default()) };
     let pbr = m.get("pbrMetallicRoughness");
     let factor = numbers::<4>(pbr.and_then(|p| p.get("baseColorFactor"))).map(|c| c.map(|v| v.clamp(0.0, 1.0)));
-    let textured = pbr.and_then(|p| p.get("baseColorTexture")).is_some();
-    match factor {
-        Some(c) if !(textured && c == [1.0; 4]) => c,
+    let base_color_image = texture_image(root, buffers, images, mesh, pbr.and_then(|p| p.get("baseColorTexture")));
+    let metallic_roughness_image =
+        texture_image(root, buffers, images, mesh, pbr.and_then(|p| p.get("metallicRoughnessTexture")));
+    let declared_texture = pbr.and_then(|p| p.get("baseColorTexture")).is_some();
+    let color = match factor {
+        Some(c) if !(declared_texture && c == [1.0; 4]) => c,
         _ => grey,
-    }
+    };
+    let material = Material {
+        base_color_image,
+        metallic_roughness_image,
+        double_sided: m.get("doubleSided").and_then(Value::as_bool).unwrap_or(false),
+    };
+    (color, material)
 }
 
 fn append(
     mesh: &mut Mesh,
-    colors: &mut HashMap<[u32; 4], u16>,
+    colors: &mut HashMap<([u32; 4], Material), u16>,
     prim: &Primitive,
     m: &Mat4,
     limits: &Limits,
@@ -645,9 +790,33 @@ fn append(
         return Ok(()); // a degenerate transform or junk floats: skip this instance
     }
     let base = u32::try_from(mesh.positions.len()).map_err(|_| MeshError::TooLarge)?;
-    let color = mesh.color_index(colors, prim.color)?;
+    let color = mesh.slot_index(colors, prim.color, prim.material)?;
+    let count = world.len();
+    // Normals and UVs stay parallel to positions across primitives: once any primitive brings
+    // one, earlier and later vertices without it get the "none" value.
+    if prim.normals.is_some() || !mesh.normals.is_empty() {
+        mesh.normals.resize(mesh.positions.len(), [0.0; 3]);
+        match &prim.normals {
+            Some(normals) => mesh.normals.extend(normals.iter().map(|n| transform_normal(m, *n))),
+            None => mesh.normals.resize(mesh.positions.len() + count, [0.0; 3]),
+        }
+    }
+    if prim.uvs.is_some() || !mesh.uvs.is_empty() {
+        mesh.uvs.resize(mesh.positions.len(), [0.0; 2]);
+        match &prim.uvs {
+            Some(uvs) => mesh.uvs.extend_from_slice(uvs),
+            None => mesh.uvs.resize(mesh.positions.len() + count, [0.0; 2]),
+        }
+    }
     mesh.positions.extend(world);
     mesh.triangles.extend(prim.triangles.iter().map(|t| t.map(|i| i + base)));
     mesh.triangle_color.extend(std::iter::repeat_n(color, prim.triangles.len()));
     Ok(())
+}
+
+/// A normal through the upper-left 3×3 of `m`, re-normalized. Exact for rotations and uniform
+/// scale (the case for every glTF exporter we know of); a non-uniform scale skews it slightly,
+/// which only shades a little wrong.
+fn transform_normal(m: &Mat4, [x, y, z]: [f32; 3]) -> [f32; 3] {
+    unit_or_zero([m[0] * x + m[4] * y + m[8] * z, m[1] * x + m[5] * y + m[9] * z, m[2] * x + m[6] * y + m[10] * z])
 }

@@ -17,7 +17,7 @@ python make_model_fixtures.py library      # 3D samples in props/models/ (standa
 | `environments/`             | Aspect ratios (16:9, 21:9, 9:16), JPG / PNG / WebP                           |
 | `environments/dupes/`       | Exact copy, resized + recompressed, brightened: near-duplicate finder        |
 | `props/`                    | PNG with transparency, GIF                                                   |
-| `props/models/`             | 3D: GLB (icosphere on a cube, two nodes and materials), glTF with a base64 data-URI buffer (torus), OBJ (quads, pentagon, negative indices) |
+| `props/models/`             | 3D: GLB (icosphere on a cube, two nodes and materials), glTF with a base64 data-URI buffer (torus), OBJ (quads, pentagon, negative indices), textured GLB (cube with normals, UVs, a base colour and a metallic-roughness PNG embedded as bufferViews) |
 | `palettes/`                 | BMP, colour extraction                                                       |
 | `storyboard/`               | TIFF (LZW), greyscale PNG sketches named by shot number                      |
 | `environments/` (Stage 1)  | Camera raw: `clearing_raw_orient6.dng` (embedded JPEG preview, Orientation 6); HEIC `lantern_dusk.heic` |
@@ -27,7 +27,7 @@ python make_model_fixtures.py library      # 3D samples in props/models/ (standa
 The three Stage 1 samples come from `make_stage1_samples.py` (same licence; the HEIC needs
 `pip install pillow-heif`): `python make_stage1_samples.py library`.
 
-27 files from the two generators above, about 1.7 MB.
+28 files from the two generators above, about 1.7 MB.
 
 ### Stage 1: PDF and video samples
 

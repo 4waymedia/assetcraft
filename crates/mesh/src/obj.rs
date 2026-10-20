@@ -10,8 +10,11 @@ const MAX_FACE_CORNERS: usize = 256;
 /// Parse an OBJ file's bytes.
 pub fn parse_obj(bytes: &[u8], limits: &Limits) -> Result<Mesh, MeshError> {
     let mut mesh = Mesh::default();
-    let color = mesh
-        .color_index(&mut std::collections::HashMap::new(), [NEUTRAL_GREY[0], NEUTRAL_GREY[1], NEUTRAL_GREY[2], 1.0])?;
+    let color = mesh.slot_index(
+        &mut std::collections::HashMap::new(),
+        [NEUTRAL_GREY[0], NEUTRAL_GREY[1], NEUTRAL_GREY[2], 1.0],
+        crate::Material::default(),
+    )?;
     let mut corners: Vec<u32> = Vec::new();
     for raw in bytes.split(|b| *b == b'\n') {
         let Ok(line) = std::str::from_utf8(raw) else { continue };
