@@ -1,0 +1,8 @@
+asset:        ai.storyteller.assetcraft.png
+title:        AssetCraft app icon, Linux hicolor theme 256 px
+author:       Paul Gemignani (AssetCraft owner), for the AssetCraft project
+source:       original work (made by the owner in ArtCraft, then vectorised)
+license:      MIT OR Apache-2.0
+license-file: assets/app-icon/LICENSE.txt
+added:        2026-10-20 by Claude (agent) for Paul Gemignani
+notes:        Rendered from assetcraft.svg with resvg by packaging/icons.py.

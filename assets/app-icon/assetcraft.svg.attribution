@@ -1,0 +1,8 @@
+asset:        assetcraft.svg
+title:        AssetCraft app icon, canonical vector (elephant)
+author:       Paul Gemignani (AssetCraft owner), for the AssetCraft project
+source:       original work (made by the owner in ArtCraft, then vectorised)
+license:      MIT OR Apache-2.0
+license-file: assets/app-icon/LICENSE.txt
+added:        2026-10-20 by Claude (agent) for Paul Gemignani
+notes:        SVG traced at 2048 px with tools/vectorize_icon.py (vtracer) from the owner's ArtCraft drawing (kept outside the repo, in _dev-data/assetcraft/app-icon/source-elephant.png). Three colours: ink #0b0b0c, paper #efe9dc, app colour #9d354b; 512 viewBox, rx=112. See assets/app-icon/README.md.
