@@ -4,7 +4,7 @@
 //! The catalog ([`SIBLING_APPS`]) comes from each sibling's own sources (see the per-app notes).
 //! Every app's desktop binary takes files as plain positional arguments after its options and
 //! opens each one; paths handed over here are always absolute, so none can be mistaken for an
-//! option. FilmCraft also understands `--`, so it gets one first.
+//! option. FilmCraft and EffectCraft also understand `--`, so they get one first.
 //!
 //! Discovery ([`SystemLocator`]): the `ASSETCRAFT_<APP>_EXE` environment variable, then `PATH`,
 //! then the folder the sibling's Windows installer uses (`%ProgramFiles%\<App>\<app>.exe`, all
@@ -118,6 +118,19 @@ pub const SIBLING_APPS: &[SiblingApp] = &[
         binary: "filmcraft",
         install_dir: "FilmCraft",
         extensions: FILMCRAFT_EXTS,
+        folders: false,
+        args: ArgStyle::AfterDoubleDash,
+    },
+    // EffectCraft: projects only (`.ecproj`, and the `.ecprojx` XML copy it also opens as a
+    // project). It imports stills and video too, but PhotoCraft and FilmCraft already serve those.
+    // storytold/effectcraft 05955c0 (v0.10.0): `apps/effectcraft/src/main.rs:3` (usage, `--`),
+    // `:50-55` (`is_project_file`); `packaging/windows/effectcraft.wxs:42` (App Paths, INSTALLFOLDER).
+    SiblingApp {
+        id: "effectcraft",
+        label: "EffectCraft",
+        binary: "effectcraft",
+        install_dir: "EffectCraft",
+        extensions: &["ecproj", "ecprojx"],
         folders: false,
         args: ArgStyle::AfterDoubleDash,
     },
@@ -293,6 +306,18 @@ mod tests {
         assert_eq!(pc, Some(vec![OsString::from("/art/shot,final.png"), OsString::from("/art/a b \"c\".png")]));
         let fc = find_app("filmcraft").map(|a| a.argv(&paths[..1]));
         assert_eq!(fc, Some(vec![OsString::from("--"), OsString::from("/art/shot,final.png")]));
+    }
+
+    #[test]
+    fn effectcraft_opens_its_projects_only_and_gets_a_double_dash() {
+        let ec = find_app("effectcraft");
+        assert_eq!(ec.map(SiblingApp::env_var).as_deref(), Some("ASSETCRAFT_EFFECTCRAFT_EXE"));
+        let opens = |p: &str| ec.is_some_and(|a| a.opens_extension(Path::new(p)));
+        assert!(opens("/art/Title.ecproj") && opens("/art/Title copy.ECPROJX"));
+        assert!(!opens("/art/plate.png") && !opens("/art/shot.mp4") && !opens("/art/Title.ecproj.bak"));
+        assert_eq!(ec.map(|a| a.folders), Some(false));
+        let argv = ec.map(|a| a.argv(&[PathBuf::from("/art/Title.ecproj")]));
+        assert_eq!(argv, Some(vec![OsString::from("--"), OsString::from("/art/Title.ecproj")]));
     }
 
     #[test]

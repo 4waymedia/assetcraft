@@ -224,6 +224,7 @@ it is refused on every remote door (`serve`, MCP, `--control`), whatever the gra
 5. `assetcraft-cli mcp` with the suite tool set; tool hints from command effects.
 6. `thumb.render` and `asset.ref` commands (`blake3`, `pure` feature).
 7. Optional: add EffectCraft, VectorCraft and SoundCraft to the Open In catalog.
+   **EffectCraft done 2026-10-16** (STATUS E1); VectorCraft and SoundCraft open.
 8. Tests: fake client over a real socket; hostile frames; manifest written and removed;
    `engine.commands` equals `commands --json`; exit test.
 
