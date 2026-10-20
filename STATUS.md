@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-20_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -45,7 +45,7 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 - [ ] Presets (Paul, 2026-10-15), ahead of step 6: spec [docs/storyboard-presets.md](docs/storyboard-presets.md). **Decisions:** 20 starting presets, 5 each at 30 s / 60 s / 90 s / 2 min (P1); 20 different songs, downloaded by Paul from Motion Array (P2); menu groups them Style › Preset (P3). Recommendation R1: the audio stays out of the repo (presets carry timing and track facts, the user links their own copy). Code steps PR1 (preset mechanics: built in Claude's sandbox, not handed over), PR2 (preset file format + loader + Style › Preset menu, next), PR3 (track audio, pulled forward from step 8), PR4 (the 20 files)
   - **Waiting on Paul:** confirm the 5 styles (proposal: Trailer, Teaser / promo, Social reel, Character intro, Music montage), confirm the Motion Array licence (O6), download the 20 songs into `_dev-data\assetcraft\preset-tracks\` and connect that folder
 - [x] G1 · Generate a storyboard from a track (Paul, 2026-10-15: "focus on generating the storyboard clips based on the audio"): cue map v1 (`crates/storyboard/src/cuemap.rs`), generator with the four pacing profiles (`generate.rs`), `storyboard.generate` / `storyboard.cueMaps` (`crates/engine/src/generate_cmd.rs`; `GeneratedFrom` kept in undo snapshots), File → New Storyboard from Track ▸, empty-state buttons, Pacing and Length pickers that regenerate; bridge analyser `tools/cuemap.py` wrote cue maps for Paul's 24 usable tracks in `_dev-data\assetcraft\preset-tracks\`. Tests: 6 storyboard-crate (cue map round trip and hostile input, timeline across a splice, every profile × length valid and exact, profiles differ, fade fit, no fit), 3 engine, 1 UI; all 480 real combinations generate (spec §9a). The shelved in-code preset catalog (design placeholders) stays out; presets will be files drafted from cue maps (A7)
-  - **Finding W2 (Windows `cargo xtask ci`, 2026-10-15, fixed):** `generate_tests` failed on Windows (2 of 71): `storyboard.generate` checked `Path::is_absolute`, which is false for `\music\…` on Windows, and the tests compared against `/music/song.mp3` where Windows joins `\music\song.mp3`. Fix: `has_root` (the `file.openIn` rule, `commands.rs:583`) and the expected path built with `Path::join`. Owner: Claude; Paul to re-run on Windows
+  - **Finding W2 (Windows `cargo xtask ci`, 2026-10-15, fixed):** `generate_tests` failed on Windows (2 of 71): `storyboard.generate` checked `Path::is_absolute`, which is false for `\music\…` on Windows, and the tests compared against `/music/song.mp3` where Windows joins `\music\song.mp3`. Fix: `has_root` (the `file.openIn` rule, `commands.rs:583`) and the expected path built with `Path::join`. Owner: Claude; **passes on Windows (Paul, 2026-10-16)**
   - **Deviation:** the analysis comes from a Python bridge until A1–A4 (pure Rust) replace it; the cue map format and everything downstream stay
 - [x] TC1 · Text clips (Paul, 2026-10-15: "Text clip types: separate clip, overlay … click to switch the type"): spec [docs/storyboard-plan.md#text-clips-tc1](docs/storyboard-plan.md#text-clips-tc1). Crate `crates/storyboard/src/text.rs` (`TextKind` Card | Overlay derived from the clip, `TextStyle {theme, animation, position}`, `TextTheme::look`, `TextAnimation::frame`, `set_text_kind`, `set_text_style`); `Clip` gains `overlay` and `textStyle` (both left out of the JSON when unset; a title card with an overlay is refused on load); scene titles fall back to a switched overlay; the generator styles cards by pacing. Engine `crates/engine/src/text_cmd.rs`: `storyboard.text.kind`, `storyboard.text.style` (EDIT; refusals and no-ops leave no undo step). UI `crates/ui-egui/src/text_view.rs`: `CARD ⇄` / `OVERLAY ⇄` chip on Shot map tiles and Strip clips, Inspector TEXT section with a looping preview, themed cards and overlays in the Viewer with the intro animation during Watch your Cut. Tests: 4 crate, 3 engine, 1 UI (click the chip, and back); the opt-in screenshot adds `AC_TEXT=1` → `-text-map`, `-text-overlay`, `-text-card-mid`, `-text-card-rest`
   - **Finding M1 (Paul, 2026-10-15: "the play preview works! But there was no music"):** Watch your Cut is silent because AssetCraft can't decode or play audio yet. Scope: Watch your Cut. Goal: hear the Cut against its track. Fix: A1 (decode via `soundcraft-audio-io`, AD1's `deny.toml` exception for `symphonia*`) then PR3 (play via `soundcraft-playback`, apply the fit's segments, crossfade and fade-out, run the playhead on the audio clock). Owner: Claude; next
@@ -85,6 +85,25 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 - [ ] 6–10. See plan
 
 **Decisions (Paul, 2026-10-15):** storyboard plan D1 (Clip replaces block): yes. D3 (save AssetCraft's own storyboard files before Stage 2, atomically, never the user's assets): agreed; lands with step 7. (Plan IDs; not the D1 finding row below.)
+
+## EffectCraft in AssetCraft (Paul, 2026-10-16: "now")
+
+- **Scope:** Open In and the thumbnail grid. **Goal served:** AssetCraft as the one place to browse Paul's work, motion-graphics projects included (`.ecproj` showed as a generic icon with no way to open it). **Immediate area:** E1 done; E2 next.
+- Paul's fork: `github.com/4waymedia/effectcraft` (`upstream` = storytold, `05955c0`, v0.10.0), local clone `F:\Script-Projects\ArtCrafting\effectcraft`; `effectcraft-cli` release build, `info --demo --json` and `render-frame --demo --max-side 256` verified on Windows by Paul (2026-10-15).
+- The EffectCraft part of Stage 1.5 step 7 (plan), done early because it is independent of the API work.
+
+| ID | Step                                       | Change                                                                                                                                                         | Owner                       | Status                          |
+|----|--------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|---------------------------------|
+| E1 | Open In: EffectCraft                       | `crates/engine/src/open_in.rs`: `SiblingApp` row after FilmCraft (`effectcraft`, `.ecproj` / `.ecprojx`, `--` first, no folders; `ASSETCRAFT_EFFECTCRAFT_EXE`); test `effectcraft_opens_its_projects_only_and_gets_a_double_dash` | Claude writes, Paul runs CI | done, `2ec05ef` (2026-10-20)    |
+| E2 | `.ecproj` thumbnails via `effectcraft-cli` | New `crates/thumbs/src/decoders/effectcraft.rs` on the `video.rs` pattern (`ToolRunner`, timeout, `ASSETCRAFT_EFFECTCRAFT_CLI`, absolute only); `render-frame --project F --max-side N --out <temp>.png`; probe learns `.ecproj` | Claude writes, Paul runs CI | next                            |
+
+**Verified:** Linux, 2026-10-17, on `9cdc85b` + E1: `cargo xtask ci` passes, 539 tests (plus 2 ignored), `heic` run, layers ok. Windows, 2026-10-20: the 12 Open In tests pass (`cargo test -p assetcraft-engine --lib open_in`); full Windows CI ran with the preview-mode commit `c28b07d`. Not verified: launching a real `effectcraft.exe` (the spawn path is shared with the other six apps and covered by `open_in_tests`).
+
+- **Deliberately out of E1:** EffectCraft also imports stills and video, but listing it on every PNG and MP4 would crowd the menu PhotoCraft and FilmCraft already serve. `.ectemplate` is a ZIP the desktop app doesn't take on its command line, so it waits for E2 (its `poster.png`).
+- **Opportunity (owner: Claude, with E2):** the CLI renders at the playhead, not the comp's `poster_time` (`docs/sibling-apis/effectcraft-vectorcraft-soundcraft.md` §2); fine for E2. A `--poster` flag would be an upstream PR from Paul's fork (owner: Paul).
+- **Opportunity (owner: Paul):** `cargo-deny` isn't installed on Windows, so `xtask ci` skips `deny` there; `cargo install cargo-deny --locked` closes it.
+
+**Next action (Paul, Windows, optional):** set `ASSETCRAFT_EFFECTCRAFT_EXE` to the fork's `target\release\effectcraft.exe`, run AssetCraft, right-click an `.ecproj` → Open In ▸ EffectCraft.
 
 ## Stage 1.5 (API): step 1 done, rest after Storyboard
 
