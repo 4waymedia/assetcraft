@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-10-20_
+_Last updated: 2026-10-22_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -152,7 +152,13 @@ Paul's scan of `ArtCrafting\cli-matrix\` (2026-10-22): designcraft and effectcra
 | D-A3 | Unknown parameter keys                            | Refuse, naming accepted keys                                                    | Paul  | open   |
 | D-A4 | `write-user-file` over MCP / `serve` without `--automation-write-root` | Refuse                                                     | Paul  | open   |
 
-Next CLI step after D-A1..A4: **C1** (`commands --json` suite shape with `menu` path, `enabled`, `disabledReason`; `commands <filter>`; `describe <id>`). Owner Claude.
+**C1 built (Claude, Linux container, 2026-10-22; = Stage 1.5 step 2a):** `crates/engine/src/enabled.rs`: `Session::enabled(id) -> Result<(), String>` (the state check each handler makes before reading a parameter, in its own `Unavailable` words; `select.all` / `select.none` greyed like the Edit menu when they would do nothing; parameter-only preconditions never disable), `Session::command_info(spec)` / `command_infos()` = `app.commands` in the suite shape `{id, label, menu: [str], shortcut, params, enabled, disabledReason, effects}`. CLI: `commands [<filter>] [--json] [--dir]` (ENABLED column, filter on id or label), `describe <id> [--dir]` (JSON), `exec` shares `session_at`. Tests: 4 engine (`enabled_tests.rs`: fresh-session reasons equal the handlers' errors, state follows nav/select/favorites, storyboard commands enable as a board fills, `app.commands` shape incl. read-only never disabled), 2 CLI (filter; describe + exit 2), `commands_json` test extended. **D-API1 (field name; built as `disabledReason`, Paul to confirm):** PhotoCraft's and the PipelineCraft hub's spelling (spec `03b-inventory.md` O9; the hub maps lightcraft/designcraft `disabled_reason` and effectcraft `why`), per the 2026-10-22 `cli-matrix` capture. Not yet: the menus still grey themselves (`menu.rs` `entries_for`); **2b** makes them call `Session::enabled` (UI only, one commit). D-A1..A4 still open; C2 next after 2b.
+
+**Finding F-V01 (fixed with C1):** `crates/fs/src/real.rs:261` `walk_counts_every_test_file` expected 35 library files; V0.1's `rune_crate_textured.glb` made it 36, so CI at `0887ed8` fails in `assetcraft-fs`. Fix: 36 + comment. Owner: Claude. Scope: V0.1 fixture; no behaviour change.
+
+**Verified (Linux container, Rust 1.97, 2026-10-22):** `cargo xtask ci` → fmt, clippy `-D warnings`, tests (108 engine, 17 CLI; whole workspace green), `clippy (heic)` + `test (heic)`, layers ok (15 crates), deny skipped (no cargo-deny here); `all checks passed`.
+
+**Next action (Paul, Windows):** `cargo xtask ci` (expect 108 engine tests, 17 CLI tests), try `cargo run -q -p assetcraft-cli -- describe nav.back` and `commands storyboard`, then commit (block in the chat).
 
 ## Stage 2 starts: Tools menu, Batch Rename, ratings and labels (Paul, 2026-10-21)
 
@@ -214,7 +220,7 @@ Plan: the Stage 1.5 section of [docs/assetcraft-plan.md](docs/assetcraft-plan.md
 
 - [x] 1. Effects on every `CommandSpec` (`crates/engine/src/effect.rs`: `EffectClass`, `Effects` with presets `READ`, `APP`, `APP_STEP`, `LAUNCH`, `RUN`; `cmd!` takes the preset first, so a command can't be added without one). `app.commands` / `commands --json` carry `effects {classes, destructive, undoable, idempotent, confirm, source: "declared", remoteAllowed, note?}`; the `commands` table has an EFFECTS column. Result: 4 `read`, 28 `write-app-state`, of which 4 `confirm` (`file.open`, `file.openIn`, `file.reveal`, `file.run`) and 1 `destructive` + local-only (`file.run`). `undoable` is `false` everywhere (no undo before Stage 2). 3 new tests in `effect.rs` (exact safety sets, well-formed effects, JSON shape) and the CLI test checks `--json` against the registry
   - **Deviations from §16.7 step 1:** `enabled` / `disabledReason` move to step 2 (the step that emits the full shape); one `cmd!` form with named presets instead of a separate `query!` macro
-- [ ] 2. Full `CommandInfo` shape with `enabled`, `disabledReason`; `assetcraft-cli describe <id>`
+- [x] 2a. Full `CommandInfo` shape with `enabled`, `disabledReason`; `assetcraft-cli describe <id>`, `commands <filter>` (**built 2026-10-22**; details under "Suite API docs and CLI spec" above). 2b (menus call `Session::enabled`) open
 - [ ] 3–8. See plan
 
 **Verified (Linux, Rust 1.97, 2026-10-15):** `cargo xtask ci` passes with step 1 alone: fmt, clippy `-D warnings`, 249 tests (plus 1 ignored), `heic` run, layers ok (10 crates). With the storyboard step 1 patch applied on top (all but its STATUS hunk, merged here by hand): `cargo xtask ci` passes, 259 tests (plus 1 ignored), `heic` run, layers ok (11 crates). Paul to run Windows CI on the combined tree.

@@ -246,11 +246,58 @@ fn commands_json_lists_every_engine_command() {
     for (c, spec) in cmds.as_array().unwrap().iter().zip(assetcraft_engine::commands()) {
         assert_eq!(c["effects"], spec.effects.to_json(), "{}", spec.id);
     }
+    // The suite CommandInfo shape: enabled + disabledReason, null when enabled.
+    let fresh = Session::new(Arc::new(RealFs::new()), Arc::new(RecordingLauncher::default()), Prefs::default());
+    for c in cmds.as_array().unwrap() {
+        let id = c["id"].as_str().unwrap();
+        match fresh.enabled(id) {
+            Ok(()) => assert!(c["enabled"] == true && c["disabledReason"].is_null(), "{id}"),
+            Err(why) => assert!(c["enabled"] == false && c["disabledReason"] == why, "{id}"),
+        }
+    }
     let table = ok(&["commands"]);
     for c in assetcraft_engine::commands() {
         assert!(table.contains(c.id), "{}", c.id);
     }
-    assert!(table.contains("EFFECTS") && table.contains("local-only"));
+    assert!(table.contains("ENABLED") && table.contains("EFFECTS") && table.contains("local-only"));
+    assert!(table.contains("no: nothing to go back to"));
+    // --dir opens the folder first, so folder-dependent commands answer for it.
+    let at = json_of(&["commands", "--json", "--dir", &lib("storyboard")]);
+    let all = at.as_array().unwrap().iter().find(|c| c["id"] == "select.all").unwrap();
+    assert_eq!(all["enabled"], true);
+}
+
+#[test]
+fn commands_filter_matches_id_or_label() {
+    let sb = json_of(&["commands", "storyboard", "--json"]);
+    let ids: Vec<&str> = sb.as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert!(!ids.is_empty() && ids.iter().all(|id| id.starts_with("storyboard.")), "{ids:?}");
+    // "Open Folder" is nav.open's label; the filter is case-insensitive.
+    let open = json_of(&["commands", "OPEN FOLDER", "--json"]);
+    assert!(open.as_array().unwrap().iter().any(|c| c["id"] == "nav.open"));
+    let table = ok(&["commands", "nav."]);
+    assert!(table.contains("matching `nav.`") && !table.contains("storyboard.place"), "{table}");
+    assert_eq!(json_of(&["commands", "zzz-no-such", "--json"]), json!([]));
+}
+
+#[test]
+fn describe_prints_one_command_with_its_enabled_state() {
+    let j = json_of(&["describe", "nav.back"]);
+    assert_eq!(j["id"], "nav.back");
+    assert_eq!(j["menu"], json!(["Go"]));
+    assert_eq!(j["enabled"], false);
+    assert_eq!(j["disabledReason"], "nothing to go back to");
+    assert_eq!(j["effects"]["classes"], json!(["write-app-state"]));
+    let run = json_of(&["describe", "file.run"]);
+    assert_eq!(run["effects"]["destructive"], true);
+    assert_eq!(run["effects"]["remoteAllowed"], false);
+    assert!(run["effects"]["note"].is_string());
+    let state = json_of(&["describe", "app.state", "--dir", &lib("")]);
+    assert_eq!(state["enabled"], true);
+    assert!(state["disabledReason"].is_null());
+    assert_eq!(code(&["describe", "nav.nowhere"]), Some(2));
+    assert_eq!(code(&["describe"]), Some(2));
+    assert_eq!(code(&["describe", "nav.back", "app.state"]), Some(2));
 }
 
 #[test]
@@ -282,7 +329,7 @@ fn usage_help_and_version() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("USAGE"));
     assert!(ok(&["--help"]).contains("exec"));
     assert!(ok(&["-h"]).contains("USAGE"));
-    for sub in ["list", "probe", "thumb", "commands", "exec"] {
+    for sub in ["list", "probe", "thumb", "analyze", "commands", "describe", "exec"] {
         assert!(ok(&[sub, "--help"]).contains(&format!("assetcraft-cli {sub}")), "{sub}");
         assert_eq!(ok(&["help", sub]), ok(&[sub, "-h"]));
     }

@@ -9,6 +9,7 @@ mod audio_out;
 mod commands;
 mod decode;
 pub mod effect;
+mod enabled;
 pub mod generate_cmd;
 pub mod launch;
 mod library_cmd;
@@ -608,6 +609,8 @@ fn same_location(a: &Location, b: &Location) -> bool {
 
 #[cfg(test)]
 mod audio_tests;
+#[cfg(test)]
+mod enabled_tests;
 #[cfg(test)]
 mod generate_tests;
 #[cfg(test)]

@@ -20,7 +20,7 @@ _2026-10-22 · Stage 1.5 (API) · v1: Part 1 marks what works today and what is 
 
 | Surface         | Start                                              | Use it for                                        | Status          |
 |-----------------|----------------------------------------------------|---------------------------------------------------|-----------------|
-| CLI             | `assetcraft-cli exec <id> '<json>'`                | Scripts, one-off checks, CI                        | **works** (`exec`, `commands`); `run`, `describe`, `inspect`, `key=value` planned (C1–C3) |
+| CLI             | `assetcraft-cli exec <id> '<json>'`                | Scripts, one-off checks, CI                        | **works** (`exec`, `commands [filter]`, `describe`; C1 built 2026-10-22); `run`, `inspect`, `key=value` planned (C2–C3) |
 | MCP             | `assetcraft-cli mcp`                               | Agents, headless or bridged                        | planned (C6), [mcp.md](mcp.md) |
 | Control channel | `assetcraft --control <port>`                      | Driving and looking at the running window          | planned (C5), [control-protocol.md](control-protocol.md) |
 
@@ -30,12 +30,17 @@ All three call `Session::execute(id, params)`, the same path the menus and keys 
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
-cargo run -q -p assetcraft-cli -- commands                 # table: id, effects, menu, shortcut, params
+cargo run -q -p assetcraft-cli -- commands                 # table: id, enabled, effects, menu, shortcut, params
+cargo run -q -p assetcraft-cli -- commands storyboard      # only ids / labels containing "storyboard"
 cargo run -q -p assetcraft-cli -- commands --json          # the live list (cli.md §3.3)
-cargo run -q -p assetcraft-cli -- exec app.commands        # same, as a command
+cargo run -q -p assetcraft-cli -- describe nav.back        # one command, with enabled / disabledReason now
+cargo run -q -p assetcraft-cli -- exec app.commands        # same list, as a command
 ```
 
-Read each command's `effects` before you call it:
+Read each command's `enabled` and `effects` before you call it:
+- `enabled: false` comes with `disabledReason`, the same words the command would answer with
+  ("no storyboard is open (File → New Storyboard)", "nothing to go back to"); a command whose only
+  preconditions are its parameters is always enabled, and its handler reports a bad parameter;
 - `read` is safe to repeat;
 - `write-app-state` changes the session or prefs;
 - `write-user-file` touches the user's files (Stage 2+);

@@ -47,7 +47,8 @@ fn taken_names_get_a_suffix_and_case_changes_are_allowed() {
     let dir = Path::new("/p");
     let files: Vec<PathBuf> = ["IMG_1.jpg", "IMG_2.jpg", "Shot.jpg"].iter().map(|n| dir.join(n)).collect();
     let on_disk = ["/p/img_1.jpg", "/p/img_2.jpg", "/p/shot.jpg", "/p/out_1.jpg"];
-    let exists = |p: &Path| on_disk.iter().any(|d| d.eq_ignore_ascii_case(&p.to_string_lossy()));
+    // `Path::join` writes `\` on Windows: compare with `/` so the test means the same everywhere.
+    let exists = |p: &Path| on_disk.iter().any(|d| d.eq_ignore_ascii_case(&p.to_string_lossy().replace('\\', "/")));
     // Lower-casing: each file's own name, so no suffix.
     let lower = plan(&files[..2], "img_{num}", 1, &exists).unwrap_or_default();
     assert_eq!(lower.iter().map(|r| r.to.clone()).collect::<Vec<_>>(), [dir.join("img_1.jpg"), dir.join("img_2.jpg")]);

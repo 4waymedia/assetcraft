@@ -34,6 +34,7 @@ COMMANDS:
     thumb <file> --out <png>   Render a thumbnail to a PNG file
     analyze <audio>...         Track facts: duration, rate, channels, peak, RMS
     commands                   List every engine command
+    describe <id>              One command as JSON: params, effects, enabled now and why not
     exec <id> [<json>]         Run one engine command headlessly; prints its JSON result
     help [<COMMAND>]           Help for one command
 
@@ -42,8 +43,9 @@ OPTIONS:
     -V, --version    Print version
 
 For agents and scripts: `assetcraft-cli commands --json` lists every command id with its
-parameters, and `assetcraft-cli exec <id> '<json>' [--dir <folder>]` runs one, so anything the
-UI can do is scriptable. Exit codes: 0 ok, 1 failed, 2 usage error.
+parameters, effects and whether it can run now, `describe <id>` shows one, and
+`assetcraft-cli exec <id> '<json>' [--dir <folder>]` runs one, so anything the UI can do is
+scriptable. Exit codes: 0 ok, 1 failed, 2 usage error.
 ";
 
 const LIST_HELP: &str = "\
@@ -113,11 +115,36 @@ const COMMANDS_HELP: &str = "\
 assetcraft-cli commands: list every engine command
 
 USAGE:
-    assetcraft-cli commands [--json]
+    assetcraft-cli commands [<filter>] [--json] [--dir <folder>]
+
+A filter keeps the commands whose id or label contains it, case-insensitively: `commands
+storyboard`, `commands open`. The ENABLED column (and `enabled` / `disabledReason` in the
+JSON) say whether each command could run in a fresh session opened at --dir: a command needing
+an open storyboard, a selection or history is disabled with the reason its handler would give.
+Commands whose only preconditions are their parameters are always enabled.
 
 OPTIONS:
-    --json           Print the app.commands JSON (id, effects, label, menu, shortcut, params)
+    --json           Print the app.commands JSON: the suite CommandInfo shape {id, label, menu,
+                     shortcut, params, enabled, disabledReason} plus AssetCraft's effects
+    --dir <folder>   Open this folder first (default: where the app would start)
     -h, --help       Print help
+";
+
+const DESCRIBE_HELP: &str = "\
+assetcraft-cli describe: one engine command as JSON
+
+USAGE:
+    assetcraft-cli describe <command-id> [--dir <folder>]
+
+Prints the command's app.commands entry: id, label, menu path, shortcut, params, effects
+(classes, destructive, undoable, idempotent, confirm, remoteAllowed, note), and `enabled` with
+`disabledReason` for a fresh session opened at --dir (null when it could run).
+
+OPTIONS:
+    --dir <folder>   Open this folder first (default: where the app would start)
+    -h, --help       Print help
+
+Exit codes: 0 ok, 2 unknown command id.
 ";
 
 const EXEC_HELP: &str = "\
@@ -146,7 +173,8 @@ const LIST_SPEC: Spec = Spec { switches: &["--json", "--desc", "--hidden"], valu
 const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
 const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary"], values: &[] };
-const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
+const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
+const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 
 /// Default `thumb --size`.
@@ -218,6 +246,7 @@ fn run(argv: &[String]) -> Outcome {
         "thumb" => with(rest, &THUMB_SPEC, THUMB_HELP, thumb),
         "analyze" => with(rest, &ANALYZE_SPEC, ANALYZE_HELP, analyze),
         "commands" => with(rest, &COMMANDS_SPEC, COMMANDS_HELP, list_commands),
+        "describe" => with(rest, &DESCRIBE_SPEC, DESCRIBE_HELP, describe),
         "exec" => with(rest, &EXEC_SPEC, EXEC_HELP, exec),
         other => Err(unknown_subcommand(other)),
     }
@@ -235,6 +264,7 @@ fn sub_help(name: &str) -> Option<&'static str> {
         "thumb" => THUMB_HELP,
         "analyze" => ANALYZE_HELP,
         "commands" => COMMANDS_HELP,
+        "describe" => DESCRIBE_HELP,
         "exec" => EXEC_HELP,
         _ => return None,
     })
@@ -562,16 +592,23 @@ fn write_atomic(out: &Path, bytes: &[u8], force: bool) -> std::io::Result<()> {
 // ---- commands / exec -----------------------------------------------------------------------
 
 fn list_commands(p: &Parsed, help: &'static str) -> Outcome {
-    positionals(p, 0, 0, "", help)?;
+    let pos = positionals(p, 0, 1, "", help)?;
+    let filter = pos.first().map(|f| f.to_lowercase());
+    let keep = |id: &str, label: &str| {
+        filter.as_deref().is_none_or(|f| id.to_lowercase().contains(f) || label.to_lowercase().contains(f))
+    };
+    let s = session_at(p.value("--dir"))?;
     if p.has("--json") {
-        let mut s = session(None);
-        return execute(&mut s, "app.commands", &json!({}));
+        let infos = commands().iter().filter(|c| keep(c.id, c.label)).map(|c| s.command_info(c)).collect();
+        return Ok(pretty(&Value::Array(infos)));
     }
-    let rows: Vec<Vec<String>> = commands()
+    let shown: Vec<&assetcraft_engine::CommandSpec> = commands().iter().filter(|c| keep(c.id, c.label)).collect();
+    let rows: Vec<Vec<String>> = shown
         .iter()
         .map(|c| {
             vec![
                 c.id.into(),
+                enabled_cell(&s, c.id),
                 effects_cell(&c.effects),
                 c.menu.into(),
                 c.shortcut.unwrap_or("-").into(),
@@ -579,9 +616,44 @@ fn list_commands(p: &Parsed, help: &'static str) -> Outcome {
             ]
         })
         .collect();
-    let mut out = table(&["ID", "EFFECTS", "MENU", "SHORTCUT", "PARAMS"], &[Align::Left; 5], &rows);
-    out.push_str(&format!("{} commands. Run one with: assetcraft-cli exec <id> '<json-params>'\n", rows.len()));
+    let mut out = table(&["ID", "ENABLED", "EFFECTS", "MENU", "SHORTCUT", "PARAMS"], &[Align::Left; 6], &rows);
+    let off = shown.iter().filter(|c| s.enabled(c.id).is_err()).count();
+    let of = match &filter {
+        Some(f) => format!(" matching `{f}` (of {})", commands().len()),
+        None => String::new(),
+    };
+    out.push_str(&format!(
+        "{} commands{of}, {off} disabled in this session (`describe <id>` says why). Run one with: assetcraft-cli exec <id> '<json-params>'\n",
+        rows.len()
+    ));
     Ok(out)
+}
+
+fn describe(p: &Parsed, help: &'static str) -> Outcome {
+    let pos = positionals(p, 1, 1, "<command-id>", help)?;
+    let id = pos[0].as_str();
+    let spec = assetcraft_engine::find(id).ok_or_else(|| Failure::BadCommand(format!("unknown command `{id}`")))?;
+    let s = session_at(p.value("--dir"))?;
+    Ok(pretty(&s.command_info(spec)))
+}
+
+/// A fresh session, opened at `--dir` when given.
+fn session_at(dir: Option<&str>) -> Result<Session, Failure> {
+    let dir = dir.map(absolute);
+    let mut s = session(dir.as_deref());
+    if let Some(dir) = &dir {
+        s.execute("nav.open", &json!({ "path": path_str(dir)? }))
+            .map_err(|e| Failure::Failed(format!("can't open {}: {e}", dir.display())))?;
+    }
+    Ok(s)
+}
+
+/// `yes`, or `no: <reason>` for the human table.
+fn enabled_cell(s: &Session, id: &str) -> String {
+    match s.enabled(id) {
+        Ok(()) => "yes".into(),
+        Err(why) => format!("no: {why}"),
+    }
 }
 
 /// `write-app-state +confirm` style summary for the human table.
@@ -611,11 +683,6 @@ fn exec(p: &Parsed, help: &'static str) -> Outcome {
             serde_json::from_str(text).map_err(|e| Failure::Usage(format!("params are not JSON: {e}"), help))?
         }
     };
-    let dir = p.value("--dir").map(absolute);
-    let mut s = session(dir.as_deref());
-    if let Some(dir) = &dir {
-        s.execute("nav.open", &json!({ "path": path_str(dir)? }))
-            .map_err(|e| Failure::Failed(format!("can't open {}: {e}", dir.display())))?;
-    }
+    let mut s = session_at(p.value("--dir"))?;
     execute(&mut s, id, &params)
 }

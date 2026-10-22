@@ -377,7 +377,7 @@ static COMMANDS: &[CommandSpec] = &[
     cmd!(READ, "storyboard.state", "Storyboard State", "Help", None, "{}", storyboard::sb_state),
     // App
     cmd!(READ, "app.state", "State", "Help", None, "{}", |s, _| Ok(state_json(s))),
-    cmd!(READ, "app.commands", "Commands", "Help", None, "{}", |_, _| Ok(commands_json())),
+    cmd!(READ, "app.commands", "Commands", "Help", None, "{}", |s, _| Ok(s.command_infos())),
     cmd!(
         READ,
         "app.openInTargets",
@@ -826,15 +826,4 @@ pub(crate) fn state_json(s: &Session) -> Value {
             "created": e.created.and_then(unix_secs),
         })).collect::<Vec<_>>(),
     })
-}
-
-fn commands_json() -> Value {
-    Value::Array(
-        COMMANDS
-            .iter()
-            .map(
-                |c| json!({ "id": c.id, "effects": c.effects.to_json(), "label": c.label, "menu": c.menu, "shortcut": c.shortcut, "params": c.params }),
-            )
-            .collect(),
-    )
 }

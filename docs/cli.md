@@ -1,6 +1,6 @@
 # AssetCraft CLI (`assetcraft-cli`)
 
-_2026-10-22 · Stage 1.5 (API) · spec v1: §2 is shipped, §3 is the target, built in steps C1–C8_
+_2026-10-22 · Stage 1.5 (API) · spec v1: §2 is shipped (C1 built 2026-10-22), §3 is the target, built in steps C1–C8_
 
 - **Scope:** the command-line surface of AssetCraft: subcommands, flags, parameter syntax, output,
   exit codes and file safety. It sits beside [control-protocol.md](control-protocol.md) (the running
@@ -10,8 +10,8 @@ _2026-10-22 · Stage 1.5 (API) · spec v1: §2 is shipped, §3 is the target, bu
   Crafting Apps, so one script, agent or PipelineCraft recipe can drive every app in the suite (plan
   Stage 1.5, AGENTS.md rule 3: everything is a command).
 - **Immediate area of improvement:** today the CLI runs one command per process (`exec`), with no
-  `describe`, `run`, `inspect`, `mcp` or `serve`. Also, `commands --json` doesn't yet have the suite
-  shape (`menu` as a path, `enabled`).
+  `run`, `inspect`, `mcp` or `serve`. `commands --json` and `describe` have the suite shape since C1
+  (2026-10-22); next is C2 (`key=value` params, `inspect`).
 
 ## 1. The suite ethos this follows
 
@@ -38,7 +38,7 @@ AssetCraft adds one rule the siblings don't have, from AGENTS.md rule 5 ("batch 
 dry run"): **every command that writes the user's files can be previewed without writing**, and
 the CLI exposes that as `--dry-run` (§3.4).
 
-## 2. Shipped today (`main` @ `0887ed8`)
+## 2. Shipped today (`main` @ `0887ed8` + C1)
 
 | Subcommand                                         | What                                                      | Engine path                     |
 |----------------------------------------------------|-----------------------------------------------------------|---------------------------------|
@@ -46,7 +46,8 @@ the CLI exposes that as `--dry-run` (§3.4).
 | `probe <file> [--json]`                            | Type, dimensions, size, times, header status              | `item.probe`                    |
 | `thumb <file> --out <png> [--size px] [--force] [--heic]` | A thumbnail PNG (atomic write, never overwrites without `--force`) | `assetcraft_thumbs::render` (the only direct call) |
 | `analyze <audio>… [--json]`                        | Duration, rate, channels, peak, RMS                       | `track.summary`                 |
-| `commands [--json]`                                | Every command                                             | `app.commands`                  |
+| `commands [<filter>] [--json] [--dir <folder>]`    | Every command (id or label containing the filter), with ENABLED / `enabled` + `disabledReason` for a fresh session at `--dir` | `Session::command_infos` (`app.commands`) |
+| `describe <id> [--dir <folder>]`                   | One command's `app.commands` entry as JSON                | `Session::command_info`         |
 | `exec <id> [<json>] [--dir <folder>]`              | One command; pretty JSON result                           | `Session::execute`              |
 | `help [<cmd>]`, `-h`, `--help`, `-V`, `--version`  | Help to stdout, exit 0                                    | —                               |
 
@@ -122,11 +123,19 @@ GLOBAL OPTIONS
 }
 ```
 
-Changes from today:
-- `menu` becomes a path array, like filmcraft and effectcraft.
-- `enabled` / `disabledReason` are added (plan Stage 1.5 step 2).
+Built in C1 (2026-10-22, `crates/engine/src/enabled.rs`):
+- `menu` is a path array, like filmcraft and effectcraft (one element: AssetCraft's menus are one level deep).
+- `enabled` / `disabledReason` (plan Stage 1.5 step 2). `Session::enabled(id) -> Result<(), String>`
+  mirrors the state check each handler makes before reading a parameter, in the handler's own
+  `Unavailable` words, so asking first and just running give the same reason. Two no-op cases
+  (`select.all` in an empty folder, `select.none` with nothing selected) are disabled the way the
+  Edit menu greys them. Parameter-only preconditions (a `path`, a `cueMap`) never disable a command.
+  `disabledReason` is `null` when enabled (PhotoCraft and the PipelineCraft hub spelling; the hub
+  maps lightcraft/designcraft `disabled_reason` and effectcraft `why`).
 - `effects` is as built on 2026-10-15.
 - `commands <filter>` matches the id or the label, case-insensitively.
+- Not yet: the menus still decide their own greying in `crates/ui-egui/src/menu.rs` `entries_for`;
+  making them call `Session::enabled` is step **2b** (one commit, UI only).
 
 ### 3.4 Dry runs and file safety (AssetCraft rule)
 
@@ -151,7 +160,7 @@ Changes from today:
 
 | Step | Delivers                                                                                         | Plan link              | Owner  | Status |
 |------|--------------------------------------------------------------------------------------------------|------------------------|--------|--------|
-| C1   | `commands --json` suite shape (`menu` array, `enabled`, `disabledReason`), `commands <filter>`, `describe <id>` | Stage 1.5 step 2 | Claude | next   |
+| C1   | `commands --json` suite shape (`menu` array, `enabled`, `disabledReason`), `commands <filter>`, `describe <id>` | Stage 1.5 step 2 | Claude | **built 2026-10-22**, Paul to run CI; 2b (menus call `Session::enabled`) next |
 | C2   | `exec key=value`, global `--dir` / `--compact`, `inspect`, strict unknown-key errors                 | new                    | Claude |        |
 | C3   | `run <jsonl \| ->`, `--keep-going`                                                                 | new                    | Claude |        |
 | C4   | `--dry-run` and the write-command preview rule (test: every `write-user-file` command has a preview) | AGENTS.md rule 5     | Claude | with T2 (`file.rename`) |
