@@ -15,6 +15,7 @@ mod library_cmd;
 pub mod open_in;
 pub mod paths;
 pub mod prefs;
+pub mod rename;
 pub mod select;
 pub mod sort;
 pub mod storyboard;
@@ -613,6 +614,8 @@ mod generate_tests;
 mod library_tests;
 #[cfg(test)]
 mod open_in_tests;
+#[cfg(test)]
+mod rename_tests;
 #[cfg(test)]
 mod storyboard_tests;
 #[cfg(test)]

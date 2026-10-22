@@ -425,7 +425,7 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
     nav.run("select.move", json!({ "delta": 1 }));
     let menus = nav.menus();
     let titles: Vec<_> = menus.iter().map(|m| m.title).collect();
-    assert_eq!(titles, ["File", "Edit", "View", "Go", "Window", "Help"]);
+    assert_eq!(titles, ["File", "Edit", "View", "Go", "Tools", "Window", "Help"]);
     let mut items = Vec::new();
     for m in &menus {
         walk(&m.entries, &mut items);
@@ -445,7 +445,14 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
                 used.insert("nav.open");
             }
             MenuAction::TogglePanel(p) => assert_ne!(*p, Panel::Content),
-            MenuAction::ResetLayout | MenuAction::Shortcuts | MenuAction::About | MenuAction::Exit => {}
+            MenuAction::BatchRename => {
+                used.insert("file.renamePreview");
+            }
+            MenuAction::ResetLayout
+            | MenuAction::Shortcuts
+            | MenuAction::About
+            | MenuAction::Exit
+            | MenuAction::NotYet => {}
         }
     }
     for spec in assetcraft_engine::commands() {
@@ -693,4 +700,31 @@ fn theme_is_dark_by_default_and_the_view_menu_switches_and_saves_it() {
     // A restart keeps the choice.
     let (reloaded, _) = navigator(fake(), nav.session().prefs());
     assert_eq!(reloaded.session().view().theme, assetcraft_engine::ThemeMode::System);
+}
+
+#[test]
+fn tools_batch_rename_opens_a_preview_that_changes_nothing() {
+    let ctx = Context::default();
+    let (mut nav, _) = navigator(fake(), Prefs::default());
+    frame(&ctx, &mut nav);
+    // Greyed until something is selected.
+    assert!(matches!(find_item(&nav, "Tools", "Batch Rename…"), MenuEntry::Item { enabled: false, .. }));
+    assert!(matches!(find_item(&nav, "Tools", "Append Metadata"), MenuEntry::Item { enabled: false, .. }));
+    nav.run("select.set", json!({ "paths": ["/home/paul/Pictures/a.png", "/home/paul/Pictures/b.png"] }));
+    assert!(nav.activate(&ctx, &find_item(&nav, "Tools", "Batch Rename…")));
+    frame(&ctx, &mut nav);
+    let dialog = nav.state.rename.clone().unwrap_or_default();
+    let preview = dialog.preview.unwrap_or_default();
+    let new: Vec<&str> = preview["plans"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|p| p["newName"].as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(new, ["Pictures_001.png", "Pictures_002.png"]);
+    assert!(nav.message().is_none(), "previews don't use the status bar");
+    // The preview is cached: another frame doesn't run it again.
+    let generation = nav.session().generation();
+    frame(&ctx, &mut nav);
+    assert_eq!(nav.session().generation(), generation);
+    // Nothing was renamed.
+    assert!(nav.session().items().iter().any(|e| e.name == "a.png"));
 }

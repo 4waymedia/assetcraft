@@ -141,13 +141,44 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 
 **Decisions (Paul, 2026-10-15):** storyboard plan D1 (Clip replaces block): yes. D3 (save AssetCraft's own storyboard files before Stage 2, atomically, never the user's assets): agreed; lands with step 7. (Plan IDs; not the D1 finding row below.)
 
+## Suite API docs and CLI spec (Paul, 2026-10-22: "missing mcp.md, agents.md, control-protocol.md; spec our CLI")
+
+Paul's scan of `ArtCrafting\cli-matrix\` (2026-10-22): designcraft and effectcraft ship all three docs, filmcraft `agents.md` + `control-protocol.md`, soundcraft `mcp.md` + `control-protocol.md`; AssetCraft none, and `assetcraft-cli mcp` is "unknown command". Added `docs/cli.md`, `docs/control-protocol.md`, `docs/mcp.md`, `docs/agents.md` (specs; mark shipped vs planned), from a survey of designcraft `5aeb4dd7`, effectcraft `2c08f675`, filmcraft `256151ae`, soundcraft `8198d6e`. FilmCraft is the template for MCP tools (`command_list/run/batch`, `doc_inspect`, `render_preview`) and exit codes; designcraft for file confinement (`--automation-read-root/-write-root`).
+
+| ID   | Decision needed                                   | Recommendation                                                                 | Owner | Status |
+| ---- | ------------------------------------------------- | ------------------------------------------------------------------------------ | ----- | ------ |
+| D-A1 | Control-channel auth: suite has none, plan says token | No auth with `--control`; token required with `--control-token-file` (PipelineCraft path) | Paul | open |
+| D-A2 | Running-app flag `--bridge` or `--connect`        | `--bridge` (filmcraft, effectcraft)                                             | Paul  | open   |
+| D-A3 | Unknown parameter keys                            | Refuse, naming accepted keys                                                    | Paul  | open   |
+| D-A4 | `write-user-file` over MCP / `serve` without `--automation-write-root` | Refuse                                                     | Paul  | open   |
+
+Next CLI step after D-A1..A4: **C1** (`commands --json` suite shape with `menu` path, `enabled`, `disabledReason`; `commands <filter>`; `describe <id>`). Owner Claude.
+
+## Stage 2 starts: Tools menu, Batch Rename, ratings and labels (Paul, 2026-10-21)
+
+Decisions (Paul, 2026-10-21): metadata goes to **XMP sidecars only** (image bytes never touched), named `IMG_0001.xmp` (LightCraft `SidecarNaming::Stem`); templates carry creator + copyright, keywords, rating + label. Ratings and colour labels added to the plan ("incredibly helpful when sorting"). Batch Rename uses a template line with token buttons (LightCraft syntax), not Bridge's rule rows; Bridge's copy/move destination: wanted too (Paul, 2026-10-21), step T2c.
+
+| Step | What                                                                                                                       | Writes files?      | Owner                       | Status |
+| ---- | -------------------------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------- | ------ |
+| T1   | Tools menu; Batch Rename… dialog (presets, template + token buttons, start number, live preview); `file.renamePreview` (READ) | no                 | Claude writes, Paul commits | built: patch `t1-batch-rename-preview.patch` |
+| T2   | `file.rename`: apply, never overwrite, `.xmp` moves with the file, undo; save / delete presets                              | yes (moves)        | Claude                      | next   |
+| T2b  | Find & Replace (text, optional regex), case (lower / UPPER / Title), extension case                                         | yes (moves)        | Claude                      |        |
+| T2c  | Destination: Rename in place / Move to folder / Copy to folder (folder picker); copies never overwrite, moves take their `.xmp`; dry run, undo | yes (moves, copies) | Claude                     |        |
+| R1   | Read rating + label (sidecar, embedded XMP); stars and colour bar on thumbnails; Sort By Rating / Label; `{date}` `{rating}` `{label}` tokens | no | Claude                      |        |
+| R2   | `item.rate {stars 0-5, -1 reject}`, `item.label`; Ctrl+0-5 / Ctrl+6-9; undo; the atomic sidecar writer (lightcraft-meta `merge_xmp`) | yes (sidecar) | Claude                    |        |
+| R3   | Filter by stars / labels                                                                                                    | no                 | Claude                      |        |
+| T3   | Metadata templates (creator, copyright, keywords, rating, label) in prefs; Create / Edit dialog                            | no                 | Claude                      |        |
+| T4   | Append / Replace Metadata to sidecars (R2's writer), dry run, undo                                                          | yes (sidecar)      | Claude                      |        |
+
+Opportunity (owner: Claude, R1): `{date}` needs the capture date; AssetCraft has no EXIF date reader or local-time conversion yet, so T1 leaves the token out rather than use the UTC modified time.
+
 ## App icon (Paul, 2026-10-20): elephant, to the FilmCraft icon standard
 
 | ID  | Step                         | What                                                                                                                                                                      | Owner                       | Status |
 | --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------ |
 | I1  | `assets/app-icon/`           | Same files and sidecars as FilmCraft's: `assetcraft.svg` (2048 px trace), `-small.svg`, `-1024.png`, `-macos-512.png`, `.ico`, `.icns`, `hicolor/` (8 sizes + scalable), README, LICENSE.txt; ATTRIBUTION.md row. Garnet `#9d354b`, ink `#0b0b0c`, paper `#efe9dc`. Sources (elephant + raven) in `_dev-data\assetcraft\app-icon\` | Claude writes, Paul commits | done, `7383a5e` |
 | I1a | Tools                        | `tools/vectorize_icon.py` (three-colour key + vtracer, MIT/Apache tool, not bundled; replaces craftrules' potrace-based `vectorize_tile.py`) and `packaging/icons.py` (resvg + Pillow; packs `.ico`/`.icns` on Windows too) | Claude                      | done   |
-| I2  | Wire it in                   | `apps/assetcraft/build.rs` embeds `assetcraft.ico` (as FilmCraft `apps/filmcraft/build.rs`); `ViewportBuilder::with_icon` from the 256 px / macOS 512 PNG; `with_app_id` on Linux | Claude                      | next   |
+| I2  | Wire it in                   | `apps/assetcraft/build.rs` embeds `assetcraft.ico` (as FilmCraft `apps/filmcraft/build.rs`); `ViewportBuilder::with_icon` from the 256 px / macOS 512 PNG; `with_app_id` on Linux | Claude writes, Paul commits | built: patch `i2-app-icon.patch` (2 tests, clippy, fmt, layers green on Linux); Paul to check the taskbar + Explorer icon on Windows |
 | I3  | App id                       | Using `ai.storyteller.assetcraft` (kept 2026-10-20 with the elephant) for suite parity (file names in `hicolor/`, future `with_app_id`). If AssetCraft should carry its own reverse-DNS id, rename before I2 | Paul (decide)               | open   |
 
 ## Suite opportunities (2026-10-20)

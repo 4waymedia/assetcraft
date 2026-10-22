@@ -82,6 +82,11 @@ here with repository, path and revision.
   3a28a657692c1b98b28c276d8f61df9471074f0f, MIT OR Apache-2.0). Changed: a fixed 2048-point frame
   at 22,050 Hz with centred frames, 30 Hz–10 kHz, and the flux kept as a curve instead of peak
   picking. FFT by rustfft 6 (MIT OR Apache-2.0).
+- crates/engine/src/rename.rs: the batch-rename template tokens (`{name}`, `{num}`, `{seq}`,
+  `{seq:N}`, `{folder}`, `{ext}`), `split_ext`, the file-name sanitizing and the "taken name gets
+  -1, -2…" planning are adapted from LightCraft crates/engine/src/rename.rs (storytold/lightcraft,
+  rev 16dbb90, MIT OR Apache-2.0). Changed: plain paths instead of catalog photos, a bounded
+  suffix search, Windows reserved names, a name-length cap, case-insensitive collision checks.
 
 Other crates.io dependencies are listed in Cargo.lock; `cargo xtask deny` checks their licences
 against deny.toml. One is called out here because it stands in for platform code:

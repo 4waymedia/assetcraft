@@ -1,7 +1,9 @@
 //! The menu bar: File, Edit, View, Go come from the engine command registry
 //! (`CommandSpec.menu`, `.label`, `.shortcut`), so menus and shortcuts can't drift apart.
 //! Commands that need parameters get small wrappers (Sort By submenu, Grid / List, …).
-//! Window and Help hold UI actions: panel toggles, layout reset, shortcuts and about boxes.
+//! Tools holds Batch Rename… (a dialog over `file.renamePreview`) and, greyed until their steps
+//! land, the metadata items (T3/T4). Window and Help hold UI actions: panel toggles, layout
+//! reset, shortcuts and about boxes.
 //!
 //! [`menus`] builds a plain model that the bar draws and tests inspect; every item ends in a
 //! [`MenuAction`], and commands go through `Session::execute` like keys and clicks do.
@@ -69,6 +71,10 @@ pub enum MenuAction {
     About,
     /// File → Exit.
     Exit,
+    /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
+    BatchRename,
+    /// A Tools item whose step hasn't landed yet (always disabled; the tooltip says when).
+    NotYet,
 }
 
 /// One menu entry.
@@ -164,13 +170,33 @@ fn cmd(id: &'static str, params: Value) -> MenuAction {
 
 /// Every menu, as the bar would draw it now.
 pub fn menus(nav: &Navigator) -> Vec<Menu> {
-    let mut out: Vec<Menu> = ["File", "Edit", "View", "Go"]
+    let mut out: Vec<Menu> = ["File", "Edit", "View", "Go", "Tools"]
         .into_iter()
         .map(|title| Menu {
             title,
             entries: commands().iter().filter(|c| c.menu == title).flat_map(|spec| entries_for(nav, spec)).collect(),
         })
         .collect();
+    if let Some(tools) = out.iter_mut().find(|m| m.title == "Tools") {
+        tools.entries.push(MenuEntry::Separator);
+        for (label, step) in [
+            ("Create Metadata Template…", "T3"),
+            ("Edit Metadata Template", "T3"),
+            ("Append Metadata", "T4"),
+            ("Replace Metadata", "T4"),
+        ] {
+            tools.entries.push(MenuEntry::Item {
+                label: label.into(),
+                shortcut: None,
+                enabled: false,
+                checked: None,
+                tooltip: Some(format!(
+                    "Coming in step {step}: creator, copyright, keywords, rating and label, written to .xmp sidecars"
+                )),
+                action: MenuAction::NotYet,
+            });
+        }
+    }
     if let Some(file) = out.first_mut() {
         file.entries.push(MenuEntry::Separator);
         file.entries.push(item("Exit", None, true, MenuAction::Exit));
@@ -335,6 +361,9 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             vec![MenuEntry::Sub { label: spec.label.into(), entries }]
         }
         "file.reveal" => simple(focus || matches!(s.location(), Location::Folder(_))),
+        "file.renamePreview" => {
+            vec![item(format!("{}…", spec.label), None, !s.selection().is_empty(), MenuAction::BatchRename)]
+        }
         _ if spec.params.starts_with("{}") => simple(true),
         // A new parameterized command needs a wrapper here (the registry test fails until then).
         "app.mode" => {
@@ -467,6 +496,8 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         MenuAction::ResetLayout => dock::reset(nav),
         MenuAction::Shortcuts => nav.state.show_shortcuts = true,
         MenuAction::About => nav.state.show_about = true,
+        MenuAction::BatchRename => crate::rename_dialog::open(nav),
+        MenuAction::NotYet => {}
         MenuAction::Exit => {
             nav.state.exit_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -17,6 +17,7 @@ mod menu;
 mod model_preview;
 mod pathbar;
 pub mod prefs_file;
+mod rename_dialog;
 mod start_timeline;
 mod start_tracks;
 mod start_view;
@@ -87,6 +88,8 @@ struct UiState {
     model: Option<model_preview::ModelPreview>,
     /// Open In ▸ entries and the session generation they were built at.
     open_in_cache: std::cell::RefCell<Option<(u64, Vec<MenuEntry>)>>,
+    /// Tools → Batch Rename…, while open.
+    rename: Option<rename_dialog::RenameDialog>,
     /// Storyboard view plumbing: playback clock and the Re-cut toast.
     storyboard: strip_view::SbUi,
 }
@@ -313,6 +316,7 @@ impl Navigator {
             inspector::overlay(self, &ctx);
         }
         menu::windows(self, &ctx);
+        rename_dialog::window(self, &ctx);
         self.thumbs.end_frame(&ctx);
         let wanted = &self.state.probe_wanted;
         self.session.retain_file_info(|p| wanted.contains(p));

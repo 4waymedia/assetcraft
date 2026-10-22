@@ -155,6 +155,7 @@ mod tests {
                 "app.commands",
                 "app.openInTargets",
                 "app.state",
+                "file.renamePreview",
                 "item.probe",
                 "storyboard.cueMaps",
                 "storyboard.preview",

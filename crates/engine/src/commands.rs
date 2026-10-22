@@ -168,6 +168,16 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(LAUNCH, "file.reveal", "Reveal in Explorer", "File", None, "{path?} (default: focused item)", file_reveal),
     cmd!(READ, "item.probe", "File Info", "File", None, "{path}", item_probe),
+    // Tools (Stage 2; T1 previews only, nothing is written)
+    cmd!(
+        READ,
+        "file.renamePreview",
+        "Batch Rename",
+        "Tools",
+        None,
+        "{template, start?: 0.. (default 1), paths?: [path]} (default: selection) → {plans: [{from, to, name, newName, changes, suffixed}], count, changed, suffixed, skipped, unknownTokens} (tokens {name} {num} {seq} {seq:3} {folder} {ext}; never overwrites: a taken name gets -1, -2…; changes nothing)",
+        crate::rename::rename_preview
+    ),
     // Cache
     cmd!(
         APP,
@@ -649,7 +659,7 @@ fn file_run(s: &mut Session, p: &Value) -> CmdResult {
 }
 
 /// `paths` param, or the selection.
-fn paths_param(s: &Session, params: &Value) -> Result<Vec<PathBuf>, CmdError> {
+pub(crate) fn paths_param(s: &Session, params: &Value) -> Result<Vec<PathBuf>, CmdError> {
     match params.get("paths") {
         None => Ok(s.selected_paths()),
         Some(list) => list
