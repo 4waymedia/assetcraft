@@ -168,6 +168,8 @@ Stage 6 recipes all build on this. No new user-facing features, and still no wri
   (one process per call), its catalog has no `enabled` or effects, and nothing outside it can ask for
   a thumbnail or an asset's identity.
 
+**Docs (2026-10-22):** the surface is specified in [cli.md](cli.md), [control-protocol.md](control-protocol.md), [mcp.md](mcp.md) and [agents.md](agents.md), aligned with the sibling apps; build steps C1–C8 are in cli.md §4 and map onto the steps below.
+
 **Decision (Paul, 2026-10-15): D8-B plus one AssetCraft rule.** Four classes (`read`,
 `write-app-state`, `write-user-file`, `external-network`) plus `destructive` / `undoable` /
 `idempotent` flags and a derived `confirm`. Programs started for the user (`file.open`,
