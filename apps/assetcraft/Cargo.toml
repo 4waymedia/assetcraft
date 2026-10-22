@@ -26,3 +26,7 @@ egui = { workspace = true }
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
 # The user must still turn on View > Formats > HEIC (`formats.heic`). See assetcraft-thumbs.
 heic = ["assetcraft-ui-egui/heic", "assetcraft-engine/heic", "assetcraft-thumbs/heic"]
+
+# Icon + VERSIONINFO for assetcraft.exe (build.rs); only needed when building on Windows.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
