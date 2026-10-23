@@ -232,3 +232,75 @@ fn the_textured_crate_thumbnail_shows_its_texture() {
     let frame = frame.expect("a frame");
     assert!(frame.image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255 && p[0] > p[2] + 60));
 }
+
+// ---- V0.3a: time-budgeted drag frames ----------------------------------------------------------
+
+#[test]
+fn drag_quality_shrinks_at_once_grows_back_damped_and_decimates_at_the_floor() {
+    use crate::model::{DRAG_BUDGET, DragQuality, MAX_DRAG_STRIDE, MIN_DRAG_SCALE};
+    let ms = Duration::from_millis;
+    let mut q = DragQuality::default();
+    assert_eq!((q.scale, q.stride), (1.0, 1));
+    // A 100 ms frame against a 25 ms budget: 4× the pixels too many → half the side.
+    q.observe(ms(100), DRAG_BUDGET);
+    assert!((q.scale - 0.5).abs() < 1e-3, "{q:?}");
+    assert_eq!(q.size(1024, 768), (512, 384));
+    // On budget: unchanged. Slightly under: unchanged (no oscillation).
+    q.observe(ms(25), DRAG_BUDGET);
+    q.observe(ms(21), DRAG_BUDGET);
+    assert!((q.scale - 0.5).abs() < 1e-3);
+    // Plenty of headroom: grows, but only half-way each time.
+    q.observe(ms(6), DRAG_BUDGET);
+    assert!(q.scale > 0.7 && q.scale < 1.0, "{q:?}");
+    for _ in 0..20 {
+        q.observe(ms(6), DRAG_BUDGET);
+    }
+    assert!((q.scale - 1.0).abs() < 1e-3 && q.stride == 1);
+    // Hopeless frames: the scale hits the floor, then the stride takes over, both capped.
+    for _ in 0..10 {
+        q.observe(ms(2_000), DRAG_BUDGET);
+    }
+    assert_eq!(q.scale, MIN_DRAG_SCALE);
+    assert_eq!(q.stride, MAX_DRAG_STRIDE);
+    assert_eq!(q.size(100, 30), (25, 16), "sides never drop below 16 px");
+    // Recovery: stride first, then the scale.
+    q.observe(ms(5), DRAG_BUDGET);
+    assert_eq!((q.scale, q.stride), (MIN_DRAG_SCALE, MAX_DRAG_STRIDE - 1));
+    // Junk timings change nothing.
+    let before = q;
+    q.observe(Duration::ZERO, Duration::ZERO);
+    assert_eq!(q, before);
+}
+
+#[test]
+fn drag_frames_are_scaled_and_full_frames_are_not() {
+    use crate::model::{DragQuality, RenderOptions, load_model, render_drag};
+    let path = models().join("rune_crate_textured.glb");
+    let probe = assetcraft_probe::probe(&RealFs, &path).unwrap();
+    let model = load_model(&RealFs, &probe).unwrap();
+    let look = RenderOptions::new(200, 120);
+    let small = render_drag(&model, View::default(), 200, 120, DragQuality { scale: 0.5, stride: 1 }, &look).unwrap();
+    assert_eq!((small.width, small.height), (100, 60));
+    let coarse = render_drag(&model, View::default(), 200, 120, DragQuality { scale: 1.0, stride: 3 }, &look).unwrap();
+    assert_eq!((coarse.width, coarse.height), (200, 120));
+    let covered = |img: &crate::model::Image| img.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count();
+    assert!(
+        covered(&coarse)
+            < covered(&render_drag(&model, View::default(), 200, 120, DragQuality::default(), &look).unwrap()),
+        "a stride of 3 draws a third of the triangles"
+    );
+    // Through the view: a drag frame reports its scale; a full frame is at 1.
+    let mut view = ModelView::open(Arc::new(RealFs), path);
+    let start = Instant::now();
+    while matches!(view.state(), ModelState::Loading) && start.elapsed() < Duration::from_secs(20) {
+        let _ = view.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    view.request(View::default(), 160, 90, true);
+    let frame = wait(&mut view).expect("a drag frame");
+    assert!(frame.fast && frame.scale > 0.0 && frame.scale <= 1.0);
+    assert_eq!(frame.image.width, ((160.0 * frame.scale).round() as u32).max(16));
+    view.request(View::default(), 160, 90, false);
+    let frame = wait(&mut view).expect("a full frame");
+    assert!(!frame.fast && frame.scale == 1.0 && frame.image.width == 160);
+}

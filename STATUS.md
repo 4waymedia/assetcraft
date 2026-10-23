@@ -65,7 +65,12 @@ Open decisions for Paul: D-A2, D-A3, D-A4, D-API1 (Stage 1.5); D-V2, D-V3 (3D vi
   - **Deviations:** the wireframe is edges over a dimmed surface, not bare lines (readable on a 50k-tri mesh; the reference viewer draws bare lines). `doubleSided` is read but every face is still drawn and lit, as before. Alpha is ignored.
   - **Opportunities (owner: Claude):** O-V1 full-size textures in the full-window preview (`TEXTURE_MAX_SIDE` is global); O-V2 the metallic-roughness map with an environment term (V1); O-V3 wireframe line width in device pixels for HiDPI (V0.3, with the panel's pixels-per-point).
 
-**Next action (Paul, Windows):** `cargo xtask ci` (expect 19 mesh tests, 7 thumbs model tests, `heic` run, layers unchanged), look at the textured thumbnails in `props/models/` and an orc GLB in the Preview panel (drag to orbit: smooth, textured), then commit:
+V0.2 committed as `fc41a5f` (2026-10-22; the fs library count went to 37 with the fixture).
+
+**V0.3a as built (Linux container, `crates/thumbs`; the UI change compiles first on Paul's CI, the container has no ALSA headers for the engine):** `thumbs::model`: `DRAG_BUDGET` 25 ms, `MIN_DRAG_SCALE` 0.25, `MAX_DRAG_STRIDE` 8, `DragQuality { scale, stride }` (pure controller: shrinks the side scale by √(budget/took) at once, grows back half-way at a time once there is > 30 % headroom, decimates triangles only at the scale floor, ignores zero timings), `render_drag(model, view, w, h, quality, look)`, `Frame.scale`; the `ModelView` thread times every drag frame with `Instant` and feeds the controller, full frames untouched. `ui-egui::model_preview`: `ModelPreview.fast_frame`, fast frames drawn with `fit_at_most(.., MAX_UPSCALE = 4)` so they fill the panel; `rect` recorded for tests. Tests: thumbs 7 → 9 model tests (controller sequence: shrink / hold / damped growth / floor + stride / recovery / junk; drag frame size and stride through `render_drag` and the view); UI + 1 (headless press, drag, release on the textured crate: fast frames while dragging, a full frame after). Measured on the wagon at 1024 × 768 (2-core container, 2 threads): full-size drag frame 62 ms → the controller settles in 2 frames at scale ≈ 0.55, 19–23 ms per drag frame (≈ 45 fps). On one thread it settles lower (≈ 0.4) at the same frame time: "≥ 30 fps orbit on one core" holds by construction, the budget is what it converges to.
+  - **Opportunities (owner: Claude):** O-V4 the first drag frame after a selection is still full size (the controller starts at 1.0): start from the last model's scale, or estimate from triangle count × panel pixels. O-V5 the full-window (Space) preview doesn't orbit yet (V0.3).
+
+**Next action (Paul, Windows):** `cargo xtask ci` (expect 19 mesh tests, 9 thumbs model tests, the new UI drag test, `heic` run, layers unchanged), orbit the wagon in the Preview panel (fluid while dragging, sharp on release), then commit:
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
@@ -75,8 +80,8 @@ cargo run -p assetcraft --release
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
-git add crates/mesh crates/thumbs STATUS.md
-git commit -m "3D viewer V0.2: smooth shading, base colour textures, studio light rig, display modes, backgrounds, threaded preview frames; RENDERER_VERSION 3"
+git add crates/thumbs crates/ui-egui/src/model_preview.rs STATUS.md
+git commit -m "3D viewer V0.3a: time-budgeted drag frames (DragQuality), upscaled in the Preview panel"
 git push
 ```
 

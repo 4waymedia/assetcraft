@@ -5,6 +5,10 @@
 //! rendering run on a `ModelView` thread from `assetcraft-thumbs`; this module only turns input
 //! into camera changes, asks for frames, and draws the newest one. Until the first frame
 //! arrives (or if the model can't be loaded) the ordinary thumbnail is drawn instead.
+//!
+//! While dragging, frames are "fast": the model view renders them smaller (and coarser) so
+//! each fits its time budget on this machine, and they are drawn scaled up to the panel; the
+//! frame after the drag ends is full size.
 
 use crate::Navigator;
 use crate::content::draw_thumb;
@@ -23,6 +27,8 @@ const ORBIT_PER_POINT: f32 = 0.01;
 const ZOOM_PER_POINT: f32 = 0.004;
 /// Longest preview frame side in pixels.
 const MAX_FRAME_SIDE: f32 = 1024.0;
+/// How far a fast (drag) frame may be scaled up to fill the panel (`1 / MIN_DRAG_SCALE`).
+const MAX_UPSCALE: f32 = 4.0;
 /// How long a model must stay selected before it is loaded. Arrowing through a folder of big
 /// models then starts no loads at all (each `ModelView` is its own thread), and a load whose
 /// selection moved on is cancelled when its view is dropped.
@@ -38,6 +44,10 @@ pub(crate) struct ModelPreview {
     camera: View,
     requested: Option<(View, [u32; 2], bool)>,
     texture: Option<TextureHandle>,
+    /// The shown frame is a fast one, drawn at a fraction of the requested size: scale it up.
+    fast_frame: bool,
+    /// Where the preview was last drawn (for tests that simulate pointer input).
+    rect: Rect,
 }
 
 impl ModelPreview {
@@ -51,6 +61,12 @@ impl ModelPreview {
     #[cfg(test)]
     pub(crate) fn has_frame(&self) -> bool {
         self.texture.is_some()
+    }
+
+    /// Whether the shown frame is a fast (drag) one (for tests).
+    #[cfg(test)]
+    pub(crate) fn shows_fast_frame(&self) -> bool {
+        self.fast_frame
     }
 
     /// Whether the loader has been started (for tests).
@@ -105,6 +121,8 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
             camera: View::default(),
             requested: None,
             texture: None,
+            fast_frame: false,
+            rect,
         });
     }
     let ctx = ui.ctx().clone();
@@ -112,6 +130,7 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
     let services = nav.session.services();
     let failed = 'model: {
         let Some(preview) = nav.state.model.as_mut() else { return };
+        preview.rect = rect;
         let drag = if response.dragged() { response.drag_delta() } else { Vec2::ZERO };
         preview.camera = next_camera(preview.camera, drag, scroll, response.double_clicked());
         let waited = preview.since.elapsed();
@@ -133,6 +152,7 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
                     preview.texture = Some(ctx.load_texture("assetcraft-model-preview", image, TextureOptions::LINEAR))
                 }
             }
+            preview.fast_frame = frame.fast;
         }
         let ready = matches!(model.state(), ModelState::Ready { .. });
         let size = frame_size(rect, ctx.pixels_per_point());
@@ -146,10 +166,11 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
         }
         matches!(model.state(), ModelState::Failed(_))
     };
-    let texture = nav.state.model.as_ref().and_then(|m| m.texture.as_ref()).map(|t| (t.id(), t.size_vec2()));
+    let texture = nav.state.model.as_ref().and_then(|m| m.texture.as_ref().map(|t| (t.id(), t.size_vec2(), m.fast_frame)));
     match texture {
-        Some((id, size)) if !failed => {
-            let target = fit_at_most(rect, size / ctx.pixels_per_point(), 1.0);
+        Some((id, size, fast)) if !failed => {
+            // A fast frame is a scaled-down render of this rect: let it scale back up.
+            let target = fit_at_most(rect, size / ctx.pixels_per_point(), if fast { MAX_UPSCALE } else { 1.0 });
             ui.painter().image(id, target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             ui.painter().text(
                 rect.center_bottom() - vec2(0.0, 4.0),
@@ -237,6 +258,70 @@ mod tests {
         std::thread::sleep(OPEN_AFTER + Duration::from_millis(20));
         frame(&mut nav);
         assert!(nav.state.model.as_ref().is_some_and(ModelPreview::is_open), "the settled model loads");
+    }
+
+    #[test]
+    fn dragging_shows_fast_frames_and_releasing_a_full_one() {
+        use assetcraft_engine::{Prefs, RecordingLauncher, Session};
+        use assetcraft_fs::RealFs;
+        use serde_json::json;
+        use std::sync::Arc;
+        let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+        let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+        let mut nav = Navigator::with_one_worker(session);
+        assert!(nav.open_folder(&models));
+        nav.run("select.click", json!({ "path": models.join("rune_crate_textured.glb") }));
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let run = |nav: &mut Navigator, events: Vec<egui::Event>| {
+            let input = egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
+            let mut output = ctx.run_ui(input, |ui| nav.ui(ui));
+            output.textures_delta.clear();
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while !nav.state.model.as_ref().is_some_and(ModelPreview::has_frame) && std::time::Instant::now() < deadline {
+            run(&mut nav, Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let preview = nav.state.model.as_ref().expect("a preview");
+        assert!(preview.has_frame() && !preview.shows_fast_frame(), "the first frame is a full one");
+        // Press in the preview panel and drag: the frames that arrive are fast ones.
+        let press = egui::Event::PointerButton {
+            pos: preview_center(&nav),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        };
+        run(&mut nav, vec![press]);
+        let mut saw_fast = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut step = 0.0;
+        while !saw_fast && std::time::Instant::now() < deadline {
+            step += 6.0;
+            run(&mut nav, vec![egui::Event::PointerMoved(preview_center(&nav) + vec2(step, 0.0))]);
+            saw_fast = nav.state.model.as_ref().is_some_and(ModelPreview::shows_fast_frame);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_fast, "a fast frame was shown while dragging");
+        let release = egui::Event::PointerButton {
+            pos: preview_center(&nav) + vec2(step, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::default(),
+        };
+        run(&mut nav, vec![release]);
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while nav.state.model.as_ref().is_some_and(ModelPreview::shows_fast_frame) && std::time::Instant::now() < deadline {
+            run(&mut nav, Vec::new());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!nav.state.model.as_ref().unwrap().shows_fast_frame(), "a full frame follows the release");
+        assert_ne!(nav.state.model.as_ref().unwrap().camera(), View::default(), "the drag orbited");
+    }
+
+    /// The centre of the preview's image area in the headless layout.
+    fn preview_center(nav: &Navigator) -> egui::Pos2 {
+        nav.state.model.as_ref().map(|m| m.rect.center()).unwrap_or(pos2(1000.0, 400.0))
     }
 
     #[test]

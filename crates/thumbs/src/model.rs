@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::time::{Duration, Instant};
 
 pub use assetcraft_mesh::{
     Background, DisplayMode, Image, Lighting, Limits, Mesh, MeshError, RenderOptions, Texture, View,
@@ -166,6 +167,77 @@ fn external_buffer(services: &dyn Services, folder: &Path, rel: &str, len: usize
     services.read_range(&path, 0, len).map_err(|e| e.to_string())
 }
 
+/// Threads a preview frame rasterizes on: every core up to [`PREVIEW_MAX_THREADS`] (the preview
+/// is the one thing the user is waiting on; thumbnails stay on their pool's workers).
+pub fn preview_threads() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, PREVIEW_MAX_THREADS)
+}
+
+/// Most threads one preview frame uses.
+pub const PREVIEW_MAX_THREADS: usize = 16;
+
+/// How long a drag (fast) frame may take. Drag frames are rendered smaller (and, at the floor,
+/// with fewer triangles) until they fit, so orbiting stays fluid on one slow core; the frame
+/// after the drag ends is full size and quality.
+pub const DRAG_BUDGET: Duration = Duration::from_millis(25);
+
+/// Smallest drag-frame scale (a quarter of the panel's pixels per side).
+pub const MIN_DRAG_SCALE: f32 = 0.25;
+
+/// Most triangles skipped per drawn one at the scale floor.
+pub const MAX_DRAG_STRIDE: usize = 8;
+
+/// Picks the size and triangle stride of drag frames so each one fits a time budget on this
+/// machine. Pure: feed it what the last frame took and it moves for the next one. Shrinks at
+/// once (one slow frame is enough), grows back damped (no oscillation).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DragQuality {
+    /// Side scale of drag frames, [`MIN_DRAG_SCALE`]..=1.
+    pub scale: f32,
+    /// Every `stride`-th triangle is drawn; > 1 only once `scale` sits at the floor.
+    pub stride: usize,
+}
+
+impl Default for DragQuality {
+    fn default() -> Self {
+        Self { scale: 1.0, stride: 1 }
+    }
+}
+
+impl DragQuality {
+    /// The last drag frame at this quality took `took`; adjust for the next one to fit `budget`.
+    pub fn observe(&mut self, took: Duration, budget: Duration) {
+        if took.is_zero() || budget.is_zero() {
+            return; // no information
+        }
+        let ratio = budget.as_secs_f32() / took.as_secs_f32();
+        if !ratio.is_finite() || ratio <= 0.0 {
+            return;
+        }
+        if ratio < 1.0 {
+            if self.scale > MIN_DRAG_SCALE {
+                // Pixels (and time) go with scale², so the side scale moves by the square root.
+                self.scale = (self.scale * ratio.sqrt()).clamp(MIN_DRAG_SCALE, 1.0);
+            } else {
+                self.stride = ((self.stride as f32 / ratio).ceil() as usize).clamp(1, MAX_DRAG_STRIDE);
+            }
+        } else if ratio > 1.3 {
+            if self.stride > 1 {
+                self.stride -= 1;
+            } else {
+                let target = (self.scale * ratio.sqrt()).min(1.0);
+                self.scale += (target - self.scale) * 0.5;
+            }
+        }
+    }
+
+    /// `width × height` scaled, each side at least 16 px.
+    pub fn size(&self, width: u32, height: u32) -> (u32, u32) {
+        let s = |v: u32| ((v as f32 * self.scale).round() as u32).clamp(16, v.max(16));
+        (s(width), s(height))
+    }
+}
+
 /// Render `model` from `view` at `width × height`. `fast` frames skip supersampling and, above
 /// [`PREVIEW_MAX_TRIANGLES`], draw a decimated subset. `look` sets the display mode, lighting
 /// and background (the size and quality fields are overwritten).
@@ -182,12 +254,35 @@ pub fn render_view(
         height: height.clamp(1, PREVIEW_MAX_SIDE),
         supersample: 2,
         stride: 1,
+        threads: preview_threads(),
         ..*look
     };
     if fast {
         opts.supersample = 1;
         opts.stride = model.mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(1);
     }
+    Ok(assetcraft_mesh::render_with(&model.mesh, &model.textures, view, &opts)?)
+}
+
+/// [`render_view`] for a drag frame at `quality`: `width × height` scaled down and every
+/// `quality.stride`-th triangle (or the size-based stride, whichever is coarser).
+pub fn render_drag(
+    model: &Model,
+    view: View,
+    width: u32,
+    height: u32,
+    quality: DragQuality,
+    look: &RenderOptions,
+) -> Result<Image, ThumbError> {
+    let (w, h) = quality.size(width, height);
+    let opts = RenderOptions {
+        width: w.clamp(1, PREVIEW_MAX_SIDE),
+        height: h.clamp(1, PREVIEW_MAX_SIDE),
+        supersample: 1,
+        stride: model.mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(quality.stride).max(1),
+        threads: preview_threads(),
+        ..*look
+    };
     Ok(assetcraft_mesh::render_with(&model.mesh, &model.textures, view, &opts)?)
 }
 
@@ -212,8 +307,11 @@ pub enum ModelState {
 pub struct Frame {
     /// The camera it was drawn from.
     pub view: View,
-    /// Whether it was a fast (interactive) frame.
+    /// Whether it was a fast (interactive) frame: drawn at `scale` of the requested size, to
+    /// be scaled up when shown.
     pub fast: bool,
+    /// Side scale against the requested size (1 for full frames).
+    pub scale: f32,
     /// The pixels.
     pub image: Image,
 }
@@ -277,6 +375,7 @@ impl ModelView {
                     return;
                 }
             };
+            let mut quality = DragQuality::default();
             while let Ok(mut job) = job_rx.recv() {
                 loop {
                     match job_rx.try_recv() {
@@ -286,11 +385,20 @@ impl ModelView {
                     }
                 }
                 let Job { seq, view, size, fast, look } = job;
+                let started = Instant::now();
+                let scale = if fast { quality.scale } else { 1.0 };
                 let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render_view(&model, view, size.0, size.1, fast, &look)
+                    if fast {
+                        render_drag(&model, view, size.0, size.1, quality, &look)
+                    } else {
+                        render_view(&model, view, size.0, size.1, false, &look)
+                    }
                 }))
                 .unwrap_or_else(|_| Err(ThumbError::Decode("model renderer panicked".into())))
-                .map(|image| Frame { view, fast, image });
+                .map(|image| Frame { view, fast, scale, image });
+                if fast {
+                    quality.observe(started.elapsed(), DRAG_BUDGET);
+                }
                 if event_tx.send(Event::Frame(seq, frame)).is_err() {
                     return;
                 }
