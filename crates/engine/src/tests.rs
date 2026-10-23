@@ -728,6 +728,25 @@ fn programs_are_revealed_by_open_and_run_by_run() {
 }
 
 #[test]
+fn mesh_info_reads_a_model_through_the_viewer_limits() {
+    let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    let path = models.join("rune_crate_textured.glb");
+    let v = run(&mut s, "asset.meshInfo", json!({"path": path.to_string_lossy()}));
+    assert_eq!(v["triangles"], 12);
+    assert_eq!(v["images"][0]["width"], 64);
+    assert_eq!(v["images"][1]["drawn"], false);
+    assert_eq!(v["format"], "GLB");
+    assert!(v["bytes"].as_u64().unwrap() > 3000);
+    let v = run(&mut s, "asset.meshInfo", json!({"path": models.join("tombstone.obj").to_string_lossy()}));
+    assert_eq!((v["normals"], v["uvs"]), (json!(false), json!(false)));
+    assert!(v["warnings"][0].as_str().unwrap().starts_with("no normals"));
+    assert!(s.execute("asset.meshInfo", &json!({"path": "relative.glb"})).is_err());
+    assert!(s.execute("asset.meshInfo", &json!({"path": models.join("missing.glb").to_string_lossy()})).is_err());
+    assert!(s.execute("asset.meshInfo", &json!({})).is_err());
+}
+
+#[test]
 fn model_command_sets_and_persists_the_3d_preview_settings() {
     let (mut s, _) = session(fake());
     assert_eq!(s.model(), ModelPrefs::default());

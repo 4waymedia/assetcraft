@@ -13,6 +13,7 @@ mod enabled;
 pub mod generate_cmd;
 pub mod launch;
 mod library_cmd;
+mod model_cmd;
 pub mod open_in;
 pub mod paths;
 pub mod prefs;

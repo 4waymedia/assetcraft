@@ -33,6 +33,7 @@ COMMANDS:
     probe <file>               File type, dimensions, size, times, header status
     thumb <file> --out <png>   Render a thumbnail to a PNG file
     analyze <audio>...         Track facts: duration, rate, channels, peak, RMS
+    info <model>...            3D model facts: counts, bounds, materials, images, warnings
     commands                   List every engine command
     describe <id>              One command as JSON: params, effects, enabled now and why not
     exec <id> [<json>]         Run one engine command headlessly; prints its JSON result
@@ -46,6 +47,24 @@ For agents and scripts: `assetcraft-cli commands --json` lists every command id 
 parameters, effects and whether it can run now, `describe <id>` shows one, and
 `assetcraft-cli exec <id> '<json>' [--dir <folder>]` runs one, so anything the UI can do is
 scriptable. Exit codes: 0 ok, 1 failed, 2 usage error.
+";
+
+const INFO_HELP: &str = "\
+assetcraft-cli info: parse 3D model files and print their facts (engine asset.meshInfo)
+
+USAGE:
+    assetcraft-cli info <model>... [--json]
+
+GLB, glTF (with its .bin and image files next to it) and OBJ. One line per file: triangles,
+vertices, materials, images with their sizes, whether normals and texture coordinates are
+present, the bounds, then any warnings. Image sizes come from the headers; nothing is decoded
+beyond the geometry. A file that can't be read prints its reason and the rest carry on; the
+exit code is 1 if any failed. Limits are the viewer's (2 M vertices / triangles, 128 MiB of
+buffers, 96 MiB of images).
+
+OPTIONS:
+    --json           A JSON array of asset.meshInfo results ({path, error} for failures)
+    -h, --help       Print help
 ";
 
 const LIST_HELP: &str = "\
@@ -173,6 +192,7 @@ const LIST_SPEC: Spec = Spec { switches: &["--json", "--desc", "--hidden"], valu
 const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
 const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary"], values: &[] };
+const INFO_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
 const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
@@ -245,6 +265,7 @@ fn run(argv: &[String]) -> Outcome {
         "probe" => with(rest, &PROBE_SPEC, PROBE_HELP, probe),
         "thumb" => with(rest, &THUMB_SPEC, THUMB_HELP, thumb),
         "analyze" => with(rest, &ANALYZE_SPEC, ANALYZE_HELP, analyze),
+        "info" => with(rest, &INFO_SPEC, INFO_HELP, info),
         "commands" => with(rest, &COMMANDS_SPEC, COMMANDS_HELP, list_commands),
         "describe" => with(rest, &DESCRIBE_SPEC, DESCRIBE_HELP, describe),
         "exec" => with(rest, &EXEC_SPEC, EXEC_HELP, exec),
@@ -263,6 +284,7 @@ fn sub_help(name: &str) -> Option<&'static str> {
         "probe" => PROBE_HELP,
         "thumb" => THUMB_HELP,
         "analyze" => ANALYZE_HELP,
+        "info" => INFO_HELP,
         "commands" => COMMANDS_HELP,
         "describe" => DESCRIBE_HELP,
         "exec" => EXEC_HELP,
@@ -486,6 +508,92 @@ fn analyze(p: &Parsed, help: &'static str) -> Outcome {
         // Print what worked, then fail.
         print_out(&out);
         return Err(Failure::Failed(format!("{failed} of {} file(s) could not be analysed", results.len())));
+    }
+    Ok(out)
+}
+
+// ---- info ----------------------------------------------------------------------------------
+
+/// Most files one `info` run takes.
+const MAX_INFO_FILES: usize = 1_000;
+
+fn info(p: &Parsed, help: &'static str) -> Outcome {
+    let files = positionals(p, 1, MAX_INFO_FILES, "<model>", help)?;
+    let mut s = session(None);
+    let mut results = Vec::new();
+    let mut failed = 0;
+    for f in files {
+        let file = absolute(f);
+        let result = match path_str(&file) {
+            Ok(path) => s.execute("asset.meshInfo", &json!({ "path": path })),
+            Err(_) => Err(CmdError::BadParams("path is not valid UTF-8".into())),
+        };
+        results.push(match result {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                json!({ "path": file.to_string_lossy(), "error": e.to_string() })
+            }
+        });
+    }
+    let out = if p.has("--json") {
+        pretty(&Value::Array(results.clone()))
+    } else {
+        let mut out = String::new();
+        for r in &results {
+            let name = r["path"]
+                .as_str()
+                .map(Path::new)
+                .and_then(Path::file_name)
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match r.get("error").and_then(Value::as_str) {
+                Some(e) => out.push_str(&format!("{name}: {e}\n")),
+                None => {
+                    let images: Vec<String> = r["images"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .map(|i| match (i["width"].as_u64(), i["height"].as_u64()) {
+                                    (Some(w), Some(h)) => format!("{w}×{h} {}", i["mime"].as_str().unwrap_or("?")),
+                                    _ => format!("{} (size unknown)", i["mime"].as_str().unwrap_or("?")),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let size = r["bounds"]["size"]
+                        .as_array()
+                        .map(|s| {
+                            s.iter().map(|v| format!("{:.3}", v.as_f64().unwrap_or(0.0))).collect::<Vec<_>>().join(" × ")
+                        })
+                        .unwrap_or_else(|| "empty".into());
+                    let attrs = match (r["normals"].as_bool(), r["uvs"].as_bool()) {
+                        (Some(true), Some(true)) => "normals + uvs",
+                        (Some(true), _) => "normals",
+                        (_, Some(true)) => "uvs",
+                        _ => "positions only",
+                    };
+                    out.push_str(&format!(
+                        "{name}: {} tris · {} verts · {} material(s) · {} image(s){}{} · {attrs} · bounds {size} · {}\n",
+                        r["triangles"],
+                        r["vertices"],
+                        r["materials"],
+                        images.len(),
+                        if images.is_empty() { "" } else { ": " },
+                        images.join(", "),
+                        human_size(r["bytes"].as_u64().unwrap_or(0)),
+                    ));
+                    for w in r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                        out.push_str(&format!("  ! {w}\n"));
+                    }
+                }
+            }
+        }
+        out
+    };
+    if failed > 0 {
+        print_out(&out);
+        return Err(Failure::Failed(format!("{failed} of {} file(s) could not be read", results.len())));
     }
     Ok(out)
 }

@@ -228,6 +228,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         READ,
+        "asset.meshInfo",
+        "Mesh Info",
+        "Help",
+        None,
+        "{path} → {path, format, bytes, vertices, triangles, materials, normals, uvs, bounds, images: [{index, mime, bytes, width, height, drawn}], warnings} (parses the whole file under the viewer's limits; image sizes from the headers)",
+        crate::model_cmd::mesh_info
+    ),
+    cmd!(
+        READ,
         "track.summary",
         "Track Summary",
         "Help",

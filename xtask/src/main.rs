@@ -1,8 +1,11 @@
 //! Build tooling for AssetCraft.
 //!
 //! - `cargo xtask ci`: fmt check, clippy (warnings are errors), tests, the same two with the opt-in
-//!   `heic` feature (thumbs, engine, ui-egui), layers, deny. Stops at the first failure.
+//!   `heic` feature (thumbs, engine, ui-egui), layers, wasm, deny. Stops at the first failure.
 //! - `cargo xtask layers`: check the crate layering table against `cargo metadata`.
+//! - `cargo xtask wasm`: `cargo check` of the crates the web build will need (today: `mesh`) for
+//!   `wasm32-unknown-unknown`, if that target is installed; without it the step is skipped
+//!   with a message, not failed.
 //! - `cargo xtask deny`: licence and source checks (`deny.toml`) with cargo-deny, if installed;
 //!   without it the step is skipped with a message, not failed.
 
@@ -15,9 +18,10 @@ fn main() -> ExitCode {
     let result = match task.as_deref() {
         Some("ci") => ci(),
         Some("layers") => check_layers(),
+        Some("wasm") => wasm(),
         Some("deny") => deny(),
         _ => {
-            eprintln!("usage: cargo xtask <ci|layers|deny>");
+            eprintln!("usage: cargo xtask <ci|layers|wasm|deny>");
             return ExitCode::from(2);
         }
     };
@@ -54,6 +58,7 @@ fn ci() -> Result<(), String> {
     test_heic.extend(heic);
     run("test (heic)", &test_heic)?;
     check_layers()?;
+    wasm()?;
     deny()?;
     println!("xtask ci: all checks passed");
     Ok(())
@@ -64,6 +69,40 @@ fn run(step: &str, args: &[&str]) -> Result<(), String> {
     let status =
         Command::new(cargo()).args(args).status().map_err(|e| format!("{step}: could not start cargo: {e}"))?;
     if status.success() { Ok(()) } else { Err(format!("{step} failed")) }
+}
+
+/// Crates that must keep building for the browser (suite principle 06): checked for
+/// `wasm32-unknown-unknown` so no desktop-only dependency slips in. More join as the web build
+/// grows (`thumbs` once its threads are behind a feature, then `engine`).
+const WASM_CRATES: &[&str] = &["assetcraft-mesh"];
+
+/// `cargo check --target wasm32-unknown-unknown` of [`WASM_CRATES`] when the target is
+/// installed; a clear skip otherwise.
+fn wasm() -> Result<(), String> {
+    println!("xtask: wasm");
+    let installed = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim() == "wasm32-unknown-unknown"));
+    if !installed {
+        println!(
+            "xtask: wasm skipped: the wasm32-unknown-unknown target is not installed (`rustup target add wasm32-unknown-unknown` to enable)"
+        );
+        return Ok(());
+    }
+    let mut args = vec!["check", "--target", "wasm32-unknown-unknown"];
+    for krate in WASM_CRATES {
+        args.extend(["-p", krate]);
+    }
+    let status = Command::new(cargo()).args(&args).status().map_err(|e| format!("wasm: could not start cargo: {e}"))?;
+    if status.success() {
+        println!("xtask: wasm ok ({} crate(s))", WASM_CRATES.len());
+        Ok(())
+    } else {
+        Err(format!("wasm: {} would not build for wasm32-unknown-unknown", WASM_CRATES.join(", ")))
+    }
 }
 
 /// `cargo deny check licenses sources` when cargo-deny is installed; a clear skip otherwise.

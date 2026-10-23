@@ -329,10 +329,37 @@ fn usage_help_and_version() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("USAGE"));
     assert!(ok(&["--help"]).contains("exec"));
     assert!(ok(&["-h"]).contains("USAGE"));
-    for sub in ["list", "probe", "thumb", "analyze", "commands", "describe", "exec"] {
+    for sub in ["list", "probe", "thumb", "analyze", "info", "commands", "describe", "exec"] {
         assert!(ok(&[sub, "--help"]).contains(&format!("assetcraft-cli {sub}")), "{sub}");
         assert_eq!(ok(&["help", sub]), ok(&[sub, "-h"]));
     }
     assert!(ok(&["--version"]).starts_with("assetcraft-cli "));
     assert!(ok(&["-V"]).contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn info_prints_mesh_facts_and_fails_per_file() {
+    let v = json_of(&["info", &lib("props/models/rune_crate_textured.glb"), "--json"]);
+    let r = &v[0];
+    assert_eq!((r["triangles"].as_u64(), r["vertices"].as_u64(), r["materials"].as_u64()), (Some(12), Some(24), Some(1)));
+    assert_eq!((r["normals"], r["uvs"]), (json!(true), json!(true)));
+    assert_eq!(r["images"].as_array().map(Vec::len), Some(2));
+    assert_eq!((r["images"][0]["width"], r["images"][0]["height"], r["images"][0]["drawn"]), (json!(64), json!(64), json!(true)));
+    assert_eq!(r["images"][1]["drawn"], json!(false), "the metallic-roughness map isn't drawn yet");
+    assert_eq!(r["format"], json!("GLB"));
+    assert_eq!(r["warnings"].as_array().map(Vec::len), Some(0));
+    let size = r["bounds"]["size"].as_array().unwrap();
+    assert!(size.iter().all(|v| (v.as_f64().unwrap() - 2.0).abs() < 1e-3), "a unit cube rotated about Y keeps its height: {size:?}");
+
+    let human = ok(&["info", &lib("props/models/tombstone.obj")]);
+    assert!(human.starts_with("tombstone.obj: "), "{human}");
+    assert!(human.contains("positions only") && human.contains("  ! no normals"), "{human}");
+
+    // One bad file among good ones: everything printed, exit 1.
+    let mixed = cli(&["info", &lib("props/models/scythe_ring.gltf"), &lib("edge-cases/broken_not_an_image.jpg")]);
+    assert_eq!(mixed.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&mixed.stdout);
+    assert!(stdout.contains("scythe_ring.gltf: ") && stdout.contains("broken_not_an_image.jpg: "), "{stdout}");
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("1 of 2"));
+    assert_eq!(code(&["info"]), Some(2));
 }

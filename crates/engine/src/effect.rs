@@ -155,6 +155,7 @@ mod tests {
                 "app.commands",
                 "app.openInTargets",
                 "app.state",
+                "asset.meshInfo",
                 "file.renamePreview",
                 "item.probe",
                 "storyboard.cueMaps",

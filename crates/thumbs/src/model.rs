@@ -85,6 +85,14 @@ pub fn decode_textures(mesh: &Mesh) -> Vec<Option<Texture>> {
         .collect()
 }
 
+/// Width and height of an encoded image from its header alone (format sniffed from the bytes;
+/// PNG, JPEG, WebP and the other formats the `image` crate reads), or `None`.
+pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
+    reader.limits(crate::decoders::image_limits());
+    reader.into_dimensions().ok()
+}
+
 /// [`load`] plus [`decode_textures`].
 pub fn load_model(services: &dyn Services, probe: &Probe) -> Result<Model, ThumbError> {
     let mesh = load(services, probe)?;
