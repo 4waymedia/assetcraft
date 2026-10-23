@@ -6,7 +6,11 @@
 //! regular files inside the model's folder (no `..`, no absolute paths, no symlink anywhere
 //! between the model's folder and the buffer), each at most its declared `byteLength`.
 //!
-//! [`ModelView`] keeps one loaded mesh on its own thread and renders the newest requested
+//! [`decode_textures`] turns the mesh's encoded images into [`Texture`]s with the `image` crate
+//! under the thumbnail decode limits, shrunk to [`TEXTURE_MAX_SIDE`]; an image that won't
+//! decode leaves its material untextured, so the geometry always draws.
+//!
+//! [`ModelView`] keeps one loaded [`Model`] on its own thread and renders the newest requested
 //! [`View`] with the CPU rasterizer, so the UI thread only uploads finished images. Requests
 //! made while a render runs are coalesced to the latest one.
 
@@ -18,7 +22,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
-pub use assetcraft_mesh::{Image, Limits, Mesh, MeshError, RenderOptions, View};
+pub use assetcraft_mesh::{
+    Background, DisplayMode, Image, Lighting, Limits, Mesh, MeshError, RenderOptions, Texture, View,
+};
+use image::ImageReader;
+use std::io::Cursor;
 
 /// Above this many triangles, interactive (`fast`) preview frames draw every n-th triangle so
 /// orbiting stays responsive; the frame after the drag ends draws them all.
@@ -26,6 +34,62 @@ pub const PREVIEW_MAX_TRIANGLES: usize = 500_000;
 
 /// Largest preview frame side.
 pub const PREVIEW_MAX_SIDE: u32 = 2048;
+
+/// Decoded textures are shrunk to this side: 4 MiB each instead of 64 MiB for a 4096² map,
+/// and more than enough for a preview panel (opportunity: full size in the full-window view).
+pub const TEXTURE_MAX_SIDE: u32 = 1024;
+
+/// A mesh with its decoded textures.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Model {
+    /// The geometry and materials.
+    pub mesh: Mesh,
+    /// `textures[i]` is the decoded `mesh.images[i]`, or `None` when it would not decode.
+    pub textures: Vec<Option<Texture>>,
+}
+
+impl Model {
+    /// Bytes held, for memory budgets.
+    pub fn cost(&self) -> usize {
+        self.mesh.cost() + self.textures.iter().flatten().map(|t| t.rgba.len()).sum::<usize>()
+    }
+}
+
+/// Decode the images of `mesh` that some material draws (base colour maps; the
+/// metallic-roughness map waits for V1's environment term), format sniffed from the bytes,
+/// not the declared MIME type, within the thumbnail limits, each shrunk to
+/// [`TEXTURE_MAX_SIDE`]. Images that fail (unknown format, damaged, over the limits) and
+/// images nothing draws are `None`.
+pub fn decode_textures(mesh: &Mesh) -> Vec<Option<Texture>> {
+    mesh.images
+        .iter()
+        .enumerate()
+        .map(|(i, image)| {
+            let drawn = mesh.materials.iter().any(|m| m.base_color_image == Some(i as u32));
+            if !drawn {
+                return None;
+            }
+            let reader = ImageReader::new(Cursor::new(image.bytes.as_slice())).with_guessed_format().ok()?;
+            let mut reader = reader;
+            reader.limits(crate::decoders::image_limits());
+            let decoded = reader.decode().ok()?;
+            let small = if decoded.width().max(decoded.height()) > TEXTURE_MAX_SIDE {
+                decoded.thumbnail(TEXTURE_MAX_SIDE, TEXTURE_MAX_SIDE)
+            } else {
+                decoded
+            };
+            let rgba = small.to_rgba8();
+            Texture::new(rgba.width(), rgba.height(), rgba.into_raw())
+        })
+        .collect()
+}
+
+/// [`load`] plus [`decode_textures`].
+pub fn load_model(services: &dyn Services, probe: &Probe) -> Result<Model, ThumbError> {
+    let mesh = load(services, probe)?;
+    let textures = decode_textures(&mesh);
+    Ok(Model { mesh, textures })
+}
 
 /// `true` for the formats [`load`] reads.
 pub fn is_model(format: Format) -> bool {
@@ -102,15 +166,29 @@ fn external_buffer(services: &dyn Services, folder: &Path, rel: &str, len: usize
     services.read_range(&path, 0, len).map_err(|e| e.to_string())
 }
 
-/// Render `mesh` from `view` at `width × height`. `fast` frames skip supersampling and, above
-/// [`PREVIEW_MAX_TRIANGLES`], draw a decimated subset.
-pub fn render_view(mesh: &Mesh, view: View, width: u32, height: u32, fast: bool) -> Result<Image, ThumbError> {
-    let mut opts = RenderOptions::new(width.clamp(1, PREVIEW_MAX_SIDE), height.clamp(1, PREVIEW_MAX_SIDE));
+/// Render `model` from `view` at `width × height`. `fast` frames skip supersampling and, above
+/// [`PREVIEW_MAX_TRIANGLES`], draw a decimated subset. `look` sets the display mode, lighting
+/// and background (the size and quality fields are overwritten).
+pub fn render_view(
+    model: &Model,
+    view: View,
+    width: u32,
+    height: u32,
+    fast: bool,
+    look: &RenderOptions,
+) -> Result<Image, ThumbError> {
+    let mut opts = RenderOptions {
+        width: width.clamp(1, PREVIEW_MAX_SIDE),
+        height: height.clamp(1, PREVIEW_MAX_SIDE),
+        supersample: 2,
+        stride: 1,
+        ..*look
+    };
     if fast {
         opts.supersample = 1;
-        opts.stride = mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(1);
+        opts.stride = model.mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(1);
     }
-    Ok(assetcraft_mesh::render(mesh, view, &opts)?)
+    Ok(assetcraft_mesh::render_with(&model.mesh, &model.textures, view, &opts)?)
 }
 
 /// Where a [`ModelView`] is.
@@ -122,6 +200,8 @@ pub enum ModelState {
     Ready {
         /// Triangles in the mesh.
         triangles: usize,
+        /// Textures that decoded, out of the images the file has.
+        textures: (usize, usize),
     },
     /// The file could not be loaded (the UI falls back to the thumbnail).
     Failed(ThumbError),
@@ -143,10 +223,11 @@ struct Job {
     view: View,
     size: (u32, u32),
     fast: bool,
+    look: RenderOptions,
 }
 
 enum Event {
-    Loaded(Result<usize, ThumbError>),
+    Loaded(Result<(usize, (usize, usize)), ThumbError>),
     Frame(u64, Result<Frame, ThumbError>),
 }
 
@@ -176,13 +257,20 @@ impl ModelView {
                     return Err(ThumbError::Decode("cancelled".into()));
                 }
                 let probe = assetcraft_probe::probe(services.as_ref(), &path).map_err(ThumbError::Io)?;
-                load_unless(services.as_ref(), &probe, &stop)
+                let mesh = load_unless(services.as_ref(), &probe, &stop)?;
+                if stop.load(Ordering::Acquire) {
+                    return Err(ThumbError::Decode("cancelled".into()));
+                }
+                let textures = decode_textures(&mesh);
+                Ok(Model { mesh, textures })
             }))
             .unwrap_or_else(|_| Err(ThumbError::Decode("model loader panicked".into())));
-            let mesh = match loaded {
-                Ok(mesh) => {
-                    let _ = event_tx.send(Event::Loaded(Ok(mesh.triangle_count())));
-                    mesh
+            let model = match loaded {
+                Ok(model) => {
+                    let decoded = model.textures.iter().flatten().count();
+                    let _ = event_tx
+                        .send(Event::Loaded(Ok((model.mesh.triangle_count(), (decoded, model.mesh.images.len())))));
+                    model
                 }
                 Err(e) => {
                     let _ = event_tx.send(Event::Loaded(Err(e)));
@@ -197,9 +285,9 @@ impl ModelView {
                         Err(TryRecvError::Disconnected) => return,
                     }
                 }
-                let Job { seq, view, size, fast } = job;
+                let Job { seq, view, size, fast, look } = job;
                 let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render_view(&mesh, view, size.0, size.1, fast)
+                    render_view(&model, view, size.0, size.1, fast, &look)
                 }))
                 .unwrap_or_else(|_| Err(ThumbError::Decode("model renderer panicked".into())))
                 .map(|image| Frame { view, fast, image });
@@ -215,11 +303,17 @@ impl ModelView {
         Self { cancel, jobs, events, state, requested: 0, finished: 0 }
     }
 
-    /// Ask for a frame of `width × height` from `view` (coalesced with earlier requests that
-    /// haven't started).
+    /// Ask for a frame of `width × height` from `view` with the default look (coalesced with
+    /// earlier requests that haven't started).
     pub fn request(&mut self, view: View, width: u32, height: u32, fast: bool) {
+        self.request_look(view, width, height, fast, &RenderOptions::new(width, height));
+    }
+
+    /// [`ModelView::request`] with a display mode, lighting and background.
+    pub fn request_look(&mut self, view: View, width: u32, height: u32, fast: bool, look: &RenderOptions) {
         self.requested += 1;
-        if self.jobs.send(Job { seq: self.requested, view, size: (width, height), fast }).is_err() {
+        let job = Job { seq: self.requested, view, size: (width, height), fast, look: *look };
+        if self.jobs.send(job).is_err() {
             self.finished = self.requested;
         }
     }
@@ -229,7 +323,7 @@ impl ModelView {
         let mut newest = None;
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Loaded(Ok(triangles)) => self.state = ModelState::Ready { triangles },
+                Event::Loaded(Ok((triangles, textures))) => self.state = ModelState::Ready { triangles, textures },
                 Event::Loaded(Err(e)) => {
                     self.state = ModelState::Failed(e);
                     self.finished = self.requested;

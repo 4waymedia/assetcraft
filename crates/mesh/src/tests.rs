@@ -468,3 +468,141 @@ fn the_textured_cube_fixture_has_everything_v0_2_will_draw() {
     let image = render(&mesh, View::default(), &RenderOptions::new(48, 48)).unwrap();
     assert!(image.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count() > 200);
 }
+
+// ---- V0.2: shading, textures, display modes, background ---------------------------------------
+
+fn pixels(image: &Image) -> impl Iterator<Item = &[u8; 4]> {
+    image.rgba.as_chunks::<4>().0.iter()
+}
+
+fn solid(opts: RenderOptions) -> RenderOptions {
+    RenderOptions { background: Background::Solid([20, 20, 20]), ..opts }
+}
+
+/// A square in the XY plane (two triangles, four corners) with per-corner normals that lean
+/// left on the left and right on the right, so smooth shading makes a gradient across it.
+fn leaning_quad() -> Mesh {
+    let lean = |x: f32| {
+        let n = [x * 0.8, 0.0, 0.6];
+        let l = (n[0] * n[0] + n[2] * n[2]).sqrt();
+        [n[0] / l, 0.0, n[2] / l]
+    };
+    Mesh {
+        positions: vec![[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [1.0, 1.0, 0.0], [-1.0, 1.0, 0.0]],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        triangle_color: vec![0, 0],
+        colors: vec![[1.0; 4]],
+        normals: vec![lean(-1.0), lean(1.0), lean(1.0), lean(-1.0)],
+        uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        materials: vec![Material { base_color_image: Some(0), ..Material::default() }],
+        images: vec![ImageData { mime: "image/png".into(), bytes: vec![1, 2, 3] }],
+    }
+}
+
+const FRONT: View = View { yaw: 0.0, pitch: 0.0, zoom: 1.0 };
+
+#[test]
+fn smooth_shading_makes_a_gradient_and_flat_does_not() {
+    let mut mesh = leaning_quad();
+    mesh.colors[0] = [0.4, 0.4, 0.4, 1.0];
+    let opts = RenderOptions::new(32, 32);
+    let smooth = render(&mesh, FRONT, &opts).unwrap();
+    let flat = render(&mesh, FRONT, &RenderOptions { smooth: false, ..opts }).unwrap();
+    let row = |img: &Image| (8..24).map(|x| img.rgba[(16 * 32 + x) * 4]).collect::<Vec<u8>>();
+    let (s, f) = (row(&smooth), row(&flat));
+    let distinct = |v: &[u8]| v.iter().collect::<std::collections::BTreeSet<_>>().len();
+    assert!(distinct(&s) > 4, "smooth: a gradient across the face {s:?}");
+    assert_eq!(distinct(&f), 1, "flat: one shade across the face {f:?}");
+}
+
+#[test]
+fn textures_are_sampled_bilinearly_with_wrap_and_multiply_the_colour() {
+    let mesh = leaning_quad();
+    // 2 × 1: red on the left, blue on the right.
+    let tex = Texture::new(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).unwrap();
+    let opts = RenderOptions {
+        smooth: false,
+        lighting: Lighting { ambient: 1.0, key: 0.0, fill: 0.0, rim: 0.0, exposure: 1.0 },
+        ..RenderOptions::new(32, 32)
+    };
+    let img = render_with(&mesh, &[Some(tex.clone())], FRONT, &opts).unwrap();
+    // Along the middle row: a pure red pixel (the red texel's centre, u = 0.25), a pure blue
+    // one to its right (u = 0.75), and a blend half-way between them (u = 0.5).
+    let px = |x: usize| img.rgba[(16 * 32 + x) * 4..(16 * 32 + x) * 4 + 3].to_vec();
+    let red = (0..32).find(|x| px(*x)[0] > 230 && px(*x)[2] < 40).expect("a pure red pixel");
+    let blue = (0..32).rev().find(|x| px(*x)[2] > 230 && px(*x)[0] < 40).expect("a pure blue pixel");
+    assert!(red < blue, "red {red} left of blue {blue}");
+    let mid = px((red + blue) / 2);
+    assert!(mid[0] > 100 && mid[2] > 100, "the middle blends: {mid:?}");
+    // Shifting every uv by a whole number changes nothing (wrap).
+    let mut shifted = mesh.clone();
+    for uv in &mut shifted.uvs {
+        uv[0] += 3.0;
+        uv[1] -= 2.0;
+    }
+    assert_eq!(render_with(&shifted, &[Some(tex.clone())], FRONT, &opts).unwrap(), img);
+    // A missing texture, or one that would not decode, draws the colour alone (white here).
+    let plain = render_with(&mesh, &[None], FRONT, &opts).unwrap();
+    assert!(px(red) != plain.rgba[(16 * 32 + red) * 4..(16 * 32 + red) * 4 + 3]);
+    assert_eq!(render(&mesh, FRONT, &opts).unwrap(), plain);
+    // The colour multiplies the texture.
+    let mut tinted = mesh.clone();
+    tinted.colors[0] = [0.0, 1.0, 0.0, 1.0];
+    let green = render_with(&tinted, &[Some(tex)], FRONT, &opts).unwrap();
+    assert!(
+        pixels(&green).filter(|p| p[3] > 0).all(|p| p[0] < 8 && p[2] < 8),
+        "red × green = black, blue × green = black"
+    );
+    assert!(Texture::new(2, 1, vec![0; 7]).is_none() && Texture::new(0, 1, vec![]).is_none());
+}
+
+#[test]
+fn display_modes_and_backgrounds_render_as_specified() {
+    let mesh = parse_glb(&rune_crate(), &Limits::default(), &mut no_files).unwrap();
+    let base = RenderOptions::new(48, 48);
+    // Normals: the cube is rotated 30° about Y, so some face normal has z ≈ 0.87 → blue ≈ 238.
+    let normals = render(&mesh, View::default(), &RenderOptions { mode: DisplayMode::Normals, ..base }).unwrap();
+    assert!(pixels(&normals).any(|p| p[3] == 255 && p[2] > 225 && (p[1] as i32 - 128).abs() < 6), "a +Z-ish face");
+    assert_eq!(
+        render(
+            &mesh,
+            View::default(),
+            &RenderOptions {
+                mode: DisplayMode::Normals,
+                lighting: Lighting { exposure: 0.0, ..Lighting::STUDIO },
+                ..base
+            }
+        )
+        .unwrap(),
+        normals,
+        "normals are unlit"
+    );
+    // Wireframe: edge pixels in the edge colour, the rest dimmed.
+    let wire = render(&mesh, View::default(), &RenderOptions { mode: DisplayMode::Wireframe, ..base }).unwrap();
+    assert!(pixels(&wire).any(|p| p[3] == 255 && p[0] > 200 && p[2] > 230), "edge pixels");
+    assert!(pixels(&wire).filter(|p| p[3] == 255).any(|p| p[0] < 90), "dimmed surface pixels");
+    // UV checker: light and dark cells; without uvs, magenta.
+    let checker = render(&mesh, View::default(), &RenderOptions { mode: DisplayMode::UvChecker, ..base }).unwrap();
+    let lum: Vec<u32> =
+        pixels(&checker).filter(|p| p[3] == 255).map(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2])).collect();
+    assert!(lum.iter().max().unwrap() - lum.iter().min().unwrap() > 200, "cells differ");
+    let mut bare = mesh.clone();
+    bare.uvs.clear();
+    let magenta = render(&bare, View::default(), &RenderOptions { mode: DisplayMode::UvChecker, ..base }).unwrap();
+    assert!(pixels(&magenta).filter(|p| p[3] == 255).all(|p| p[0] > p[1] + 40 && p[2] > p[1] + 40), "magenta");
+    // Background: transparent corners by default; solid everywhere with alpha 255.
+    let shaded = render(&mesh, View::default(), &base).unwrap();
+    assert_eq!(shaded.rgba[3], 0);
+    let on_solid = render(&mesh, View::default(), &solid(base)).unwrap();
+    assert!(pixels(&on_solid).all(|p| p[3] == 255));
+    assert_eq!(&on_solid.rgba[..4], &[20, 20, 20, 255]);
+    // Exposure 0 is black; the untextured call equals an empty texture list.
+    let dark = render(
+        &mesh,
+        View::default(),
+        &RenderOptions { lighting: Lighting { exposure: 0.0, ..Lighting::STUDIO }, ..base },
+    )
+    .unwrap();
+    assert!(pixels(&dark).filter(|p| p[3] > 0).all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0));
+    assert_eq!(render_with(&mesh, &[], View::default(), &base).unwrap(), shaded);
+}

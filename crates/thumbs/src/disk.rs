@@ -34,8 +34,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Bump when any decoder's output changes, so older cache files are never shown.
 /// 2: PSD, camera raw, HEIF (sibling crates), PDF (pdfcraft-render), video poster frames
-/// (filmcraft-cli) and GLB/glTF/OBJ models (assetcraft-mesh) added.
-pub const RENDERER_VERSION: u64 = 2;
+/// (filmcraft-cli) and GLB/glTF/OBJ models (assetcraft-mesh) added. 3: models draw smooth
+/// normals, base colour textures and the studio light rig (3D viewer V0.2).
+pub const RENDERER_VERSION: u64 = 3;
 
 /// The `thumbs` kind's entry format (bump when [`encode`] changes).
 pub const FORMAT_VERSION: u16 = 1;

@@ -104,7 +104,7 @@ fn wait(view: &mut ModelView) -> Option<crate::model::Frame> {
 fn model_view_loads_once_and_renders_the_newest_request() {
     let mut view = ModelView::open(Arc::new(RealFs), models().join("soul_orb_icosphere.glb"));
     assert!(wait(&mut view).is_none(), "no frame before one is requested");
-    assert!(matches!(view.state(), ModelState::Ready { triangles } if *triangles > 300));
+    assert!(matches!(view.state(), ModelState::Ready { triangles, .. } if *triangles > 300));
     for k in 0..5 {
         view.request(View::default().orbit(k as f32 * 0.3, 0.0), 120, 80, true);
     }
@@ -170,4 +170,65 @@ fn dropping_a_model_view_cancels_a_load_that_has_not_read_the_file() {
     let _ = wait(&mut view);
     assert!(matches!(view.state(), ModelState::Ready { .. }), "{:?}", view.state());
     assert!(reads.load(std::sync::atomic::Ordering::Acquire) > 0);
+}
+
+// ---- V0.2: textures ----------------------------------------------------------------------------
+
+#[test]
+fn textures_decode_only_what_a_material_draws_and_never_fail_the_model() {
+    use crate::model::{Model, TEXTURE_MAX_SIDE, decode_textures, load_model};
+    let path = models().join("rune_crate_textured.glb");
+    let probe = assetcraft_probe::probe(&RealFs, &path).unwrap();
+    let model = load_model(&RealFs, &probe).unwrap();
+    assert_eq!(model.mesh.images.len(), 2);
+    let base = model.textures[0].as_ref().expect("the base colour map decodes");
+    assert_eq!((base.width, base.height), (64, 64));
+    assert!(model.textures[1].is_none(), "the metallic-roughness map is not drawn yet, so not decoded");
+    assert!(model.cost() > model.mesh.cost());
+    // Damaged image bytes, or a format the sniffer doesn't know: untextured, not an error.
+    let mut damaged = model.mesh.clone();
+    damaged.images[0].bytes.truncate(40);
+    assert_eq!(decode_textures(&damaged), vec![None, None]);
+    damaged.images[0].bytes = b"not an image at all".to_vec();
+    assert_eq!(decode_textures(&damaged), vec![None, None]);
+    // Big maps are shrunk to TEXTURE_MAX_SIDE (a 1,600 px PNG here).
+    let big = {
+        let mut png = Vec::new();
+        let mut enc = png::Encoder::new(&mut png, 1600, 40);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().unwrap().write_image_data(&vec![200u8; 1600 * 40 * 3]).unwrap();
+        png
+    };
+    let mut wide = model.mesh.clone();
+    wide.images[0].bytes = big;
+    let shrunk = decode_textures(&wide)[0].clone().unwrap();
+    assert_eq!(shrunk.width, TEXTURE_MAX_SIDE);
+    assert_eq!(shrunk.height, 26, "40 × 1024 / 1600, rounded");
+    let _ = Model { mesh: wide, textures: vec![Some(shrunk), None] };
+}
+
+#[test]
+fn the_textured_crate_thumbnail_shows_its_texture() {
+    let t = render_path(&RealFs, &models().join("rune_crate_textured.glb"), 128).unwrap();
+    // The front face is orange (178, 92, 48) with lighter rune lines: warm pixels, red over blue.
+    let warm = t.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] == 255 && p[0] > p[2] + 60 && p[0] > 110).count();
+    assert!(warm > 200, "warm textured pixels: {warm}");
+    // The preview thread reports the textures it decoded.
+    let mut view = ModelView::open(Arc::new(RealFs), models().join("rune_crate_textured.glb"));
+    let start = Instant::now();
+    while matches!(view.state(), ModelState::Loading) && start.elapsed() < Duration::from_secs(20) {
+        let _ = view.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(view.state(), ModelState::Ready { triangles: 12, textures: (1, 2) }), "{:?}", view.state());
+    view.request_look(View::default(), 64, 64, false, &crate::model::RenderOptions::new(64, 64));
+    let start = Instant::now();
+    let mut frame = None;
+    while frame.is_none() && start.elapsed() < Duration::from_secs(20) {
+        frame = view.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let frame = frame.expect("a frame");
+    assert!(frame.image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255 && p[0] > p[2] + 60));
 }

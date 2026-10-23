@@ -1,9 +1,10 @@
 //! 3D models (GLB, glTF, OBJ): parsed by `assetcraft-mesh`, drawn by its CPU rasterizer from
-//! the fixed 3/4 view, neutral grey (or the material's base colour) on transparent, then
-//! cropped to the drawn pixels. No GPU, so it works on worker threads and headless CI.
+//! the fixed 3/4 view, smooth-shaded with the base colour texture (or the material's colour,
+//! or neutral grey) on transparent, then cropped to the drawn pixels. No GPU, so it works on
+//! worker threads and headless CI.
 
 use super::Decoder;
-use crate::model::{RenderOptions, View, load};
+use crate::model::{RenderOptions, View, load_model};
 use crate::{Thumb, ThumbError};
 use assetcraft_fs::Services;
 use assetcraft_probe::{Format, Probe};
@@ -23,9 +24,14 @@ impl Decoder for Model {
     }
 
     fn render(&self, services: &dyn Services, probe: &Probe, max_side: u32) -> Result<Thumb, ThumbError> {
-        let mesh = load(services, probe)?;
+        let model = load_model(services, probe)?;
         let side = max_side.clamp(1, crate::SIDE_RANGE.1);
-        let image = assetcraft_mesh::render(&mesh, View::THREE_QUARTER, &RenderOptions::new(side, side))?;
+        let image = assetcraft_mesh::render_with(
+            &model.mesh,
+            &model.textures,
+            View::THREE_QUARTER,
+            &RenderOptions::new(side, side),
+        )?;
         let image = image.crop_to_content(0.04);
         Ok(Thumb {
             width: image.width,

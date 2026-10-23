@@ -11,11 +11,14 @@
 //!   ([`ImageData`]); decoding them is the caller's job (`assetcraft-thumbs`, which has the image
 //!   decoders and their allocation limits). Every count and size read from the file is checked
 //!   against [`Limits`] before anything is allocated; bad data is a [`MeshError`], never a panic.
-//! - [`render`] draws a [`Mesh`] with a z-buffered, flat-shaded (Lambert) software rasterizer
-//!   from an orbit [`View`] fitted to the mesh's bounds, onto a transparent background.
+//! - [`render`] and [`render_with`] draw a [`Mesh`] (the latter with decoded [`Texture`]s)
+//!   with a z-buffered software rasterizer from an orbit [`View`] fitted to the mesh's bounds:
+//!   smooth or flat shading under a three-point [`Lighting`] rig, bilinear base colour
+//!   textures, a [`DisplayMode`] (shaded, wireframe, normals, UV checker) and a
+//!   [`Background`].
 //!
-//! Not drawn yet (V0.2 draws normals and textures): textures, vertex colours, smooth normals.
-//! Not read: sparse accessors, Draco/meshopt compression (reported as
+//! Not drawn: the metallic-roughness map (V1, with an environment term), vertex colours,
+//! alpha. Not read: sparse accessors, Draco/meshopt compression (reported as
 //! [`MeshError::Unsupported`]), OBJ `vn` / `vt` / `.mtl`, glTF samplers (wrap is assumed) and
 //! texture coordinate sets other than `TEXCOORD_0`.
 
@@ -25,7 +28,7 @@ mod raster;
 
 pub use gltf::{parse_glb, parse_gltf};
 pub use obj::parse_obj;
-pub use raster::{Image, MAX_SAMPLES, RenderOptions, render};
+pub use raster::{Background, DisplayMode, Image, Lighting, MAX_SAMPLES, RenderOptions, Texture, render, render_with};
 
 use std::fmt;
 

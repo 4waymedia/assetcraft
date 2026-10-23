@@ -4,9 +4,23 @@ _Last updated: 2026-10-22_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
+## Now (2026-10-22)
+
+| Track                     | Where it stands                                                                                       | Next                                                                   | Owner                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------- |
+| 3D viewer V0              | V0.1 committed `0887ed8`; V0.2 built in the 3D cowork, **uncommitted** in the tree                    | Paul: `cargo xtask ci` + commit V0.2; then V0.3 (panel, `view.model*`) | Paul, 3D cowork        |
+| Stage 2 Organize          | T1 committed `e0bde69` (its Windows test fix rode in `bde947f`)                                       | T2 `file.rename`: apply, undo, `.xmp` moves                            | Claude                 |
+| Stage 1.5 API             | Docs `e2c9397`; C1 (step 2a) committed in `bde947f`; D-A1 decided, D-A2..A4 open                      | 2b (menus call `Session::enabled`), then C2                            | Claude; Paul (D-A2..4) |
+| App icon                  | I1 `7383a5e`, I2 `82a0649`, I3 decided                                                                | Paul: check the taskbar, Alt-Tab and Explorer icon on Windows          | Paul                   |
+| Stage 4 Storyboard        | Steps 1–5, G1, TC1, A1, PR3, S1–S2, B1–B9 done                                                        | B4b (range re-cut with Tone); presets PR2                              | Claude                 |
+| Track analysis            | A1, A2a, A2b done; AN1.2 (FilmCraft tempo PR) built                                                   | Paul: CI, push, open the AN1.2 PR; Claude: A2c with cache C2           | Paul, Claude           |
+| EffectCraft in AssetCraft | E1 `2ec05ef`                                                                                          | E2 `.ecproj` thumbnails                                                | Claude                 |
+
+Open decisions for Paul: D-A2, D-A3, D-A4, D-API1 (Stage 1.5); D-V2, D-V3 (3D viewer); D-C3, D-C5, D-C6 (cache); B9a; SF1; the submission-readiness doc's D-S2–D-S5 (project doc).
+
 ## 3D viewer V0 (Paul, 2026-10-20): the AssetCraft side of ModelCraft
 
-- **Scope:** the Preview panel's 3D viewer and the mesh crates it rests on. Behaviour reference: gltf-viewer.donmccurdy.com (MIT; behaviour only, no code). **Goal served:** AssetCraft as the viewer for Paul's TRELLIS exports, and `crates/mesh` + the renderer as the shared crates ModelCraft (its own cowork; plan in the project doc `modelcraft-plan.md` §9) will depend on. **Immediate area:** V0.1 (textures and normals in `crates/mesh`).
+- **Scope:** the Preview panel's 3D viewer and the mesh crates it rests on. Behaviour reference: gltf-viewer.donmccurdy.com (MIT; behaviour only, no code). **Goal served:** AssetCraft as the viewer for Paul's TRELLIS exports, and `crates/mesh` + the renderer as the shared crates ModelCraft (its own cowork; plan in the project doc `modelcraft-plan.md` §9) will depend on. **Immediate area:** V0.2 (draw textures, normals and display modes) built; V0.3 (the panel and its commands) next.
 - **Decision (Paul, 2026-10-20):** ModelCraft is built in a separate cowork; this repo only builds the viewer (V0–V2) and the shared crates.
 - **Corpus:** five `trellis.cpp v0.8.1` GLBs in `_dev-data\modelcraft\trellis\` (24k–50k tris, 1 primitive, `POSITION`/`NORMAL`/`TEXCOORD_0`, u32 indices, base colour + metallic-roughness PNG 2048²/4096², 15–43 MB, Y up, normalized to a 1-unit box); `measurements.json` beside them is the reference for `asset.meshInfo`; `_previews\` holds stills from a Python reference renderer (`tools\glb_render.py`: fit to 92 % of the frame, 3-point light 1.0 / 0.55 / 0.4 + 0.42 ambient, gamma 1.25).
 
@@ -26,7 +40,8 @@ _Last updated: 2026-10-22_
 | Step | Change                                                                                                                                                                                                                                  | Tests / exit                                                                                              | Status |
 |------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|--------|
 | V0.1 | `crates/mesh`: read `NORMAL` and `TEXCOORD_0` into `Mesh.normals` / `Mesh.uvs` (per vertex, optional); `Mesh.materials` (`baseColorFactor`, `baseColorTexture` → image index, `doubleSided`, `alphaMode`); `Mesh.images` as undecoded bytes + MIME (GLB bufferView or data URI, bounded by `Limits.max_image_bytes`, new); `triangle_material` replaces `triangle_color`. No new deps in L1: decoding stays in `thumbs` (L2, `image` crate, existing `MAX_DECODE_ALLOC` and caught panics) as `Textures::decode(&Mesh)` | mesh: normals/uvs round trip on the fixtures, hostile image refs (bad bufferView, oversize, unknown MIME → `Unsupported`, never a panic); thumbs: decode one texture; `test_data/make_model_fixtures.py` gains a textured cube | **built (2026-10-20), Paul to run CI** |
-| V0.2 | `raster.rs`: smooth shading from vertex normals (face normal fallback), bilinear texture sampling with wrap, `Lighting {key, fill, rim, ambient, exposure}` with the reference rig as default, `Background` (transparent / solid), `DisplayMode { Shaded, Wireframe, Normals, UvChecker }` | render fixtures: textured cube pixel checks, wireframe draws edges only, normals mode colours; the contact sheet re-rendered from the CLI matches the Python stills by eye | |
+| V0.2 | `raster.rs`: smooth shading from vertex normals (face normal fallback), bilinear texture sampling with wrap, `Lighting {key, fill, rim, ambient, exposure}` with the reference rig as default, `Background` (transparent / solid), `DisplayMode { Shaded, Wireframe, Normals, UvChecker }` | render fixtures: textured cube pixel checks, wireframe draws edges only, normals mode colours; the contact sheet re-rendered from the CLI matches the Python stills by eye | **built (2026-10-22), Paul to run CI** |
+| V0.3a | Low-end target (Paul, 2026-10-22): `ModelView` times every frame; drag frames pick a resolution scale (and a triangle stride) so the next one fits `DRAG_BUDGET` ≈ 25 ms, the panel upscales them (`fit_at_most` gains an upscale allowance for fast frames), the release frame is full size and quality; full-window preview the same. Target: ≥ 30 fps orbit at a 1024 px panel with the wagon on **one** thread (tested in the container with `threads = 1`, a fair stand-in for a slow laptop core) | thumbs: the scale converges on a slow fake clock; UI: a fast frame smaller than the rect is drawn filling it; perf numbers in STATUS | next, after the V0.2 CI |
 | V0.3 | Preview panel + commands: `view.model {turntable?, mode?, background?, lighting?}` (APP, saved in prefs), `view.modelState` (READ); turntable on egui's clock; a small overlay bar (mode, turntable, reset); full-window (Space) preview orbits too | UI: command round trip, turntable advances yaw on a simulated clock, Space preview takes drag | |
 | V0.4 | `asset.meshInfo {path}` (READ, `crates/engine`) → counts, bounds, materials, images (size, MIME, bytes), warnings; `assetcraft-cli info <model>... [--json]` | engine + CLI tests; on the five orc GLBs the counts equal `measurements.json` (`totalVertices`, `totalTriangles`, `images[].w/h`) | |
 | V0.5 | Web gate: `cargo check -p assetcraft-mesh --target wasm32-unknown-unknown` in `cargo xtask ci` (skipped with a message when the target isn't installed, like `deny`) | ci passes with and without the target                                                                     | |
@@ -35,7 +50,7 @@ _Last updated: 2026-10-22_
 
 | ID   | Decision                                           | Recommendation                                                                                                                          | Needed by |
 |------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|-----------|
-| D-V1 | CPU rasterizer vs the plan's wgpu renderer         | **Keep the CPU rasterizer for V0–V1**: headless CI, thumbnail workers and the web build all work without a GPU device; 50k-tri textured frames at panel size are well inside budget. wgpu only if the 2048 px full-window preview drags on Windows (measure in V0.3) | V0.1 |
+| D-V1 | CPU rasterizer vs the plan's wgpu renderer         | **Decided (Paul, 2026-10-22, on this recommendation): keep the CPU rasterizer for V0–V1** (deviation noted at `docs/assetcraft-plan.md` Stage 1): headless CI, thumbnail workers and the web build all work without a GPU device. **Revised the same day (Paul: "I have a very high end system… we want to build this to run on low end systems as well"):** the CPU rasterizer stays as the reference and for thumbnails, CLI, CI and the no-GPU fallback; interactive speed on low-end machines comes in two steps: **V0.3a** time-budgeted drag frames (resolution + stride chosen to fit ≈ 25 ms, upscaled by the panel; works on one core and on wasm), then **V1** a wgpu viewport for the Preview panel (egui_wgpu paint callback; the same `Scene`: camera, light rig, display modes; integrated graphics and WebGL2/WebGPU draw 50k textured triangles in < 1 ms). The V0.2 threads remain for the CPU path | V0.3a |
 | D-V2 | Where decoded textures live                        | **`thumbs` (L2)**, so `crates/mesh` stays dependency-free and ModelCraft can take it as is; decoded textures are handed to `render` as a slice | V0.1 |
 | D-V3 | Metallic-roughness map                             | **Read and keep it, draw it in V1** (needs an environment term to look right); V0 draws base colour only, like the Python stills | V0.1 |
 
@@ -43,23 +58,31 @@ _Last updated: 2026-10-22_
 
 **V0.1 as built (Linux container, Rust 1.97, `crates/mesh` alone):** `Mesh` gains `normals`, `uvs`, `materials` (`Material { base_color_image, metallic_roughness_image, double_sided }`, parallel to `colors`) and `images` (`ImageData { mime, bytes }`, encoded, never decoded in L1); `Limits.max_image_bytes` (96 MiB, per image and total; an image over it is dropped, the geometry still draws); `Mesh::material_of`, `image_bytes`, `cost` counts the new data; `slot_index` replaces `color_index` (dedup by colour + material). `gltf.rs`: `read_vec::<N>` replaces `read_positions`; `NORMAL` / `TEXCOORD_0` read per primitive (float or normalized integers), a count mismatch or malformed accessor drops the attribute instead of failing the primitive; normals go through the node's 3×3 and are re-normalized (`[0,0,0]` = none); mixed primitives keep both vectors parallel to positions; `materials → textures → images` resolve `baseColorTexture` and `metallicRoughnessTexture` (`texCoord` ≠ 0 ignored); images from a `bufferView`, a base64 data URI (MIME from the URI when the image has none) or a relative external file through the resolver, each copied once. **Pixel-identical to before:** the colour slot stays grey for "texture over white factor" until V0.2 samples the texture, so `RENDERER_VERSION` and the disk cache are untouched. `raster.rs` unchanged. Tests: 14 in `crates/mesh` (5 new: transform + embedded image, bounded and bad image refs incl. escaping URI and `texCoord` 1, mismatched attributes dropped, mixed primitives in both orders, the fixture); probe and thumbs library lists gain the fixture. New sample `rune_crate_textured.glb` (3.4 KB: cube with per-face normals/UVs, 64² base colour + 16² MR PNG as bufferViews, the orc files' shape); the other three samples are byte-identical. On the warg pup: 44,824 / 48,052 / images 8,343,620 + 4,252,427 bytes, exactly `measurements.json`; parse 9 ms, flat 512² render 30 ms (release).
 
-**Next action (Paul, Windows):** `cargo xtask ci` (expect 14 mesh tests, the probe and thumbs model tests green, layers unchanged), then commit:
+**V0.1 committed** (`0887ed8`, 2026-10-20). Its one Windows CI failure, finding F-V01 (`assetcraft-fs` walk count 35 → 36 for the new fixture), was fixed in `bde947f`.
+
+**V0.2 as built (Linux container, Rust 1.97, `crates/mesh` + `crates/thumbs` with the model fixtures):** `raster.rs` draws per pixel: smooth shading from vertex normals (perspective-correct, flat when a triangle lacks one; `RenderOptions.smooth`), bilinear base colour textures with wrap (`Texture`, sRGB8, a const sRGB→linear table), a three-point `Lighting` rig fixed to the camera (`STUDIO` = key 1.0 / fill 0.55 / rim 0.4 / ambient 0.42 / exposure 1, the reference stills' look), `DisplayMode` Shaded / Wireframe (edges over a 20 % surface, hidden lines removed by the z-buffer) / Normals (unlit) / UvChecker (8 × 8, tinted by u and v; magenta without UVs), `Background` Transparent / Solid; `render_with(mesh, textures, view, opts)` with `render` = no textures. Both faces still lit. `thumbs::model`: `Model { mesh, textures }`, `decode_textures` (format sniffed from the bytes, `image_limits()`, shrunk to `TEXTURE_MAX_SIDE` 1024; only images a material draws, so the metallic-roughness map is skipped until V1: warg pup load 1.9 s → 0.13 s), `load_model`, `render_view(model, view, w, h, fast, look)`, `ModelView::request_look`, `ModelState::Ready { triangles, textures: (decoded, total) }`; the thumbnail decoder renders textured; `RENDERER_VERSION` 2 → 3 (every model thumbnail re-renders once). `gltf.rs` / `obj.rs` unchanged. Tests: mesh 14 → 19 (smooth vs flat gradient, threads identical, bilinear + wrap + colour multiply + missing texture, the four modes and both backgrounds, the const table vs `powf`); thumbs 5 → 7 model tests (decode rules incl. damaged bytes and shrinking; textured thumbnail and preview-thread texture count). Timings, release, 2-core container, warg pup 48k tris at 512² 2×: shaded 115 ms, wireframe 110, normals 66, checker 100; fast frame 45 ms.
+  - **Finding V2a (Paul, 2026-10-22: "sluggish on orc-wagon-team.glb"):** measured, the wagon is no outlier (≈ 25 % more covered pixels than the pup); the cost is the single-threaded per-pixel loop at panel size: 1024 × 768 drag frames 100 ms, full frames 300 ms on 2 cores. **Fix (built):** `RenderOptions.threads`: the rasterizer draws row bands on scoped threads (each band walks every triangle, rejects those outside its rows after three lookups, writes only its own samples; the image is bit-identical for any count, test over 1 / 2 / 3 / 7 / 64 / 500; a thread that can't spawn is drawn inline; `wasm32` forces 1). `render_view` sets `threads = preview_threads()` (all cores up to `PREVIEW_MAX_THREADS` 16); thumbnails stay at 1 (the pool is the parallelism). On Paul's 16-core 9950X3D a 300 ms frame should land near 30–40 ms. Owner: Claude. **Still to do in V0.3:** drag frames at a capped resolution, upscaled by the panel (`fit_at_most(.., 1.0)` never upscales today), which makes drag cost independent of panel size.
+  - **Deviations:** the wireframe is edges over a dimmed surface, not bare lines (readable on a 50k-tri mesh; the reference viewer draws bare lines). `doubleSided` is read but every face is still drawn and lit, as before. Alpha is ignored.
+  - **Opportunities (owner: Claude):** O-V1 full-size textures in the full-window preview (`TEXTURE_MAX_SIDE` is global); O-V2 the metallic-roughness map with an environment term (V1); O-V3 wireframe line width in device pixels for HiDPI (V0.3, with the panel's pixels-per-point).
+
+**Next action (Paul, Windows):** `cargo xtask ci` (expect 19 mesh tests, 7 thumbs model tests, `heic` run, layers unchanged), look at the textured thumbnails in `props/models/` and an orc GLB in the Preview panel (drag to orbit: smooth, textured), then commit:
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
 cargo xtask ci
+cargo run -p assetcraft --release
 ```
 
 ```powershell
 Set-Location F:\Script-Projects\ArtCrafting\assetcraft
-git add -A
-git commit -m "3D viewer V0.1: mesh reads normals, UVs, materials and embedded images (not drawn yet); textured cube fixture"
+git add crates/mesh crates/thumbs STATUS.md
+git commit -m "3D viewer V0.2: smooth shading, base colour textures, studio light rig, display modes, backgrounds, threaded preview frames; RENDERER_VERSION 3"
 git push
 ```
 
-Then Claude writes V0.2 (draw them).
+Then Claude writes V0.3 (the Preview panel's controls and `view.model*` commands).
 
-## Current: Stage 4 Storyboard mode (Paul, 2026-10-15), step 1 done
+## Stage 4 Storyboard mode (Paul, 2026-10-15): steps 1–5, G1, TC1, A1, PR3, S1–S2, B1–B9 done; B4b and presets next
 
 ### Bug list (Paul, 2026-10-17): Strip view and timeline
 
@@ -98,7 +121,7 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
 - [x] 5. Quick fill and Watch your Cut (design 4a). Crate: `fill::auto_fill` (empty clips in Cut order, unused assets first, then the list repeats) and `fill::clear`. Engine: `storyboard.view` gains `fill`; `storyboard.autofill {assets?}` (EDIT; default = the Organizer folder's files, ≤ `MAX_AUTOFILL_ASSETS` 10,000) and `storyboard.clear` (EDIT), each one undo step; transport `storyboard.play {from?}`, `.pause {at?}`, `.seek {seconds}` (APP; `Transport {playing, position}` in `storyboard.state`, clamped to the Cut, play from the end starts over, a new storyboard rewinds); `storyboard.place` / `.autofill` leave the next empty clip selected, or nothing once every clip is filled. UI (`strip_view.rs`): Quick fill view (Content panel 360 px with the NEXT / REPLACING card; clicking an asset places it in the selected clip, else the next empty one; Viewer shows the target's brief in a dashed `#4da3ff` frame, then "All n clips filled" + ▶ Watch your Cut; controls `n / N filled`, 180 × 4 progress bar, Undo, Auto-fill rest, Clear); transport ⏮ ▶/⏸ and live timecode in the mode bar, Space toggles in Storyboard mode; the playhead runs on egui's clock from the recorded start and pauses at the end; the Viewer (Strip, Quick fill) shows the clip under the playhead and the Shot map rings it; Re-cut animates clip widths over 0.4 s and shows a 3.8 s toast instead of a status message. Tests: 1 crate, 4 engine, 3 UI (click-to-fill and replace via stable widget ids, Space play/pause and stop at the end on a simulated clock, toast expiry); the opt-in screenshot adds `-fill.png` and `-fill-done.png`
   - **Deviations:** Watch your Cut is silent (track audio with step 8); the playhead runs on the window's clock, not an audio clock, so long Cuts may drift against music later (owner: Claude, revisit with step 8); suggested angles show "none yet" until Stage 5
 - [ ] Presets (Paul, 2026-10-15), ahead of step 6: spec [docs/storyboard-presets.md](docs/storyboard-presets.md). **Decisions:** 20 starting presets, 5 each at 30 s / 60 s / 90 s / 2 min (P1); 20 different songs, downloaded by Paul from Motion Array (P2); menu groups them Style › Preset (P3). Recommendation R1: the audio stays out of the repo (presets carry timing and track facts, the user links their own copy). Code steps PR1 (preset mechanics: built in Claude's sandbox, not handed over), PR2 (preset file format + loader + Style › Preset menu, next), PR3 (track audio, pulled forward from step 8), PR4 (the 20 files)
-  - **Waiting on Paul:** confirm the 5 styles (proposal: Trailer, Teaser / promo, Social reel, Character intro, Music montage), confirm the Motion Array licence (O6), download the 20 songs into `_dev-data\assetcraft\preset-tracks\` and connect that folder
+  - **Updated 2026-10-22:** the songs are in `_dev-data\assetcraft\preset-tracks\` (24 analysed, see G1), and the five proposed styles were replaced by the six pacing presets on the Start screen (S2b: Trailer, Energetic, Cinematic, Calm, Family, Hero). **Still waiting on Paul:** the Motion Array licence (O6)
 - [x] G1 · Generate a storyboard from a track (Paul, 2026-10-15: "focus on generating the storyboard clips based on the audio"): cue map v1 (`crates/storyboard/src/cuemap.rs`), generator with the four pacing profiles (`generate.rs`), `storyboard.generate` / `storyboard.cueMaps` (`crates/engine/src/generate_cmd.rs`; `GeneratedFrom` kept in undo snapshots), File → New Storyboard from Track ▸, empty-state buttons, Pacing and Length pickers that regenerate; bridge analyser `tools/cuemap.py` wrote cue maps for Paul's 24 usable tracks in `_dev-data\assetcraft\preset-tracks\`. Tests: 6 storyboard-crate (cue map round trip and hostile input, timeline across a splice, every profile × length valid and exact, profiles differ, fade fit, no fit), 3 engine, 1 UI; all 480 real combinations generate (spec §9a). The shelved in-code preset catalog (design placeholders) stays out; presets will be files drafted from cue maps (A7)
   - **Finding W2 (Windows `cargo xtask ci`, 2026-10-15, fixed):** `generate_tests` failed on Windows (2 of 71): `storyboard.generate` checked `Path::is_absolute`, which is false for `\music\…` on Windows, and the tests compared against `/music/song.mp3` where Windows joins `\music\song.mp3`. Fix: `has_root` (the `file.openIn` rule, `commands.rs:583`) and the expected path built with `Path::join`. Owner: Claude; **passes on Windows (Paul, 2026-10-16)**
   - **Deviation:** the analysis comes from a Python bridge until A1–A4 (pure Rust) replace it; the cue map format and everything downstream stay
@@ -126,13 +149,13 @@ Plan: [docs/storyboard-plan.md](docs/storyboard-plan.md). Design: [docs/design/s
   - **AN1.1 · FilmCraft issue (2026-10-18), drafted:** tempo candidates (×½/×2), double-time check, BPM from beat slope, steady/free rhythm, additive on `remix::Analysis`. Text in `filmcraft/target/handoff/issue-tempo-alternatives.md`. Filed by Paul on storytold/filmcraft (2026-10-18).
   - **AN1.2 · FilmCraft PR (2026-10-18), built:** `feat/tempo-alternatives` off `upstream/main` 48088e3 (remix.rs unchanged since 09aaf9bf): `remix::Analysis.tempo` (`TempoCandidate`, `Rhythm`, `Tempo`), double-time check on a linear-magnitude flux (threshold 0.7: the log flux read `test_music`'s quiet hats at 0.82 and doubled 90 → 180), BPM from grid-numbered beat slope, gap-tolerant interval CV. 5 new tests; audio-dsp 128 passed, engine remix 4 passed, clippy, fmt, layers green. Patch and PR text in `filmcraft/target/handoff/`. Next: Paul runs the full `cargo xtask ci` (wasm not run here), commits, pushes, opens the PR. Owner: Paul (ci, push, PR), Claude (review replies)
   - **Next after AN1.1: C2 with A2c**: `analysis` (cue map v1) and `waveforms` kinds in the shared `Crafting` cache, formats documented for FilmCraft. Owner: Claude
-  - **Cache spec v2 (Paul, 2026-10-16: "follow the same principles and structures... run on the web as well"):** [docs/design/cache.md](docs/design/cache.md) from a survey of all 15 storytold repos: storage classes per OS and web, layout, keys, entries, concurrency, budgets, `cache.*` / `storage.*` commands, shared cache with sandbox fallback, `craft-cache` crate (C1–C5), decisions D-C1–D-C6, findings G1–G6 for sibling apps. v1 moved to docs/archive/cache-proposal-v1.md. **Waiting on Paul: D-C1–D-C6** (D-C1 and D-C4 before A2c)
+  - **Cache spec v2 (Paul, 2026-10-16: "follow the same principles and structures... run on the web as well"):** [docs/design/cache.md](docs/design/cache.md) from a survey of all 15 storytold repos: storage classes per OS and web, layout, keys, entries, concurrency, budgets, `cache.*` / `storage.*` commands, shared cache with sandbox fallback, `craft-cache` crate (C1–C5), decisions D-C1–D-C6, findings G1–G6 for sibling apps. v1 moved to docs/archive/cache-proposal-v1.md. D-C1, D-C2 and D-C4 decided (Paul, 2026-10-16). **Waiting on Paul: D-C3, D-C5, D-C6** (recommendations in docs/design/cache.md §decisions)
   - **Decision (Paul, 2026-10-16): analysis results go in a cache, like Adobe Bridge**, not beside the tracks; the cache is to be one design across the Crafting apps and Windows, Linux, macOS and web. Proposal: [docs/design/cache.md](docs/design/cache.md). Owner: Claude (proposal), Paul (decision)
   - **Next (Paul, 2026-10-16): the Rust analyser A2–A4** ([docs/track-analysis.md](docs/track-analysis.md)), replacing the Python stand-in's cue maps (finding T2). S2d-3 zoom and S2e output settings after it. Owner: Claude
   - **Logged for the future (Paul, 2026-10-16): O9 Storyboard in FilmCraft** once Storyboard mode is finished: the Start screen, presets and shape, and the full-width timeline; first survey FilmCraft under its upstream rules, then decide D-O9 (shared crates vs the interchange format). Owner: Paul (priority), Claude (survey and port)
   - **Logged for the future (Paul, 2026-10-16): O8 themed composite shots** (a theme = a set of shots, titles, background, effects, fonts and edit styles; spec, the six styles as first built-in themes, decision D-O8 on `ShotType::Theme` vs a clip `theme` field; see the plan). Owner: Paul (priority), Claude (spec)
   - **Logged for the future (Paul, 2026-10-16): O7 custom sequences** (a group of clips with effects and text, selectable on the Start screen or included in a storyboard; an export item from FilmCraft and EffectCraft if they don't have it yet). See the plan's Opportunities. Owner: Paul (priority), Claude (spec)
-  - **Opportunity API1 (Paul to choose):** `assetcraft-cli batch <script.json>` (one session, many commands) before the MCP server, so presets can be scripted. Owner: Claude
+  - **Opportunity API1:** `assetcraft-cli batch <script.json>` (one session, many commands). **Covered by C3** (`run <script.jsonl | ->`, docs/cli.md §4, 2026-10-22). Owner: Claude
 - [ ] Track analysis (Paul, 2026-10-15), first, because presets and Shape to music need it: spec [docs/track-analysis.md](docs/track-analysis.md), from Paul's draft ([docs/design/audio-analysis-draft.md](docs/design/audio-analysis-draft.md)). Reuse: `soundcraft-audio-io` (decode, peaks), `soundcraft-dsp::offline::detect_transients` (onsets), `soundcraft-time::TempoMap`, `filmcraft-audio-dsp` loudness, all compiled in as pinned git dependencies (no SoundCraft install needed). Build: tempo, beat tracking, downbeats, sections, edit planner. aubio (GPL-3.0) is out. Phases A1–A8; A1 next
   - **Decisions (Paul, 2026-10-15):** AD1 yes (MPL-2.0 allowed for `symphonia*` only, crate-scoped in `deny.toml`, lands with A1); AD2 agreed (A1→A9, Fit to length added as A5); AD3 agreed (no tempo ramps in v1); AD4 create the pacing profiles Calm, Cinematic, Energetic, Trailer, Custom
   - **Fit to length** (find the best ending for a 30/60/90/120 s preset, then fade or edit to the song's ending) prototyped on 3 tracks; previews in `_dev-data\assetcraft\preset-tracks\_previews\` for Paul to judge (spec §6.5)
@@ -147,7 +170,7 @@ Paul's scan of `ArtCrafting\cli-matrix\` (2026-10-22): designcraft and effectcra
 
 | ID   | Decision needed                                   | Recommendation                                                                 | Owner | Status |
 | ---- | ------------------------------------------------- | ------------------------------------------------------------------------------ | ----- | ------ |
-| D-A1 | Control-channel auth: suite has none, plan says token | No auth with `--control`; token required with `--control-token-file` (PipelineCraft path) | Paul | open |
+| D-A1 | Control-channel auth: suite has none, plan says token | No auth with `--control`; token required with `--control-token-file` (PipelineCraft path). Plan Stage 1.5 text aligned | Paul | **decided 2026-10-22** (Paul: "resolve the conflicts with your suggestions") |
 | D-A2 | Running-app flag `--bridge` or `--connect`        | `--bridge` (filmcraft, effectcraft)                                             | Paul  | open   |
 | D-A3 | Unknown parameter keys                            | Refuse, naming accepted keys                                                    | Paul  | open   |
 | D-A4 | `write-user-file` over MCP / `serve` without `--automation-write-root` | Refuse                                                     | Paul  | open   |
@@ -158,7 +181,7 @@ Paul's scan of `ArtCrafting\cli-matrix\` (2026-10-22): designcraft and effectcra
 
 **Verified (Linux container, Rust 1.97, 2026-10-22):** `cargo xtask ci` → fmt, clippy `-D warnings`, tests (108 engine, 17 CLI; whole workspace green), `clippy (heic)` + `test (heic)`, layers ok (15 crates), deny skipped (no cargo-deny here); `all checks passed`.
 
-**Next action (Paul, Windows):** `cargo xtask ci` (expect 108 engine tests, 17 CLI tests), try `cargo run -q -p assetcraft-cli -- describe nav.back` and `commands storyboard`, then commit (block in the chat).
+**C1 committed** in `bde947f` (2026-10-22), with the Windows fix for `rename_tests` and F-V01; see the Log note on that commit's title. **Next:** 2b, then C2 (owner Claude). **Paul, Windows (optional):** `cargo run -q -p assetcraft-cli -- describe nav.back` and `commands storyboard`.
 
 ## Stage 2 starts: Tools menu, Batch Rename, ratings and labels (Paul, 2026-10-21)
 
@@ -166,7 +189,7 @@ Decisions (Paul, 2026-10-21): metadata goes to **XMP sidecars only** (image byte
 
 | Step | What                                                                                                                       | Writes files?      | Owner                       | Status |
 | ---- | -------------------------------------------------------------------------------------------------------------------------- | ------------------ | --------------------------- | ------ |
-| T1   | Tools menu; Batch Rename… dialog (presets, template + token buttons, start number, live preview); `file.renamePreview` (READ) | no                 | Claude writes, Paul commits | built: patch `t1-batch-rename-preview.patch` |
+| T1   | Tools menu; Batch Rename… dialog (presets, template + token buttons, start number, live preview); `file.renamePreview` (READ) | no                 | Claude writes, Paul commits | done, `e0bde69` (Windows test fix in `bde947f`); Paul to try Tools ▸ Batch Rename… by hand |
 | T2   | `file.rename`: apply, never overwrite, `.xmp` moves with the file, undo; save / delete presets                              | yes (moves)        | Claude                      | next   |
 | T2b  | Find & Replace (text, optional regex), case (lower / UPPER / Title), extension case                                         | yes (moves)        | Claude                      |        |
 | T2c  | Destination: Rename in place / Move to folder / Copy to folder (folder picker); copies never overwrite, moves take their `.xmp`; dry run, undo | yes (moves, copies) | Claude                     |        |
@@ -184,8 +207,8 @@ Opportunity (owner: Claude, R1): `{date}` needs the capture date; AssetCraft has
 | --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------ |
 | I1  | `assets/app-icon/`           | Same files and sidecars as FilmCraft's: `assetcraft.svg` (2048 px trace), `-small.svg`, `-1024.png`, `-macos-512.png`, `.ico`, `.icns`, `hicolor/` (8 sizes + scalable), README, LICENSE.txt; ATTRIBUTION.md row. Garnet `#9d354b`, ink `#0b0b0c`, paper `#efe9dc`. Sources (elephant + raven) in `_dev-data\assetcraft\app-icon\` | Claude writes, Paul commits | done, `7383a5e` |
 | I1a | Tools                        | `tools/vectorize_icon.py` (three-colour key + vtracer, MIT/Apache tool, not bundled; replaces craftrules' potrace-based `vectorize_tile.py`) and `packaging/icons.py` (resvg + Pillow; packs `.ico`/`.icns` on Windows too) | Claude                      | done   |
-| I2  | Wire it in                   | `apps/assetcraft/build.rs` embeds `assetcraft.ico` (as FilmCraft `apps/filmcraft/build.rs`); `ViewportBuilder::with_icon` from the 256 px / macOS 512 PNG; `with_app_id` on Linux | Claude writes, Paul commits | built: patch `i2-app-icon.patch` (2 tests, clippy, fmt, layers green on Linux); Paul to check the taskbar + Explorer icon on Windows |
-| I3  | App id                       | Using `ai.storyteller.assetcraft` (kept 2026-10-20 with the elephant) for suite parity (file names in `hicolor/`, future `with_app_id`). If AssetCraft should carry its own reverse-DNS id, rename before I2 | Paul (decide)               | open   |
+| I2  | Wire it in                   | `apps/assetcraft/build.rs` embeds `assetcraft.ico` (as FilmCraft `apps/filmcraft/build.rs`); `ViewportBuilder::with_icon` from the 256 px / macOS 512 PNG; `with_app_id` on Linux | Claude writes, Paul commits | done, `82a0649`; Paul to check the taskbar, Alt-Tab and Explorer icon on Windows |
+| I3  | App id                       | `ai.storyteller.assetcraft` now, for suite parity (`hicolor/` names, `APP_ID` in `apps/assetcraft/src/main.rs`, shipped in `82a0649`). Supersedes the submission-readiness doc's D-S1 ("keep own ids until a transfer"), updated there | Paul                        | **decided 2026-10-22** |
 
 ## Suite opportunities (2026-10-20)
 
@@ -212,7 +235,7 @@ Opportunity (owner: Claude, R1): `{date}` needs the capture date; AssetCraft has
 
 **Next action (Paul, Windows, optional):** set `ASSETCRAFT_EFFECTCRAFT_EXE` to the fork's `target\release\effectcraft.exe`, run AssetCraft, right-click an `.ecproj` → Open In ▸ EffectCraft.
 
-## Stage 1.5 (API): step 1 done, rest after Storyboard
+## Stage 1.5 (API): steps 1 and 2a (C1) done; 2b next
 
 Plan: the Stage 1.5 section of [docs/assetcraft-plan.md](docs/assetcraft-plan.md), adopted 2026-10-15 from PipelineCraft spec §16.7. The 2026-10-14 draft is in [docs/archive/assetcraft-api.md](docs/archive/assetcraft-api.md).
 
@@ -227,7 +250,7 @@ Plan: the Stage 1.5 section of [docs/assetcraft-plan.md](docs/assetcraft-plan.md
 
 **Opportunity (owner: Paul, in the PipelineCraft repo):** record D8 as decided (B + AssetCraft's `remoteAllowed`) in `pipelinecraft/docs/spec/15-decisions.md`, and consider `remoteAllowed` (or a hub-side per-app deny list) as a suite field, since the hub's MCP door should honour it too.
 
-**Next action (Paul, Windows):** run `cargo xtask ci`, expect `layers ok (11 crates)` and `all checks passed`, then commit (blocks in the chat). The manual Stage 1 app checks below are still open and can run alongside.
+**Committed** (step 1 with storyboard step 1, 2026-10-15; every later commit builds on it). The manual Stage 1 app checks below are still open.
 
 ## Stage 1 (Every format, fast): done; Windows CI passes (2026-10-15); manual app checks open
 
@@ -309,14 +332,14 @@ Test note: tests use the real `PATH`, so a `filmcraft-cli` on Paul's PATH is exe
 
 **Verified (Linux, Rust 1.97, step 8 + Stage 0 deferred items, 2026-10-14):** `cargo xtask ci` passes: fmt, clippy `-D warnings`, 246 tests (plus 1 ignored; 235 before the Stage 1 review fixes, 244 before the HEIC opt-in), then `clippy (heic)` and `test (heic)`: 159 tests over thumbs, engine and ui-egui with `--features assetcraft-thumbs/heic`, layers ok (10 crates), deny `licenses ok, sources ok` (cargo-deny 0.20.2); `cargo build -p assetcraft -p assetcraft-cli` and `cargo build -p assetcraft --features heic` succeed. 12 new tests: 5 catalog/discovery (`open_in.rs`, Windows candidate rules tested on every platform), 1 argv/no-shell (`launch.rs`), 4 `file.openIn` / `app.openInTargets` / F5 re-discovery with a fake locator and `RecordingLauncher` (`open_in_tests.rs`), 1 UI menu (`stage1_tests.rs`), 1 exit test (`tests/stage1_exit.rs`). A one-off manual check with `SystemLauncher` and a stand-in script received `shot,final ü.png` as one intact argv item. **Not verified here:** the `cfg(windows)` code (`known-folders` lookup, `DETACHED_PROCESS` flags) can't be compiled in this container; it is small and mirrors existing patterns, but Paul's Windows `cargo xtask ci` is its first build.
 
-**Next action (Paul, Windows):**
+**Open manual checks (Paul, Windows; written 2026-10-14, not yet recorded as done):**
 1. `cargo xtask ci` (now ends with `xtask: deny`, skipped with a message unless cargo-deny is installed) and `cargo run -p assetcraft --release`.
 2. Open In: with any sibling installed from its MSI (or `ASSETCRAFT_PHOTOCRAFT_EXE=C:\path\photocraft.exe`), select a PNG → File → Open In ▸ PhotoCraft opens it; the same from the right-click menu; a missing app is greyed with the "not installed" tooltip; install one while AssetCraft runs, press F5, it becomes enabled; a file named `shot,final.png` and one with spaces/ünïcode open correctly; closing AssetCraft leaves the sibling running.
 3. Known folders with OneDrive: if Desktop/Documents/Pictures are redirected (OneDrive backup or a moved Pictures folder), the Folders panel and Go → Known Folders open the real locations (`known-folders` → `SHGetKnownFolderPath`); with no redirect, nothing changes.
 4. HEIC opt-in: `cargo run -p assetcraft --release` shows `lantern_dusk.heic` (and your iPhone photos) as a type icon, and View → Formats ▸ HEIC is greyed with the rebuild tooltip. Then `cargo run -p assetcraft --release --features heic`: still a type icon until View → Formats ▸ HEIC / HEIF thumbnails (HEVC) is ticked, then they render; untick → type icons again (no stale thumbnails from the disk cache); restart keeps the choice.
 5. Optional: `cargo install cargo-deny --locked`, then `cargo xtask deny` (should print `licenses ok, sources ok`).
 
-**Next action (step 3):** Paul checks on Windows: copy a file into the open folder (appears within ~1 s, selection kept), delete one, overwrite an image (thumbnail refreshes), paste 1,000 files (one update, no stutter), open a mapped network drive (either live or "Live updates off", no error messages), check the open folder's parent can still be renamed/deleted in Explorer while watched, Enter vs Shift+Enter on an `.exe`/`.lnk`, and View → Theme → System following the Windows setting.
+**Open manual check (step 3, not yet recorded as done):** Paul checks on Windows: copy a file into the open folder (appears within ~1 s, selection kept), delete one, overwrite an image (thumbnail refreshes), paste 1,000 files (one update, no stutter), open a mapped network drive (either live or "Live updates off", no error messages), check the open folder's parent can still be renamed/deleted in Explorer while watched, Enter vs Shift+Enter on an `.exe`/`.lnk`, and View → Theme → System following the Windows setting.
 
 **Decision (Paul, 2026-10-14): HEIC / HEVC is off by default, with an opt-in at build time and at run time.**
 - Build: `assetcraft-thumbs` feature `heic` (was `heif`, default on) is now off; `lightcraft-heif` / heic-rs aren't compiled without it (`cargo tree -p assetcraft -e normal | grep -i "heic\|heif"` is empty). One flag on the app or CLI turns it on: `cargo run -p assetcraft --release --features heic`, `cargo build -p assetcraft-cli --release --features heic` (it is forwarded through `assetcraft-engine` / `assetcraft-ui-egui` to `assetcraft-thumbs`). Same choice as LightCraft and PhotoCraft releases.
@@ -390,112 +413,11 @@ Test note: tests use the real `PATH`, so a `filmcraft-cli` on Paul's PATH is exe
 
 **Opportunity (from step 2), done in Stage 1:** known folders now come from the Windows Known Folder API (`known-folders` 1.4, MIT OR Apache-2.0, over `windows-sys`; no `unsafe` here) with the `%USERPROFILE%\<name>` / `OneDrive\<name>` guess as fallback (`crates/fs/src/real.rs`).
 
-**Next action:** Paul runs the app on Windows (see checklist): `cargo xtask ci`, then `cargo run -p assetcraft --release`; check a OneDrive-redirected Pictures folder lists as folders (H3), a mapped/offline drive doesn't freeze the Folders panel (H1), "Reveal in Explorer" on `shot,final.png` selects the right file (M5), pasting a quoted path and typing `C:` both work (M6). Then commit (block in chat). Claude then starts Stage 1.
+**Open manual checks (Stage 0, not yet recorded as done; the code is committed and Stage 1 built on it):** check a OneDrive-redirected Pictures folder lists as folders (H3), a mapped/offline drive doesn't freeze the Folders panel (H1), "Reveal in Explorer" on `shot,final.png` selects the right file (M5), pasting a quoted path and typing `C:` both work (M6).
 
 ---
 
-_Everything below is the superseded ArtCraft Library history._
-
-## ArtCraft Library stage: 0 — Fork, build and spike
-
-**Next action (Paul):** launch the app from `artcraft-wt\library`, open Apps → Library, and paste the `[Library spike]` console group back here.
-
-### Stage 0 checklist
-
-- [x] Upstream paths in the plan verified against `d4e4ac6`
-- [x] Stage 0 patch written and type-checked (no new errors in touched files)
-- [ ] Docs repo (this folder) committed and pushed (private)
-- [x] Private clone `4waymedia/artcraft-private` created (not a fork), `upstream` push disabled
-- [x] Library worktree at `artcraft-wt\library`; patch applied on `library/stage-0`
-- [ ] App builds and runs from the private repo
-- [ ] Library tab opens and shows the placeholder
-- [ ] Console shows media files and folders from the live API
-- [ ] `SearchUserMediaFiles` probe result recorded (see finding F2)
-
-### Setup commands (PowerShell)
-
-Layout (decided 2026-10-12): one private clone, one worktree per app.
-
-```
-F:\Script-Projects\
-├── ArtCraft-Library\     # this docs repo
-├── artcraft\             # private clone; main mirrors upstream; hosts worktrees
-└── artcraft-wt\
-    └── library\          # worktree: library/main -> library/stage-0
-```
-
-Done so far:
-
-```powershell
-Set-Location F:\Script-Projects
-git clone -c core.autocrlf=false https://github.com/storytold/artcraft.git artcraft
-Set-Location .\artcraft
-git remote rename origin upstream
-git remote set-url --push upstream DISABLED
-git remote add origin https://github.com/4waymedia/artcraft-private.git
-git push -u origin main
-
-New-Item -ItemType Directory ..\artcraft-wt | Out-Null
-git branch library/main main
-git worktree add ..\artcraft-wt\library library/main
-Set-Location ..\artcraft-wt\library
-git switch -c library/stage-0
-git apply ..\..\ArtCraft-Library\patches\stage0-library-tab.patch
-```
-
-Next: run the app from the worktree (two terminals):
-
-```powershell
-Set-Location F:\Script-Projects\artcraft-wt\library
-.\script\artcraft\windows_frontend_dev.ps1    # terminal 1
-.\script\artcraft\windows_rust_dev.ps1        # terminal 2
-```
-
-When the exit criteria pass:
-
-```powershell
-Set-Location F:\Script-Projects\artcraft-wt\library
-git add -A
-git commit -m "Stage 0: Library tab spike"
-git push -u origin library/stage-0
-```
-
-Weekly upstream sync (from `F:\Script-Projects\artcraft`):
-
-```powershell
-git fetch upstream
-git switch main; git merge --ff-only upstream/main; git push origin main
-# then in each worktree: git rebase main
-```
-
-Add another app later: `git branch <app>/main main; git worktree add ..\artcraft-wt\<app> <app>/main`
-
-## Findings (opportunities)
-
-| ID | Finding                                                                                         | Scope   | Suggested fix                                                                                                    | Owner         |
-|----|-------------------------------------------------------------------------------------------------|---------|------------------------------------------------------------------------------------------------------------------|---------------|
-| F1 | Tabs are opened from the Apps menu (`config/appMenu.tsx`), not a top-bar entry                  | Stage 0 | Done in patch: `AppId`, `ALL_APPS` entry and `goToApp` list, plus a TopBar breadcrumb. Update plan step 4 wording | Claude (done) |
-| F2 | `MediaFilesApi.SearchUserMediaFiles` (`/v1/media_files/search_session`) exists and nothing calls it | Stage 3 | Spike probes it with `"reaper"`. If it returns your files, Stage 3 search goes server-side and the risk row shrinks | Paul to run; Claude updates plan |
-| F3 | Two `MediaFilesApi` classes: `libs/api` and `app/src/Classes/ApiManager`                        | 1 to 6  | Use `@storyteller/api` only (spike does), so Library logic can move to `frontend/libs/library`                   | Claude        |
-| F4 | Windows dev runs two scripts; frontend uses `VITE_ENVIRONMENT_TYPE=production`, port 5173       | Stage 0 | Use both scripts as in step 4; the Unix single launcher doesn't apply                                           | Paul          |
-| F5 | ~185 pre-existing `tsc -b` errors in `frontend/libs/*`                                          | All     | Treat as baseline; gate on "no new errors in touched files"                                                     | Claude        |
-
-## Open decisions
-
-| Decision                                                   | Recommendation                                     | Needed by |
-|------------------------------------------------------------|----------------------------------------------------|-----------|
-| Repo layout                                                | Decided: one clone + worktree per app              | Done      |
-| Library: tab inside ArtCraft, or standalone app            | Tab first (patch is a tab); revisit at Stage 1     | Stage 1   |
-| Local metadata: SQLite only, or SQLite + JSON sidecars     | SQLite only in Stage 4; sidecars on export (Stage 5) | Stage 4 |
-| Cloud + local: one merged view or two sections             | Two sections first, merge later if it earns it     | Stage 4   |
-| Deal type (OSS credit / license / role)                    | Decide before any code is shared                   | Stage 6   |
-
-## Direction change (2026-10-12)
-
-ArtCraft (credit-based AI studio) is not the hub. New target: **AssetCraft**, a pure-Rust
-Bridge-style sibling of the storytold Crafting Apps (browse, structure, organize, plan,
-execute). Elo stays out. The ArtCraft clone/worktree and Stage 0 patch are superseded; keep or
-delete at will. Study notes: [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md).
+_The superseded ArtCraft Library history (Stage 0 of the Library tab, findings F1–F5, its open decisions and the 2026-10-12 direction change) moved to [docs/archive/status-artcraft-library.md](docs/archive/status-artcraft-library.md) on 2026-10-22._
 
 ## Log
 
@@ -503,3 +425,5 @@ delete at will. Study notes: [docs/crafting-apps-notes.md](docs/crafting-apps-no
 - 2026-10-12: Private clone + Library worktree set up; Stage 0 patch applied cleanly.
 - 2026-10-12: Studied LightCraft, FilmCraft, PhotoCraft, DesignCraft, PdfCraft, WordCraft, craft-libs; notes written.
 - 2026-10-12: AssetCraft plan, Storyline Builder spec and test_data/library written.
+- 2026-10-22: Docs cleanup (Paul: "resolve the conflicts … update the stale items … S8 next actions"): "Now" table at the top; D-A1, D-V1 and I3 decided on the recommendations; cache waits narrowed to D-C3/C5/C6; committed work marked with hashes; old manual checks relabelled as open checks; ArtCraft Library history archived.
+- 2026-10-22: Note on commit `bde947f`: its title repeats V0.1's ("3D viewer V0.1: mesh reads normals…"), but it carries C1 (`enabled.rs`, `describe`, `commands <filter>`), the Windows `rename_tests` fix, F-V01 and doc edits; V0.1's code is `0887ed8`. Pushed, so history stays as is.
