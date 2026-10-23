@@ -141,7 +141,9 @@ only.
   - raw and HEIF via the LightCraft crates
   - PDF via `pdfcraft-render`
   - video poster frames via `filmcraft-cli probe`
-  - GLB/glTF/OBJ through a small wgpu renderer
+  - GLB/glTF/OBJ through a small wgpu renderer (**deviation, D-V1 decided 2026-10-22:** a CPU rasterizer in
+    `crates/mesh/src/raster.rs`, so CI, thumbnail workers and the web build need no GPU; wgpu only if the
+    full-window preview drags on Windows)
 - **"Open in…"** a sibling app (PhotoCraft, FilmCraft, LightCraft, PdfCraft, DesignCraft,
   WordCraft) when it's installed.
 - **Exit:** a mixed folder shows correct thumbnails for every type, and a file copied in
@@ -158,7 +160,7 @@ are, and every command says what it touches. PipelineCraft (working name), "Open
 Stage 6 recipes all build on this. No new user-facing features, and still no writes to user files.
 
 - **Scope:** command effects and `enabled` on every command; `assetcraft-cli commands --json` in the
-  full suite shape; an opt-in loopback control channel (`--control`) with a token and a manifest
+  full suite shape; an opt-in loopback control channel (`--control`) with an optional token and a manifest
   file; `assetcraft-cli serve` (headless control) and `assetcraft-cli mcp`; `thumb.render` and
   `asset.ref` as commands.
 - **Goal it serves:** AssetCraft becomes the first app that declares command effects natively and
@@ -183,7 +185,8 @@ it is refused on every remote door (`serve`, MCP, `--control`), whatever the gra
   (PipelineCraft spec §6.4). `app.commands` lists them with `enabled` and `disabledReason`.
 - **Control channel:** `assetcraft --control <port|0> [--control-token-file F]`, loopback only,
   JSON lines `{id, method, params}` → `{id, ok, result|error}`, methods `engine.execute
-  {command, params}` and `engine.commands`, `auth {token}` as the first frame. The real bound port
+  {command, params}` and `engine.commands`, and, only when started with `--control-token-file`, `auth {token}` as the first frame (D-A1, decided 2026-10-22;
+  plain `--control` has no auth, like the sibling apps; see [control-protocol.md](control-protocol.md) §4). The real bound port
   is logged, a failed bind exits non-zero, and a manifest is written to
   `%LOCALAPPDATA%\CraftApps\run\assetcraft-<pid>.json` (removed on exit).
 - **Headless:** `assetcraft-cli serve --control <port|0>` runs the same server over a headless
@@ -234,7 +237,7 @@ it is refused on every remote door (`serve`, MCP, `--control`), whatever the gra
 - `engine.commands` over `--control` equals `assetcraft-cli commands --json` (same ids, effects and
   `enabled`).
 - A PowerShell `TcpClient` script authenticates, runs `nav.open` and `app.state`, and a second
-  script without the token is refused; an HTTP request line closes the connection.
+  script without the token is refused when the app runs with `--control-token-file`; an HTTP request line closes the connection.
 - The manifest appears in `%LOCALAPPDATA%\CraftApps\run\` while the app runs and is gone after a
   normal exit.
 - `assetcraft-cli mcp` lists its tools in Claude Code, and read-only tools are marked read-only.

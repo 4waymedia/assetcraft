@@ -10,7 +10,8 @@ DesignCraft, WordCraft).
 - **Immediate area of improvement:** the Crafting Apps have no Bridge. Each app opens its own
   files, and nothing sits above them to find, group, plan and hand off work.
 
-**Status:** Stage 1 (Every format, fast) done, pending a Windows check. See [STATUS.md](STATUS.md).
+**Status (2026-10-22):** Stages 0 and 1 done; Stage 4 Storyboard mode largely built; Stage 2 (Organize) and Stage 1.5
+(API) under way; 3D viewer V0 in progress. The "Now" table in [STATUS.md](STATUS.md) has the details.
 
 ## Build (Windows, PowerShell)
 
@@ -86,8 +87,15 @@ AI is optional. Each capability uses a provider chosen in Preferences: **Local**
 | [docs/assetcraft-plan.md](docs/assetcraft-plan.md)         | Stages 0–7, Stage 0 in detail, feature backlog        |
 | [docs/storyline-builder.md](docs/storyline-builder.md)     | Plan mode spec, slices A–F, provider design           |
 | [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) | What we learned from each sibling app, with file refs |
+| [docs/storyboard-plan.md](docs/storyboard-plan.md)         | Storyboard mode plan (Stage 4)                        |
+| [docs/track-analysis.md](docs/track-analysis.md)           | Music analysis, cue maps, Fit to length               |
+| [docs/design/cache.md](docs/design/cache.md)               | Suite cache design                                    |
+| [docs/cli.md](docs/cli.md)                                 | `assetcraft-cli`: shipped and target surface          |
+| [docs/control-protocol.md](docs/control-protocol.md)       | Loopback control channel (spec)                       |
+| [docs/mcp.md](docs/mcp.md)                                 | MCP server (spec)                                     |
+| [docs/agents.md](docs/agents.md)                           | Driving and developing AssetCraft as an agent         |
 | [test_data/README.md](test_data/README.md)                 | The generated test library                            |
-| [docs/archive/](docs/archive/)                             | The earlier ArtCraft Library plan (superseded)        |
+| [docs/archive/](docs/archive/)                             | Superseded plans and the ArtCraft Library history     |
 
 ## Stack (planned, following the siblings)
 

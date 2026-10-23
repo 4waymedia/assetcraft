@@ -79,7 +79,7 @@ Server limits:
 
 ## 4. Auth (decision D-A1)
 
-The suite has no auth: designcraft says "only enable it while you use it". AssetCraft's plan text adds a token. Recommended rule (**Paul to confirm**):
+The suite has no auth: designcraft says "only enable it while you use it". AssetCraft's plan text adds a token. **Decided (Paul, 2026-10-22, on the recommendation):**
 
 - `--control` alone: no auth, so suite clients work unchanged.
 - `--control-token-file F`: the token is read from `F` (or generated and written to `F`, never logged).
