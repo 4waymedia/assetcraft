@@ -163,6 +163,7 @@ Built in C1 (2026-10-22, `crates/engine/src/enabled.rs`):
 | C1   | `commands --json` suite shape (`menu` array, `enabled`, `disabledReason`), `commands <filter>`, `describe <id>` | Stage 1.5 step 2 | Claude | **built 2026-10-22**, Paul to run CI; 2b (menus call `Session::enabled`) next |
 | C2   | `exec key=value`, global `--dir` / `--compact`, `inspect`, strict unknown-key errors                 | new                    | Claude |        |
 | C3   | `run <jsonl \| ->`, `--keep-going`                                                                 | new                    | Claude |        |
+| C3b  | `session.inspect {since?}`: what the last command(s) changed (STATUS automation audit AU10)          | suite promise          | Claude |        |
 | C4   | `--dry-run` and the write-command preview rule (test: every `write-user-file` command has a preview) | AGENTS.md rule 5     | Claude | with T2 (`file.rename`) |
 | C5   | `crates/craft-control-proto` + `craft-control-server`; `assetcraft --control`, `serve`            | Stage 1.5 steps 3–4    | Claude |        |
 | C6   | `mcp` (stdio), `--bridge`                                                                          | Stage 1.5 step 5       | Claude |        |

@@ -46,7 +46,7 @@ Commands aren't one tool each: the core set is the suite's, and it's the same in
 | `command_list`   | `{filter?}`                                 | `commands --json` (suite shape, effects, `enabled`)                    | read                                             |
 | `command_run`    | `{id, params?}`                             | One command via `Session::execute`; the result is the command's JSON   | from the command's effects, checked per call      |
 | `command_batch`  | `{steps: [{id, params?}], stop_on_error?}`  | `{completed, failed, results}`; `failed > 0` sets `isError`             | the union of the steps' effects                   |
-| `doc_inspect`    | `{}`                                        | `app.state` (location, selection, view, items) plus storyboard state when open | read                                     |
+| `doc_inspect`    | `{}`                                        | `app.state` (location, selection, view, items) plus storyboard state when open, and `session.inspect`'s change report (C3b) | read                                     |
 | `render_preview` | `{path, max_side?, out?}`                   | A thumbnail PNG (`thumb.render`): base64 ≤ 1 MiB, or a **new** file at `out` | read; a writer when `out` is given        |
 | `ui_screenshot`, `ui_elements`, `ui_click`, `ui_key`, `ui_type` | as the control methods | Bridged only                                               | `ui_screenshot` read; the rest are not read-only  |
 
