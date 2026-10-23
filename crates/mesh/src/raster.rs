@@ -144,11 +144,14 @@ pub struct RenderOptions {
     pub background: Background,
     /// Shade from the mesh's vertex normals when it has them (`false` = flat faces).
     pub smooth: bool,
+    /// Threads to rasterize on (row bands; 0 or 1 = this thread). The output is the same
+    /// whatever the count. Ignored on `wasm32`, which has no threads.
+    pub threads: usize,
 }
 
 impl RenderOptions {
     /// `width × height`, 2× supersampled, every triangle, 400 M pixel tests, studio lighting,
-    /// shaded, smooth, on transparent.
+    /// shaded, smooth, on transparent, one thread.
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
@@ -160,6 +163,7 @@ impl RenderOptions {
             mode: DisplayMode::Shaded,
             background: Background::Transparent,
             smooth: true,
+            threads: 1,
         }
     }
 }
@@ -375,10 +379,107 @@ pub fn render_with(
             })
             .collect();
 
-        let smooth = opts.smooth && mesh.normals.len() == mesh.positions.len();
-        let has_uv = mesh.uvs.len() == mesh.positions.len();
-        let edge_px = 0.5 * ss as f32;
-        let mut budget = opts.max_pixel_tests;
+        let scene = Scene {
+            mesh,
+            textures,
+            opts,
+            projected: &projected,
+            eye,
+            lights,
+            sw,
+            sh,
+            smooth: opts.smooth && mesh.normals.len() == mesh.positions.len(),
+            has_uv: mesh.uvs.len() == mesh.positions.len(),
+            edge_px: 0.5 * ss as f32,
+        };
+
+        // Row bands, one per thread; each band rasterizes every triangle clipped to its rows,
+        // so no two threads touch the same sample and the result doesn't depend on the count.
+        let threads = if cfg!(target_arch = "wasm32") { 1 } else { opts.threads.clamp(1, 64).min(sh.max(1)) };
+        let rows = sh.div_ceil(threads).max(1);
+        let budget = opts.max_pixel_tests / threads as u64;
+        if threads == 1 {
+            scene.draw_band(0, sh, &mut depth, &mut color, budget);
+        } else {
+            // Each band sits in a `Mutex<Option<_>>` so that, when a thread can't be spawned
+            // (a resource limit), the same band is drawn on this thread instead.
+            type Band<'b> = Option<(usize, usize, &'b mut [f32], &'b mut [[u8; 3]])>;
+            let bands: Vec<std::sync::Mutex<Band<'_>>> = depth
+                .chunks_mut(rows * sw)
+                .zip(color.chunks_mut(rows * sw))
+                .enumerate()
+                .map(|(k, (depth, color))| {
+                    std::sync::Mutex::new(Some((k * rows, (k * rows + rows).min(sh), depth, color)))
+                })
+                .collect();
+            std::thread::scope(|scope| {
+                for band in &bands {
+                    let scene = &scene;
+                    let draw = move || {
+                        if let Some((y0, y1, depth, color)) = band.lock().ok().and_then(|mut b| b.take()) {
+                            scene.draw_band(y0, y1, depth, color, budget);
+                        }
+                    };
+                    if std::thread::Builder::new().spawn_scoped(scope, draw).is_err() {
+                        draw();
+                    }
+                }
+            });
+        }
+    }
+
+    // Resolve the supersamples: coverage becomes alpha (transparent background) or every
+    // sample counts (solid background); covered samples are averaged.
+    let solid = matches!(opts.background, Background::Solid(_));
+    let mut rgba = vec![0u8; w * h * 4];
+    let full = (ss * ss) as u32;
+    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (ox, oy) = (i % w * ss, i / w * ss);
+        let (mut sum, mut covered) = ([0u32; 3], 0u32);
+        for sy in 0..ss {
+            for sx in 0..ss {
+                let s = (oy + sy) * sw + ox + sx;
+                if (solid || depth.get(s).is_some_and(|d| *d > 0.0))
+                    && let Some(c) = color.get(s)
+                {
+                    covered += 1;
+                    for k in 0..3 {
+                        sum[k] += u32::from(c[k]);
+                    }
+                }
+            }
+        }
+        if let (Some(r), Some(g), Some(b)) =
+            (sum[0].checked_div(covered), sum[1].checked_div(covered), sum[2].checked_div(covered))
+        {
+            *px = [r as u8, g as u8, b as u8, ((covered * 255 + full / 2) / full) as u8];
+        }
+    }
+    Ok(Image { width: opts.width, height: opts.height, rgba })
+}
+
+/// Everything a band needs to rasterize, shared read-only between threads.
+struct Scene<'a> {
+    mesh: &'a Mesh,
+    textures: &'a [Option<Texture>],
+    opts: &'a RenderOptions,
+    projected: &'a [Option<[f32; 3]>],
+    eye: V3,
+    lights: [(V3, f32); 3],
+    sw: usize,
+    sh: usize,
+    smooth: bool,
+    has_uv: bool,
+    edge_px: f32,
+}
+
+impl Scene<'_> {
+    /// Rasterize every triangle into sample rows `y_lo..y_hi`; `depth` and `color` hold exactly
+    /// those rows. Stops when `budget` pixel tests are spent.
+    fn draw_band(&self, y_lo: usize, y_hi: usize, depth: &mut [f32], color: &mut [[u8; 3]], budget: u64) {
+        let Scene { mesh, textures, opts, projected, eye, lights, sw, sh, smooth, has_uv, edge_px } = *self;
+        let (sw, sh, smooth, has_uv, edge_px, eye, lights) = (sw, sh, smooth, has_uv, edge_px, eye, lights);
+        let mut budget = budget;
         for (t, tri) in mesh.triangles.iter().enumerate().step_by(opts.stride.max(1)) {
             let corner = |i: u32| -> Option<Corner> {
                 let i = i as usize;
@@ -390,6 +491,21 @@ pub fn render_with(
                     uv: if has_uv { mesh.uvs.get(i).copied().unwrap_or([0.0; 2]) } else { [0.0; 2] },
                 })
             };
+            // The band's row test first, so a triangle outside it costs three lookups and
+            // nothing else (every band walks every triangle).
+            let (Some(sa), Some(sb), Some(sc)) = (
+                projected.get(tri[0] as usize).copied().flatten(),
+                projected.get(tri[1] as usize).copied().flatten(),
+                projected.get(tri[2] as usize).copied().flatten(),
+            ) else {
+                continue;
+            };
+            let top = sa[1].min(sb[1]).min(sc[1]);
+            let bottom = sa[1].max(sb[1]).max(sc[1]);
+            // Rows floor(top)..=ceil(bottom) are what the box below rasterizes.
+            if bottom.ceil() < y_lo as f32 || top.floor() >= y_hi as f32 || !(top.is_finite() && bottom.is_finite()) {
+                continue;
+            }
             let (Some(a), Some(b), Some(c)) = (corner(tri[0]), corner(tri[1]), corner(tri[2])) else { continue };
             let Some(face) = normalize(cross(sub(b.p, a.p), sub(c.p, a.p))) else { continue };
             // Both faces lit: a face normal pointing away from the eye is flipped, and so are
@@ -416,9 +532,9 @@ pub fn render_with(
                 continue;
             }
             let min_x = a.s[0].min(b.s[0]).min(c.s[0]).floor().max(0.0);
-            let min_y = a.s[1].min(b.s[1]).min(c.s[1]).floor().max(0.0);
+            let min_y = a.s[1].min(b.s[1]).min(c.s[1]).floor().max(y_lo as f32);
             let max_x = a.s[0].max(b.s[0]).max(c.s[0]).ceil().min(sw as f32 - 1.0);
-            let max_y = a.s[1].max(b.s[1]).max(c.s[1]).ceil().min(sh as f32 - 1.0);
+            let max_y = a.s[1].max(b.s[1]).max(c.s[1]).ceil().min(y_hi as f32 - 1.0).min(sh as f32 - 1.0);
             if min_x > max_x || min_y > max_y {
                 continue;
             }
@@ -434,7 +550,7 @@ pub fn render_with(
             let (lbc, lca, lab) = (len(&b.s, &c.s), len(&c.s, &a.s), len(&a.s, &b.s));
             for y in y0..=y1 {
                 let py = y as f32 + 0.5;
-                let row = y * sw;
+                let row = (y - y_lo) * sw;
                 for x in x0..=x1 {
                     let px = x as f32 + 0.5;
                     let w0 = edge(&b.s, &c.s, px, py) * inv;
@@ -509,35 +625,6 @@ pub fn render_with(
             }
         }
     }
-
-    // Resolve the supersamples: coverage becomes alpha (transparent background) or every
-    // sample counts (solid background); covered samples are averaged.
-    let solid = matches!(opts.background, Background::Solid(_));
-    let mut rgba = vec![0u8; w * h * 4];
-    let full = (ss * ss) as u32;
-    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-        let (ox, oy) = (i % w * ss, i / w * ss);
-        let (mut sum, mut covered) = ([0u32; 3], 0u32);
-        for sy in 0..ss {
-            for sx in 0..ss {
-                let s = (oy + sy) * sw + ox + sx;
-                if (solid || depth.get(s).is_some_and(|d| *d > 0.0))
-                    && let Some(c) = color.get(s)
-                {
-                    covered += 1;
-                    for k in 0..3 {
-                        sum[k] += u32::from(c[k]);
-                    }
-                }
-            }
-        }
-        if let (Some(r), Some(g), Some(b)) =
-            (sum[0].checked_div(covered), sum[1].checked_div(covered), sum[2].checked_div(covered))
-        {
-            *px = [r as u8, g as u8, b as u8, ((covered * 255 + full / 2) / full) as u8];
-        }
-    }
-    Ok(Image { width: opts.width, height: opts.height, rgba })
 }
 
 /// Twice the signed area of (a, b, p) in screen space.

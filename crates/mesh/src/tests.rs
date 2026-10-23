@@ -606,3 +606,36 @@ fn display_modes_and_backgrounds_render_as_specified() {
     assert!(pixels(&dark).filter(|p| p[3] > 0).all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0));
     assert_eq!(render_with(&mesh, &[], View::default(), &base).unwrap(), shaded);
 }
+
+#[test]
+fn threaded_rendering_is_identical_to_single_threaded() {
+    let mesh = parse_glb(&rune_crate(), &Limits::default(), &mut no_files).unwrap();
+    let one = RenderOptions { mode: DisplayMode::Wireframe, ..RenderOptions::new(50, 37) };
+    let base = render(&mesh, View::default(), &one).unwrap();
+    for threads in [2, 3, 7, 64, 500] {
+        let img = render(&mesh, View::default(), &RenderOptions { threads, ..one }).unwrap();
+        if img != base {
+            let diffs: Vec<(usize, usize, [u8; 4], [u8; 4])> = img
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(base.rgba.as_chunks::<4>().0)
+                .enumerate()
+                .filter(|(_, (a, b))| a != b)
+                .map(|(i, (a, b))| (i % 50, i / 50, *a, *b))
+                .collect();
+            panic!("{threads} threads: {} pixels differ, first {:?}", diffs.len(), &diffs[..diffs.len().min(6)]);
+        }
+    }
+    // A band-bounded budget still ends in a valid image.
+    let img = render(&mesh, View::default(), &RenderOptions { threads: 4, max_pixel_tests: 50, ..one }).unwrap();
+    assert_eq!((img.width, img.height), (50, 37));
+    // Threads don't change the textured path either.
+    let pup = leaning_quad();
+    let tex = Texture::new(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 255]).unwrap();
+    let a = render_with(&pup, &[Some(tex.clone())], FRONT, &RenderOptions::new(40, 24)).unwrap();
+    let b =
+        render_with(&pup, &[Some(tex)], FRONT, &RenderOptions { threads: 5, ..RenderOptions::new(40, 24) }).unwrap();
+    assert_eq!(a, b);
+}

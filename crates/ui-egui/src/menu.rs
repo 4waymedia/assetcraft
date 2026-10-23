@@ -11,7 +11,9 @@
 use crate::dock::{self, Panel};
 use crate::widgets::format_size;
 use crate::{Navigator, content::sort_name, pathbar};
-use assetcraft_engine::{BoardView, CommandSpec, Location, Mode, SortKey, ThemeMode, ViewMode, commands, same_path};
+use assetcraft_engine::{
+    BoardView, CommandSpec, Location, Mode, ModelBackground, ModelDisplay, SortKey, ThemeMode, ViewMode, commands, same_path,
+};
 use egui::{Button, Rect, Ui};
 use serde_json::{Value, json};
 
@@ -358,6 +360,28 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 .into_iter()
                 .map(|(m, label)| check(label, view.theme == m, true, cmd(spec.id, json!({ "mode": m.name() }))))
                 .collect();
+            vec![MenuEntry::Sub { label: spec.label.into(), entries }]
+        }
+        "view.model" => {
+            let model = s.model();
+            let mut entries =
+                vec![check("Turntable", model.turntable, true, cmd(spec.id, json!({ "turntable": !model.turntable })))];
+            entries.push(MenuEntry::Sub {
+                label: "Display".into(),
+                entries: ModelDisplay::ALL
+                    .into_iter()
+                    .map(|(m, label)| check(label, model.mode == m, true, cmd(spec.id, json!({ "mode": m.name() }))))
+                    .collect(),
+            });
+            entries.push(MenuEntry::Sub {
+                label: "Background".into(),
+                entries: ModelBackground::ALL
+                    .into_iter()
+                    .map(|(b, label)| {
+                        check(label, model.background == b, true, cmd(spec.id, json!({ "background": b.name() })))
+                    })
+                    .collect(),
+            });
             vec![MenuEntry::Sub { label: spec.label.into(), entries }]
         }
         "file.reveal" => simple(focus || matches!(s.location(), Location::Folder(_))),

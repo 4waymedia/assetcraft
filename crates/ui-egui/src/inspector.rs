@@ -28,6 +28,12 @@ pub(crate) fn preview(nav: &mut Navigator, ui: &mut Ui) {
     };
     let rect = ui.available_rect_before_wrap();
     if crate::model_preview::wants_orbit(&entry) {
+        if nav.session.preview_open() {
+            // The full-window overlay drives the same model view at its own size; two drawers
+            // would re-request frames at two sizes every frame.
+            ui.centered_and_justified(|ui| ui.weak("Shown in the full-window preview"));
+            return;
+        }
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
         crate::model_preview::draw(nav, ui, &entry, rect.shrink(4.0), &response);
         return;
@@ -129,17 +135,27 @@ pub(crate) fn overlay(nav: &mut Navigator, ctx: &egui::Context) {
             ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(235));
             let caption = Rect::from_min_max(rect.left_bottom() - vec2(0.0, 36.0), rect.max);
             let image = Rect::from_min_max(rect.min + vec2(24.0, 24.0), caption.right_top() - vec2(24.0, 4.0));
+            let mut orbit = false;
             if let Some(entry) = &entry {
-                draw_thumb(nav, ui, entry, image, 1024, PRIORITY_OVERLAY);
+                if crate::model_preview::wants_orbit(entry) {
+                    // A model orbits here too (drag), so a click on it must not close the overlay.
+                    orbit = true;
+                    let drag = ui.allocate_rect(image, Sense::click_and_drag());
+                    crate::model_preview::draw(nav, ui, entry, image, &drag);
+                } else {
+                    draw_thumb(nav, ui, entry, image, 1024, PRIORITY_OVERLAY);
+                }
+                let hint = if orbit { "drag: orbit    ·    scroll: zoom" } else { "arrows: next / previous" };
                 ui.painter().text(
                     caption.center(),
                     Align2::CENTER_CENTER,
-                    format!("{}    ·    arrows: next / previous    ·    Space or Esc: close", entry.name),
+                    format!("{}    ·    {hint}    ·    Space or Esc: close", entry.name),
                     FontId::proportional(14.0),
                     Color32::from_gray(220),
                 );
             }
-            if response.clicked() {
+            let on_model = orbit && response.interact_pointer_pos().is_some_and(|p| image.contains(p));
+            if response.clicked() && !on_model {
                 nav.run("view.preview", json!({ "open": false }));
             }
         },

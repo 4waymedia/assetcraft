@@ -728,6 +728,29 @@ fn programs_are_revealed_by_open_and_run_by_run() {
 }
 
 #[test]
+fn model_command_sets_and_persists_the_3d_preview_settings() {
+    let (mut s, _) = session(fake());
+    assert_eq!(s.model(), ModelPrefs::default());
+    let out = run(&mut s, "view.model", json!({"mode": "wireframe", "turntable": true}));
+    assert_eq!(out["model"]["mode"], "wireframe");
+    assert_eq!(s.model().mode, ModelDisplay::Wireframe);
+    assert!(s.model().turntable);
+    run(&mut s, "view.model", json!({"background": "grey", "exposure": 150}));
+    assert_eq!((s.model().background, s.model().exposure), (ModelBackground::Grey, 150));
+    assert_eq!(s.model().mode, ModelDisplay::Wireframe, "fields not named are kept");
+    let reloaded =
+        Session::new(Arc::new(fake()), Arc::new(RecordingLauncher::default()), Prefs::from_json(&s.prefs().to_json()));
+    assert_eq!(reloaded.model(), s.model());
+    for bad in [json!({"mode": "xray"}), json!({"background": 3}), json!({"exposure": 9}), json!({"turntable": "yes"})] {
+        assert!(s.execute("view.model", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(s.model().exposure, 150, "a bad call changes nothing");
+    assert_eq!(run(&mut s, "app.state", json!({}))["model"]["background"], "grey");
+    let junk = Prefs::from_json(r#"{"model":{"mode":"purple","exposure":9000,"turntable":true}}"#).model;
+    assert_eq!((junk.mode, junk.exposure, junk.turntable), (ModelDisplay::Shaded, 400, true));
+}
+
+#[test]
 fn theme_command_sets_and_persists_the_theme() {
     let (mut s, _) = session(fake());
     assert_eq!(s.view().theme, ThemeMode::Dark, "dark by default");

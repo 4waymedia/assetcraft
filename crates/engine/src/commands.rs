@@ -101,6 +101,15 @@ static COMMANDS: &[CommandSpec] = &[
     cmd!(APP, "view.theme", "Theme", "View", None, "{mode: system|dark|light}", view_theme),
     cmd!(
         APP,
+        "view.model",
+        "3D Preview",
+        "View",
+        None,
+        "{turntable?: bool, mode?: shaded|wireframe|normals|uv, background?: panel|dark|grey|light, exposure?: 25..400 (percent)}",
+        view_model
+    ),
+    cmd!(
+        APP,
         "formats.heic",
         "HEIC / HEIF thumbnails (HEVC)",
         "View",
@@ -559,6 +568,30 @@ fn view_theme(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({ "view": s.view }))
 }
 
+/// `view.model`: every field optional; a bad value refuses the whole call and changes nothing.
+fn view_model(s: &mut Session, p: &Value) -> CmdResult {
+    let mut next = s.model;
+    if let Some(v) = p.get("turntable") {
+        next.turntable = v.as_bool().ok_or_else(|| CmdError::BadParams("`turntable` must be true/false".into()))?;
+    }
+    if let Some(v) = p.get("mode") {
+        let text = v.as_str().unwrap_or_default();
+        next.mode = crate::ModelDisplay::parse(text).ok_or_else(|| CmdError::BadParams(format!("unknown mode `{text}`")))?;
+    }
+    if let Some(v) = p.get("background") {
+        let text = v.as_str().unwrap_or_default();
+        next.background = crate::ModelBackground::parse(text)
+            .ok_or_else(|| CmdError::BadParams(format!("unknown background `{text}`")))?;
+    }
+    if let Some(v) = p.get("exposure") {
+        let (lo, hi) = crate::prefs::EXPOSURE_RANGE;
+        let e = v.as_u64().filter(|e| (u64::from(lo)..=u64::from(hi)).contains(e));
+        next.exposure = e.map(|e| e as u16).ok_or_else(|| CmdError::BadParams(format!("`exposure` must be {lo}..{hi}")))?;
+    }
+    s.model = next;
+    Ok(json!({ "model": s.model }))
+}
+
 /// The message shown when HEIC is asked for in a build without the decoder.
 pub const NO_HEIC_BUILD: &str = "this build has no HEIC support; rebuild with --features heic";
 
@@ -816,6 +849,7 @@ pub(crate) fn state_json(s: &Session) -> Value {
         "preview": s.preview_open,
         "thumb_cache": cache_json(s),
         "formats": formats_json(s),
+        "model": s.model,
         "apps": s.installed_apps().iter().map(|(id, p)| json!({ "app": id, "program": lossy(p) })).collect::<Vec<_>>(),
         "items": s.items.iter().map(|e| json!({
             "name": e.name,

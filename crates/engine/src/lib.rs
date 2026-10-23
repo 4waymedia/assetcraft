@@ -37,7 +37,7 @@ pub use launch::{
 };
 pub use open_in::{AppLocator, FakeLocator, OpenInTarget, SIBLING_APPS, SiblingApp, SystemLocator, find_app};
 pub use paths::{clean_user_path, same_path};
-pub use prefs::{FormatPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
+pub use prefs::{FormatPrefs, ModelBackground, ModelDisplay, ModelPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
 pub use select::{ClickMode, Selection};
 pub use sort::SortKey;
 pub use storyboard::{BoardView, MAX_AUTOFILL_ASSETS, MAX_UNDO, Mode, Transport};
@@ -172,6 +172,8 @@ pub struct Session {
     generation: u64,
     /// Optional formats as saved (`formats.heic`).
     formats: FormatPrefs,
+    /// 3D preview settings (`view.model`).
+    model: ModelPrefs,
     /// Storyboard mode: the open storyboard, selected clip, undo (`storyboard.*`).
     boards: storyboard::Boards,
     /// Track audio for Watch your Cut: player, decode, program (`audio_out`).
@@ -216,6 +218,7 @@ impl Session {
             apps: Vec::new(),
             generation: 0,
             formats: prefs.formats,
+            model: prefs.model,
             boards: storyboard::Boards::default(),
             audio: audio_out::TrackAudio::default(),
             waveforms: waveform::Waveforms::default(),
@@ -291,6 +294,11 @@ impl Session {
     /// View settings.
     pub fn view(&self) -> &ViewPrefs {
         &self.view
+    }
+
+    /// 3D preview settings (`view.model`).
+    pub fn model(&self) -> ModelPrefs {
+        self.model
     }
 
     /// The saved panel arrangement (opaque JSON owned by the UI; see `view.panels`).
@@ -482,6 +490,7 @@ impl Session {
             formats: self.formats,
             music_folder: self.music_folder.clone().filter(|p| p.to_str().is_some()),
             preview_volume: Some((self.preview_volume * 100.0).round().clamp(0.0, 100.0) as u8),
+            model: self.model,
         }
     }
 

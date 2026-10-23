@@ -51,6 +51,131 @@ impl ThemeMode {
     }
 }
 
+/// What the 3D preview's pixels show (`view.model {mode}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelDisplay {
+    /// Lit colour and texture.
+    #[default]
+    Shaded,
+    /// Edges over a dimmed surface.
+    Wireframe,
+    /// Normals as colours.
+    Normals,
+    /// A checker over the texture coordinates.
+    Uv,
+}
+
+impl ModelDisplay {
+    /// Parse `shaded` / `wireframe` / `normals` / `uv`.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "shaded" => Some(Self::Shaded),
+            "wireframe" => Some(Self::Wireframe),
+            "normals" => Some(Self::Normals),
+            "uv" => Some(Self::Uv),
+            _ => None,
+        }
+    }
+
+    /// The command-parameter name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Shaded => "shaded",
+            Self::Wireframe => "wireframe",
+            Self::Normals => "normals",
+            Self::Uv => "uv",
+        }
+    }
+
+    /// Every mode, in menu order, with its label.
+    pub const ALL: [(ModelDisplay, &'static str); 4] =
+        [(Self::Shaded, "Shaded"), (Self::Wireframe, "Wireframe"), (Self::Normals, "Normals"), (Self::Uv, "UV Checker")];
+}
+
+/// What is behind the 3D preview (`view.model {background}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelBackground {
+    /// The panel shows through (transparent frames).
+    #[default]
+    Panel,
+    /// Near black.
+    Dark,
+    /// Mid grey (the reference viewer's look).
+    Grey,
+    /// Near white.
+    Light,
+}
+
+impl ModelBackground {
+    /// Parse `panel` / `dark` / `grey` / `light`.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "panel" => Some(Self::Panel),
+            "dark" => Some(Self::Dark),
+            "grey" | "gray" => Some(Self::Grey),
+            "light" => Some(Self::Light),
+            _ => None,
+        }
+    }
+
+    /// The command-parameter name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Panel => "panel",
+            Self::Dark => "dark",
+            Self::Grey => "grey",
+            Self::Light => "light",
+        }
+    }
+
+    /// Every background, in menu order, with its label.
+    pub const ALL: [(ModelBackground, &'static str); 4] =
+        [(Self::Panel, "Panel"), (Self::Dark, "Dark"), (Self::Grey, "Grey"), (Self::Light, "Light")];
+
+    /// The solid colour (sRGB), or `None` for the panel.
+    pub fn rgb(self) -> Option<[u8; 3]> {
+        match self {
+            Self::Panel => None,
+            Self::Dark => Some([24, 24, 26]),
+            Self::Grey => Some([77, 77, 80]),
+            Self::Light => Some([228, 228, 230]),
+        }
+    }
+}
+
+/// Exposure of the 3D preview in percent (`view.model {exposure}`), clamped to this range.
+pub const EXPOSURE_RANGE: (u16, u16) = (25, 400);
+
+/// 3D preview settings (saved as `model` in prefs). The camera is not here: it is view state
+/// in the UI, reset per model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelPrefs {
+    /// Turn the model slowly while nothing drags it.
+    pub turntable: bool,
+    /// What the pixels show.
+    pub mode: ModelDisplay,
+    /// What is behind the model.
+    pub background: ModelBackground,
+    /// Light exposure in percent, [`EXPOSURE_RANGE`].
+    pub exposure: u16,
+}
+
+impl Default for ModelPrefs {
+    fn default() -> Self {
+        Self { turntable: false, mode: ModelDisplay::Shaded, background: ModelBackground::Panel, exposure: 100 }
+    }
+}
+
+impl ModelPrefs {
+    /// Exposure as a multiplier.
+    pub fn exposure_factor(self) -> f32 {
+        f32::from(self.exposure.clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1)) / 100.0
+    }
+}
+
 /// Content-panel view settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -116,6 +241,8 @@ pub struct Prefs {
     pub music_folder: Option<PathBuf>,
     /// Track preview volume in percent, 0–100 (`track.previewVolume`); `None` = the default.
     pub preview_volume: Option<u8>,
+    /// 3D preview settings (`view.model`).
+    pub model: ModelPrefs,
 }
 
 /// Largest panel-layout JSON accepted by `view.panels` and restored from disk.
@@ -159,6 +286,14 @@ impl Prefs {
         }
         prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
         prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
+        if let Some(Value::Object(model)) = root.get("model") {
+            let m = &mut prefs.model;
+            set_field(&mut m.turntable, model.get("turntable"));
+            set_field(&mut m.mode, model.get("mode"));
+            set_field(&mut m.background, model.get("background"));
+            set_field(&mut m.exposure, model.get("exposure"));
+            m.exposure = m.exposure.clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1);
+        }
         prefs.view.thumb_size = prefs.view.thumb_size.clamp(THUMB_SIZE_RANGE.0, THUMB_SIZE_RANGE.1);
         prefs.version = PREFS_VERSION;
         (prefs, true)
