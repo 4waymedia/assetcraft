@@ -5,6 +5,7 @@
 //! getters ([`Session::location`], [`Session::items`], [`Session::selection`] …) and draws it.
 //! Commands are listed in [`commands`]; `assetcraft-cli commands` prints them.
 
+mod analyse_job;
 mod audio_out;
 mod commands;
 mod decode;
@@ -26,6 +27,7 @@ mod track_cmd;
 mod watching;
 mod waveform;
 
+pub use analyse_job::{AnalyseProgress, AnalyseState};
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_thumbs::DiskCache;
 pub use audio_out::PreviewMode;
@@ -186,6 +188,10 @@ pub struct Session {
     music_folder: Option<PathBuf>,
     /// Track preview volume, 0–1 (`track.previewVolume`).
     preview_volume: f32,
+    /// Where in-app track analyses are kept (`storyboard.analyse`; set by the app).
+    analysis_dir: Option<std::path::PathBuf>,
+    /// The background track analyser (`storyboard.analyse`).
+    analyser: analyse_job::Analyser,
 }
 
 impl Session {
@@ -226,6 +232,8 @@ impl Session {
             decodes: decode::Decodes::default(),
             music_folder: prefs.music_folder.clone(),
             preview_volume: prefs.preview_volume.map_or(audio_out::DEFAULT_PREVIEW_VOLUME, |p| f32::from(p) / 100.0),
+            analysis_dir: None,
+            analyser: analyse_job::Analyser::default(),
         };
         session.rescan_places();
         let start = prefs
@@ -617,6 +625,8 @@ fn same_location(a: &Location, b: &Location) -> bool {
     }
 }
 
+#[cfg(test)]
+mod analyse_job_tests;
 #[cfg(test)]
 mod audio_tests;
 #[cfg(test)]

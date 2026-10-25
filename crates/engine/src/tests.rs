@@ -739,7 +739,7 @@ fn mesh_info_reads_a_model_through_the_viewer_limits() {
     assert_eq!(v["format"], "GLB");
     assert!(v["bytes"].as_u64().unwrap() > 3000);
     let v = run(&mut s, "asset.meshInfo", json!({"path": models.join("tombstone.obj").to_string_lossy()}));
-    assert_eq!((v["normals"], v["uvs"]), (json!(false), json!(false)));
+    assert_eq!((&v["normals"], &v["uvs"]), (&json!(false), &json!(false)));
     assert!(v["warnings"][0].as_str().unwrap().starts_with("no normals"));
     assert!(s.execute("asset.meshInfo", &json!({"path": "relative.glb"})).is_err());
     assert!(s.execute("asset.meshInfo", &json!({"path": models.join("missing.glb").to_string_lossy()})).is_err());
@@ -760,7 +760,8 @@ fn model_command_sets_and_persists_the_3d_preview_settings() {
     let reloaded =
         Session::new(Arc::new(fake()), Arc::new(RecordingLauncher::default()), Prefs::from_json(&s.prefs().to_json()));
     assert_eq!(reloaded.model(), s.model());
-    for bad in [json!({"mode": "xray"}), json!({"background": 3}), json!({"exposure": 9}), json!({"turntable": "yes"})] {
+    for bad in [json!({"mode": "xray"}), json!({"background": 3}), json!({"exposure": 9}), json!({"turntable": "yes"})]
+    {
         assert!(s.execute("view.model", &bad).is_err(), "{bad}");
     }
     assert_eq!(s.model().exposure, 150, "a bad call changes nothing");

@@ -341,15 +341,22 @@ fn usage_help_and_version() {
 fn info_prints_mesh_facts_and_fails_per_file() {
     let v = json_of(&["info", &lib("props/models/rune_crate_textured.glb"), "--json"]);
     let r = &v[0];
-    assert_eq!((r["triangles"].as_u64(), r["vertices"].as_u64(), r["materials"].as_u64()), (Some(12), Some(24), Some(1)));
-    assert_eq!((r["normals"], r["uvs"]), (json!(true), json!(true)));
+    assert_eq!(
+        (r["triangles"].as_u64(), r["vertices"].as_u64(), r["materials"].as_u64()),
+        (Some(12), Some(24), Some(1))
+    );
+    assert_eq!((&r["normals"], &r["uvs"]), (&json!(true), &json!(true)));
     assert_eq!(r["images"].as_array().map(Vec::len), Some(2));
-    assert_eq!((r["images"][0]["width"], r["images"][0]["height"], r["images"][0]["drawn"]), (json!(64), json!(64), json!(true)));
+    let image = &r["images"][0];
+    assert_eq!((&image["width"], &image["height"], &image["drawn"]), (&json!(64), &json!(64), &json!(true)));
     assert_eq!(r["images"][1]["drawn"], json!(false), "the metallic-roughness map isn't drawn yet");
     assert_eq!(r["format"], json!("GLB"));
     assert_eq!(r["warnings"].as_array().map(Vec::len), Some(0));
     let size = r["bounds"]["size"].as_array().unwrap();
-    assert!(size.iter().all(|v| (v.as_f64().unwrap() - 2.0).abs() < 1e-3), "a unit cube rotated about Y keeps its height: {size:?}");
+    assert!(
+        size.iter().all(|v| (v.as_f64().unwrap() - 2.0).abs() < 1e-3),
+        "a unit cube rotated about Y keeps its height: {size:?}"
+    );
 
     let human = ok(&["info", &lib("props/models/tombstone.obj")]);
     assert!(human.starts_with("tombstone.obj: "), "{human}");

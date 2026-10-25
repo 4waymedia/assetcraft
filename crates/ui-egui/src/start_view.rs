@@ -71,6 +71,10 @@ pub(crate) struct StartUi {
     pub(crate) cursor: f64,
     /// Track column search, tempo filter and sort.
     pub(crate) filter: crate::start_tracks::TrackFilter,
+    /// Ask "Analyse all N audio files in this folder?" (set when a music folder is picked).
+    pub(crate) ask_analyse: bool,
+    /// The analyser's `(done + failed, batches)` last drawn, to refresh the list and notify once.
+    pub(crate) seen_analyse: (usize, u64),
 }
 
 impl Default for StartUi {
@@ -91,6 +95,8 @@ impl Default for StartUi {
             scrub: None,
             cursor: 0.0,
             filter: crate::start_tracks::TrackFilter::default(),
+            ask_analyse: false,
+            seen_analyse: (0, 0),
         }
     }
 }
@@ -147,6 +153,11 @@ impl StartUi {
     /// Look for tracks again next time the screen shows (the open folder may have changed).
     pub(crate) fn library_refresh(&mut self) {
         self.library = None;
+    }
+
+    /// Whether the track list has been read since the last refresh.
+    pub(crate) fn library_loaded(&self) -> bool {
+        self.library.is_some()
     }
 }
 

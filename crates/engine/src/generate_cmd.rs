@@ -145,8 +145,12 @@ pub(crate) fn read_cue(s: &Session, path: &Path) -> Result<CueMap, CmdError> {
     CueMap::from_json(&bytes).map_err(|e| CmdError::Unavailable(e.to_string()))
 }
 
-/// The audio file a cue map describes (`track.file`, next to the cue map).
-pub(crate) fn track_path(path: &Path, cue: &CueMap) -> PathBuf {
+/// The audio file a cue map describes: `track.file` next to the cue map, or, for one the in-app
+/// analyser stored, the song its `.source` names.
+pub(crate) fn track_path(s: &Session, path: &Path, cue: &CueMap) -> PathBuf {
+    if let Some(audio) = s.stored_audio(path, &cue.track.file) {
+        return audio;
+    }
     path.parent().map(|d| d.join(&cue.track.file)).unwrap_or_else(|| PathBuf::from(&cue.track.file))
 }
 
@@ -172,7 +176,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     let shape = shape_param(p, s.boards.generated.as_ref().map(|g| g.shape).unwrap_or_default())?;
     let fit_mode = fit_mode_param(p)?;
     let cue = read_cue(s, &path)?;
-    let track_path = track_path(&path, &cue);
+    let track_path = track_path(s, &path, &cue);
     let name = match p.get("name").and_then(Value::as_str).map(str::trim) {
         Some(n) if !n.is_empty() && n.len() <= 256 => n.to_owned(),
         Some(_) => return Err(CmdError::BadParams("`name` must be 1–256 bytes".into())),

@@ -12,7 +12,8 @@ use crate::dock::{self, Panel};
 use crate::widgets::format_size;
 use crate::{Navigator, content::sort_name, pathbar};
 use assetcraft_engine::{
-    BoardView, CommandSpec, Location, Mode, ModelBackground, ModelDisplay, SortKey, ThemeMode, ViewMode, commands, same_path,
+    BoardView, CommandSpec, Location, Mode, ModelBackground, ModelDisplay, SortKey, ThemeMode, ViewMode, commands,
+    same_path,
 };
 use egui::{Button, Rect, Ui};
 use serde_json::{Value, json};
@@ -38,10 +39,13 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // The Start screen (design 3b / 3c) drives these.
     "storyboard.musicFolder",
     "storyboard.tracks",
+    "storyboard.analyse",
     "storyboard.preview",
     "track.preview",
     "track.previewVolume",
     "track.peaks",
+    // `assetcraft-cli analyze --cuemap` and automation; the app analyses through storyboard.analyse.
+    "track.analyze",
     "storyboard.text.style",
     "storyboard.undo",
     "storyboard.redo",

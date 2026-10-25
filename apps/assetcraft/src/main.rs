@@ -66,8 +66,14 @@ impl eframe::App for App {
 fn main() -> ExitCode {
     let path = prefs_file::config_path();
     let prefs = path.as_deref().map(prefs_file::load).unwrap_or_default();
+    // In-app track analyses live beside prefs.json (macOS: ~/Library/Application Support/AssetCraft/analysis),
+    // never beside the user's music.
+    let analysis_dir = path.as_deref().and_then(std::path::Path::parent).map(|d| d.join("analysis"));
     let store = PrefsStore::new(path, prefs.clone());
     let mut session = Session::new(Arc::new(RealFs::new()), Arc::new(SystemLauncher), prefs);
+    if let Some(dir) = analysis_dir {
+        session = session.with_analysis_dir(dir);
+    }
     let cache_root = assetcraft_cache::root::resolve_here(&assetcraft_cache::root::ASSETCRAFT, None);
     if let Some(root) = cache_root.dir {
         session = session.with_thumb_cache(DiskCache::open(root, DEFAULT_DISK_BUDGET));

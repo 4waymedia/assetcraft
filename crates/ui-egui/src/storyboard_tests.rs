@@ -782,3 +782,70 @@ fn space_plays_and_pauses_the_cut_from_the_playhead_and_a_new_track_starts_at_ze
     assert!(nav.session().preview_state().is_none());
     assert_eq!(nav.state.storyboard.start.cursor, 0.0);
 }
+
+/// A 16-bit mono 22,050 Hz WAV of clicks at 120 BPM (a pulse the analyser can find).
+fn click_wav(secs: f32) -> Vec<u8> {
+    let rate = 22_050u32;
+    let n = (secs * rate as f32) as usize;
+    let mut x = vec![0i16; n];
+    let mut at = (0.25 * rate as f32) as usize;
+    while at < n {
+        for i in 0..110usize {
+            if let Some(v) = x.get_mut(at + i) {
+                *v = (24_000.0 * (-(i as f32) / 30.0).exp() * (i as f32 * 0.57).sin()) as i16;
+            }
+        }
+        at += (rate / 2) as usize;
+    }
+    let data = (n * 2) as u32;
+    let mut b = Vec::new();
+    for part in [&b"RIFF"[..], &(36 + data).to_le_bytes(), b"WAVEfmt ", &16u32.to_le_bytes()] {
+        b.extend_from_slice(part);
+    }
+    for v in [1u16, 1] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 2).to_le_bytes());
+    for v in [2u16, 16] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data.to_le_bytes());
+    for v in x {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b
+}
+
+#[test]
+fn analysing_from_the_start_screen_refreshes_the_list_and_notifies_when_done() {
+    let dir = std::env::temp_dir().join(format!("ac-analyse-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(std::fs::create_dir_all(dir.join("music")).is_ok());
+    assert!(std::fs::write(dir.join("music").join("Pulse.wav"), click_wav(40.0)).is_ok());
+    let mut nav = nav();
+    nav.session.set_analysis_dir(dir.join("analysis"));
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.join("music").to_string_lossy() }));
+    let ctx = Context::default();
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let rows = nav.state.storyboard.start.tracks_all();
+    assert_eq!(rows.len(), 1);
+    assert_eq!((&rows[0]["analysed"], &rows[0]["status"]), (&json!(false), &json!("new")));
+    // Picking a folder asks; answering "Analyse all" runs storyboard.analyse.
+    nav.state.storyboard.start.ask_analyse = true;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert!(nav.state.storyboard.start.ask_analyse, "still asking: one song waits");
+    super::start_tracks::tests_start_analysis(&mut nav);
+    assert!(!nav.state.storyboard.start.ask_analyse, "answered");
+    let done = frames_until(&ctx, &mut nav, &mut t, |n| {
+        n.state.storyboard.start.tracks_all().first().is_some_and(|r| r["analysed"] == true)
+    });
+    assert!(done, "the row turns analysed without a manual refresh");
+    let message = nav.state.message.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert_eq!(message, "Analysed 1 track");
+    assert!(std::fs::read_dir(dir.join("music")).map(|d| d.count()).unwrap_or(0) == 1, "music folder untouched");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -46,6 +46,7 @@ the CLI exposes that as `--dry-run` (§3.4).
 | `probe <file> [--json]`                            | Type, dimensions, size, times, header status              | `item.probe`                    |
 | `thumb <file> --out <png> [--size px] [--force] [--heic]` | A thumbnail PNG (atomic write, never overwrites without `--force`) | `assetcraft_thumbs::render` (the only direct call) |
 | `analyze <audio>… [--json]`                        | Duration, rate, channels, peak, RMS                       | `track.summary`                 |
+| `analyze <audio>… --cuemap [--force] [--json]`     | Beats, bars, sections, hits, fits → `<stem>.cuemap.json` beside each file (atomic write; kept unless `--force`); what the Start screen reads | `track.analyze` (A2c-1, 2026-10-25) |
 | `commands [<filter>] [--json] [--dir <folder>]`    | Every command (id or label containing the filter), with ENABLED / `enabled` + `disabledReason` for a fresh session at `--dir` | `Session::command_infos` (`app.commands`) |
 | `describe <id> [--dir <folder>]`                   | One command's `app.commands` entry as JSON                | `Session::command_info`         |
 | `exec <id> [<json>] [--dir <folder>]`              | One command; pretty JSON result                           | `Session::execute`              |
@@ -69,7 +70,7 @@ SUBCOMMANDS
   list <dir> [--json] [--sort k] [--desc] [--hidden]
   probe <file> [--json]
   thumb <file> --out <png> [--size px] [--force] [--heic]
-  analyze <audio>… [--json]
+  analyze <audio>… [--json] [--cuemap [--force]]
   mcp                                  MCP server on stdio (headless, or --bridge to the live app)
   serve --control <port|0>             headless control server (control-protocol.md)
   help [<subcommand>] | --help | -V | --version | version

@@ -1,7 +1,7 @@
 //! Track commands (`docs/track-analysis.md` §9.1, phase A1): read a track's audio facts.
 //!
 //! Decoding is `assetcraft-audio` (SoundCraft's decoder, with Storyboard's limits). A1 answers
-//! `track.summary`; analysis (`track.analyze`) and playback build on the same decode.
+//! `track.summary`; A2c answers `track.analyze` (the cue map); playback builds on the same decode.
 
 use crate::audio_out::PreviewMode;
 use crate::{CmdError, CmdResult, Session};
@@ -30,6 +30,45 @@ pub(crate) fn track_summary(s: &mut Session, p: &Value) -> CmdResult {
         map.insert("path".into(), json!(path.to_string_lossy()));
     }
     Ok(v)
+}
+
+/// `track.analyze {path}` → `{path, cueMapPath, cueMap, seconds, tempo: {bpm, candidates, half,
+/// double, pulseClarity, stabilityCv, rhythm}}`: decode, analyse (A2a curves, A2b tempo) and build
+/// the cue map (`assetcraft_storyboard::cue_map`). Reads only; `cueMapPath` is where a writer
+/// would put the sidecar (`<stem>.cuemap.json` beside the audio), which is what `storyboard.tracks`
+/// looks for. The CLI's `analyze --cuemap` writes it; the app's background job comes with A2c-2.
+pub(crate) fn track_analyze(s: &mut Session, p: &Value) -> CmdResult {
+    let path = audio_path(p)?;
+    let started = std::time::Instant::now();
+    let audio = assetcraft_audio::load(s.services.as_ref(), &path).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    let file = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| CmdError::BadParams("`path` has no file name".into()))?;
+    let facts = assetcraft_storyboard::TrackFacts {
+        file: &file,
+        sample_rate: audio.rate(),
+        duration_frames: audio.frames() as u64,
+    };
+    let curves = assetcraft_analysis::curves(&audio.analysis_signal());
+    let tempo = assetcraft_analysis::tempo(&curves);
+    let cue = assetcraft_storyboard::cue_map(&facts, &curves, tempo.as_ref())
+        .map_err(|e| CmdError::Unavailable(format!("{}: {e}", path.display())))?;
+    let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| file.clone());
+    let cue_map_path = path.with_file_name(format!("{stem}{}", crate::generate_cmd::CUEMAP_SUFFIX));
+    let tempo = tempo.map(|t| {
+        json!({
+            "bpm": t.bpm, "candidates": t.candidates, "half": t.half, "double": t.double,
+            "pulseClarity": t.pulse_clarity, "stabilityCv": t.stability_cv, "rhythm": t.rhythm,
+        })
+    });
+    Ok(json!({
+        "path": path.to_string_lossy(),
+        "cueMapPath": cue_map_path.to_string_lossy(),
+        "cueMap": serde_json::to_value(&cue).unwrap_or(Value::Null),
+        "seconds": started.elapsed().as_secs_f64(),
+        "tempo": tempo,
+    }))
 }
 
 /// `track.preview {path | null, from?, cut?: {cueMap, seconds?, fit?}}`: play a track from the

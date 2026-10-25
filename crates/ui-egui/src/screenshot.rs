@@ -108,7 +108,11 @@ fn shoot(
     events: Vec<egui::Event>,
     t: f64,
 ) -> (Vec<u8>, usize, usize) {
-    let (w, h) = (1360usize, 860usize);
+    // `AC_SIZE=1000x700` picks the window size (default 1360x860), to check narrow layouts.
+    let (w, h) = std::env::var("AC_SIZE")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .unwrap_or((1360usize, 860usize));
     let input = RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(w as f32, h as f32))),
         time: Some(t),
@@ -211,6 +215,8 @@ fn screenshot() {
     // The Start screen (no board yet). `AC_MUSIC=/abs/folder` sets the music folder first.
     nav.run("app.mode", json!({ "mode": "storyboard" }));
     if let Some(music) = std::env::var_os("AC_MUSIC") {
+        // An analysis folder too, so the Start screen offers Analyse (stored beside the PNG).
+        nav.session.set_analysis_dir(out.with_file_name(format!("{stem}-analysis")));
         nav.run("storyboard.musicFolder", json!({ "path": music.to_string_lossy() }));
     }
     let mut start = None;

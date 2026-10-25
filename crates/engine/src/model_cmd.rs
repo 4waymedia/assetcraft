@@ -64,7 +64,10 @@ pub(crate) fn describe(mesh: &Mesh) -> Value {
             let drawn = mesh.materials.iter().any(|m| m.base_color_image == Some(i as u32));
             let dims = image_dimensions(&image.bytes);
             if dims.is_none() {
-                warnings.push(format!("image {i}: dimensions unreadable ({})", if image.mime.is_empty() { "unknown type" } else { &image.mime }));
+                warnings.push(format!(
+                    "image {i}: dimensions unreadable ({})",
+                    if image.mime.is_empty() { "unknown type" } else { &image.mime }
+                ));
             }
             json!({
                 "index": i,
@@ -76,9 +79,9 @@ pub(crate) fn describe(mesh: &Mesh) -> Value {
             })
         })
         .collect();
-    let bounds = mesh.bounds().map(|(lo, hi)| {
-        json!({ "min": lo, "max": hi, "size": [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]] })
-    });
+    let bounds = mesh
+        .bounds()
+        .map(|(lo, hi)| json!({ "min": lo, "max": hi, "size": [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]] }));
     json!({
         "vertices": mesh.positions.len(),
         "triangles": mesh.triangle_count(),

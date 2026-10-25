@@ -246,6 +246,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         READ,
+        "track.analyze",
+        "Analyze Track",
+        "Storyboard",
+        None,
+        "{path} → {path, cueMapPath, cueMap, seconds, tempo: {bpm, candidates, half, double, pulseClarity, stabilityCv, rhythm}} (decodes and analyses the whole file: beats, bars, sections, hits, fits; writes nothing; cueMapPath is the sidecar storyboard.tracks reads)",
+        crate::track_cmd::track_analyze
+    ),
+    cmd!(
+        READ,
         "track.peaks",
         "Track Waveform",
         "Storyboard",
@@ -268,8 +277,17 @@ static COMMANDS: &[CommandSpec] = &[
         "Music Library",
         "Storyboard",
         None,
-        "{} → {musicFolder, tracks: [{audio, cueMap, analysed, title, artist, license, seconds, bpm, lengths}]} (music folder + the open folder)",
+        "{} → {musicFolder, tracks: [{audio, cueMap, analysed, title, artist, license, seconds, bpm, lengths, status?: new|queued|analysing|failed, error?}], analysis: {pending, done, failed, batches, available}} (music folder + the open folder)",
         crate::library_cmd::sb_tracks
+    ),
+    cmd!(
+        APP,
+        "storyboard.analyse",
+        "Analyse Tracks",
+        "Storyboard",
+        None,
+        "{paths?: [audio]} → {queued, pending, message} (analyses in the background: beats, bars, sections, hits, fits; default every listed track not analysed yet; results kept in AssetCraft's own analysis folder, never beside the music; storyboard.tracks shows queued / analysing / failed and counts the queue in `analysis`)",
+        crate::analyse_job::sb_analyse
     ),
     cmd!(
         READ,
@@ -585,7 +603,8 @@ fn view_model(s: &mut Session, p: &Value) -> CmdResult {
     }
     if let Some(v) = p.get("mode") {
         let text = v.as_str().unwrap_or_default();
-        next.mode = crate::ModelDisplay::parse(text).ok_or_else(|| CmdError::BadParams(format!("unknown mode `{text}`")))?;
+        next.mode =
+            crate::ModelDisplay::parse(text).ok_or_else(|| CmdError::BadParams(format!("unknown mode `{text}`")))?;
     }
     if let Some(v) = p.get("background") {
         let text = v.as_str().unwrap_or_default();
@@ -595,7 +614,8 @@ fn view_model(s: &mut Session, p: &Value) -> CmdResult {
     if let Some(v) = p.get("exposure") {
         let (lo, hi) = crate::prefs::EXPOSURE_RANGE;
         let e = v.as_u64().filter(|e| (u64::from(lo)..=u64::from(hi)).contains(e));
-        next.exposure = e.map(|e| e as u16).ok_or_else(|| CmdError::BadParams(format!("`exposure` must be {lo}..{hi}")))?;
+        next.exposure =
+            e.map(|e| e as u16).ok_or_else(|| CmdError::BadParams(format!("`exposure` must be {lo}..{hi}")))?;
     }
     s.model = next;
     Ok(json!({ "model": s.model }))

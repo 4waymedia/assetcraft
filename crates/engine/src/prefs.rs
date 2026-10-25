@@ -89,8 +89,12 @@ impl ModelDisplay {
     }
 
     /// Every mode, in menu order, with its label.
-    pub const ALL: [(ModelDisplay, &'static str); 4] =
-        [(Self::Shaded, "Shaded"), (Self::Wireframe, "Wireframe"), (Self::Normals, "Normals"), (Self::Uv, "UV Checker")];
+    pub const ALL: [(ModelDisplay, &'static str); 4] = [
+        (Self::Shaded, "Shaded"),
+        (Self::Wireframe, "Wireframe"),
+        (Self::Normals, "Normals"),
+        (Self::Uv, "UV Checker"),
+    ];
 }
 
 /// What is behind the 3D preview (`view.model {background}`).

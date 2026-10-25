@@ -162,6 +162,7 @@ mod tests {
                 "storyboard.preview",
                 "storyboard.state",
                 "storyboard.tracks",
+                "track.analyze",
                 "track.peaks",
                 "track.summary"
             ])

@@ -6,6 +6,12 @@
 //! first drop); a click on a section of the selected track's strip previews from that section's
 //! start (Paul, 2026-10-16: sample the chorus or the verse); the music folder row runs
 //! `storyboard.musicFolder`.
+//!
+//! Analysis (A2c-2; Paul, 2026-10-25): a not-analysed row has an **Analyse** button, the footer
+//! **Analyse all**, and picking a folder with unanalysed songs asks "Analyse all N audio files in
+//! this folder?". All run `storyboard.analyse`; the rows show queued / analysing / failed while the
+//! background analyser works, the list refreshes as songs finish, and a notification says when the
+//! batch is done.
 
 use crate::Navigator;
 use crate::storyboard_view::{ACCENT, SELECT};
@@ -93,6 +99,8 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
     });
     ui.add_space(4.0);
     folder_row(nav, ui);
+    let analyse = analyse_poll(nav, ui);
+    ask_banner(nav, ui, &all, analyse);
     ui.add_space(4.0);
     let filter = &mut nav.state.storyboard.start.filter;
     ui.add(
@@ -140,9 +148,13 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
         .preview_state()
         .filter(|_| song_mode)
         .map(|(p, loading)| (p.to_string_lossy().into_owned(), loading));
-    let footer_h = 28.0;
+    // The footer: an analyse line (when there's something to analyse) above the counts + volume line.
+    let not_analysed = all.iter().filter(|t| t["analysed"] != true).count();
+    let analyse_line = analyse.pending > 0 || (analyse.available && not_analysed > 0);
+    let footer_h = if analyse_line { 54.0 } else { 28.0 };
     let list_h = (ui.available_height() - footer_h).max(80.0);
     let mut preview: Option<Value> = None;
+    let mut to_analyse: Option<Value> = None;
     egui::ScrollArea::vertical().id_salt("sb-start-tracks").max_height(list_h).auto_shrink([false, false]).show(
         ui,
         |ui| {
@@ -165,16 +177,9 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
                 }
             }
             for t in &pending {
-                ui.horizontal(|ui| {
-                    ui.add_space(28.0);
-                    ui.label(RichText::new(t["title"].as_str().unwrap_or("?")).color(Color32::from_gray(0x6a)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new("not analysed").monospace().small().color(Color32::from_gray(0x6a)))
-                            .on_hover_text(
-                                "No cue map beside this file yet; the built-in analyser (A2–A4) will add one",
-                            );
-                    });
-                });
+                if let Some(audio) = pending_row(ui, t, analyse.available) {
+                    to_analyse = Some(json!({ "paths": [audio] }));
+                }
             }
         },
     );
@@ -186,14 +191,27 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
     }
     let analysed = all.iter().filter(|t| t["analysed"] == true).count();
+    let waiting = all.len() - analysed;
     ui.separator();
+    // Its own line, so it never runs into the volume slider in a narrow column (Paul, 2026-10-25).
+    if analyse_line {
+        ui.horizontal(|ui| {
+            if analyse.pending > 0 {
+                ui.spinner();
+                ui.label(RichText::new(format!("Analysing… {} to go", analyse.pending)).small().color(TEXT_AI));
+            } else {
+                let all_btn = ui
+                    .small_button(format!("Analyse all ({waiting})"))
+                    .on_hover_text("Find beats, bars, sections and drops in every song not analysed yet");
+                if all_btn.clicked() {
+                    to_analyse = Some(json!({}));
+                }
+            }
+        });
+    }
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("{analysed} tracks · {} not analysed", all.len() - analysed))
-                .monospace()
-                .small()
-                .weak(),
-        );
+        ui.label(RichText::new(format!("{analysed} ready · {waiting} to analyse")).monospace().small().weak())
+            .on_hover_text(format!("{analysed} tracks analysed, {waiting} not analysed yet"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Preview volume (Paul, 2026-10-16: a quick sample at a low volume). Saved; the Cut stays at full level.
             let mut v = nav.session.preview_volume();
@@ -208,7 +226,163 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
             ui.label(RichText::new("Preview").small().weak());
         });
     });
+    if let Some(params) = to_analyse {
+        start_analysis(nav, params);
+    }
     pick
+}
+
+/// The analyser as this frame sees it.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct AnalyseView {
+    /// Songs still queued or running.
+    pub(crate) pending: usize,
+    /// The app keeps analyses somewhere (`storyboard.analyse` can run).
+    pub(crate) available: bool,
+}
+
+/// Tests: answer the folder prompt with "Analyse all".
+#[cfg(test)]
+pub(crate) fn tests_start_analysis(nav: &mut Navigator) {
+    start_analysis(nav, json!({}));
+}
+
+/// Run `storyboard.analyse` and say what started.
+fn start_analysis(nav: &mut Navigator, params: Value) {
+    nav.state.storyboard.start.ask_analyse = false;
+    if let Some(r) = nav.run("storyboard.analyse", params) {
+        if let Some(m) = r["message"].as_str() {
+            nav.inform(m.to_owned());
+        }
+        nav.state.storyboard.start.library_refresh();
+    }
+}
+
+/// Follow the background analyser: repaint while it works, refresh the list as songs finish, and
+/// notify once when a batch is done.
+fn analyse_poll(nav: &mut Navigator, ui: &Ui) -> AnalyseView {
+    let p = nav.session.analyse_progress();
+    let available = nav.session.analysis_dir().is_some();
+    let start = &mut nav.state.storyboard.start;
+    let finished = p.done + p.failed;
+    let (seen_finished, seen_batches) = start.seen_analyse;
+    if finished != seen_finished || p.batches != seen_batches {
+        start.seen_analyse = (finished, p.batches);
+        start.library_refresh();
+    }
+    if p.batches != seen_batches && p.pending == 0 && finished > 0 {
+        let mut m = format!("Analysed {} track{}", p.done, if p.done == 1 { "" } else { "s" });
+        if p.failed > 0 {
+            m.push_str(&format!(", {} failed (hover a row to see why)", p.failed));
+        }
+        if p.failed > 0 && p.done == 0 {
+            nav.notify(m);
+        } else {
+            nav.inform(m);
+        }
+    }
+    if p.pending > 0 {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+    }
+    AnalyseView { pending: p.pending, available }
+}
+
+/// After a folder is picked: "Analyse all N audio files in this folder?" (Paul, 2026-10-25).
+fn ask_banner(nav: &mut Navigator, ui: &mut Ui, all: &[Value], analyse: AnalyseView) {
+    let waiting = all.iter().filter(|t| t["analysed"] != true && t["status"] != "failed").count();
+    if !nav.state.storyboard.start.ask_analyse {
+        return;
+    }
+    if waiting == 0 || !analyse.available || analyse.pending > 0 {
+        // Nothing to ask (yet): keep asking only while the list is still loading.
+        if nav.state.storyboard.start.library_loaded() {
+            nav.state.storyboard.start.ask_analyse = false;
+        }
+        return;
+    }
+    let mut answer = None;
+    egui::Frame::new()
+        .fill(Color32::from_rgb(0x1a, 0x2a, 0x40))
+        .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(77, 163, 255, 90)))
+        .corner_radius(4)
+        .inner_margin(8)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let files = if waiting == 1 { "1 audio file" } else { "audio files" };
+            let question = if waiting == 1 {
+                format!("Analyse the {files} in this folder?")
+            } else {
+                format!("Analyse all {waiting} {files} in this folder?")
+            };
+            ui.label(RichText::new(question).strong());
+            ui.label(
+                RichText::new(
+                    "Finds beats, bars, sections and drops so you can build a storyboard. Your files aren't changed.",
+                )
+                .small()
+                .weak(),
+            );
+            ui.horizontal(|ui| {
+                if ui.button(RichText::new("Analyse all").color(Color32::WHITE)).clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Not now").clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+    match answer {
+        Some(true) => start_analysis(nav, json!({})),
+        Some(false) => nav.state.storyboard.start.ask_analyse = false,
+        None => {}
+    }
+}
+
+/// Width kept for a pending row's status (Analyse, Retry + failed, spinner + analysing).
+const STATUS_W: f32 = 96.0;
+
+/// A row for a song that isn't analysed: its title, and Analyse / queued / analysing / failed.
+/// Returns the song's path when its Analyse (or Retry) button is clicked.
+fn pending_row(ui: &mut Ui, t: &Value, available: bool) -> Option<String> {
+    let audio = t["audio"].as_str().unwrap_or("").to_owned();
+    let dim = Color32::from_gray(0x6a);
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.add_space(28.0);
+        // Long titles end in "…" before the status (Paul, 2026-10-25); the full name on hover.
+        let title = t["title"].as_str().unwrap_or("?");
+        let room = (ui.available_width() - STATUS_W).max(40.0);
+        ui.allocate_ui(vec2(room, ui.spacing().interact_size.y), |ui| {
+            ui.add(egui::Label::new(RichText::new(title).color(dim)).truncate()).on_hover_text(title);
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            match t["status"].as_str().unwrap_or("new") {
+                "queued" => {
+                    ui.label(RichText::new("queued").monospace().small().color(dim));
+                }
+                "analysing" => {
+                    ui.spinner();
+                    ui.label(RichText::new("analysing").monospace().small().color(TEXT_AI));
+                }
+                "failed" => {
+                    let why = t["error"].as_str().unwrap_or("unknown error");
+                    clicked |= ui.small_button("Retry").on_hover_text(format!("Couldn't analyse: {why}")).clicked();
+                    ui.label(RichText::new("failed").monospace().small().color(Color32::from_rgb(0xe5, 0x6a, 0x6a)))
+                        .on_hover_text(why);
+                }
+                _ if available => {
+                    clicked |= ui
+                        .small_button("Analyse")
+                        .on_hover_text("Find this song's beats, bars, sections and drops")
+                        .clicked();
+                }
+                _ => {
+                    ui.label(RichText::new("not analysed").monospace().small().color(dim));
+                }
+            }
+        });
+    });
+    clicked.then_some(audio)
 }
 
 /// The section under `x` on a strip: `(label, start seconds)`.
@@ -423,6 +597,7 @@ fn folder_row(nav: &mut Navigator, ui: &mut Ui) {
     {
         nav.state.storyboard.start.library_refresh();
         nav.state.storyboard.start.clear_track();
+        nav.state.storyboard.start.ask_analyse = true;
     }
 }
 

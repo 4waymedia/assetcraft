@@ -18,6 +18,8 @@ assetcraft-thumbs = { workspace = true }
 assetcraft-watch = { workspace = true }
 assetcraft-storyboard = { workspace = true }
 assetcraft-audio = { workspace = true }
+assetcraft-analysis = { workspace = true }
+assetcraft-cache = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

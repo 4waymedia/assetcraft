@@ -32,7 +32,7 @@ COMMANDS:
     list <dir>                 List a folder the way the navigator shows it
     probe <file>               File type, dimensions, size, times, header status
     thumb <file> --out <png>   Render a thumbnail to a PNG file
-    analyze <audio>...         Track facts: duration, rate, channels, peak, RMS
+    analyze <audio>...         Track facts, or --cuemap: write <stem>.cuemap.json for Storyboard mode
     info <model>...            3D model facts: counts, bounds, materials, images, warnings
     commands                   List every engine command
     describe <id>              One command as JSON: params, effects, enabled now and why not
@@ -114,19 +114,24 @@ Unsupported, unreadable or too-large files print a message on stderr and exit 1.
 ";
 
 const ANALYZE_HELP: &str = "\
-assetcraft-cli analyze: decode audio tracks and print their facts (engine track.summary)
+assetcraft-cli analyze: decode audio tracks and print their facts, or write their cue maps
 
 USAGE:
     assetcraft-cli analyze <audio>... [--summary] [--json]
+    assetcraft-cli analyze <audio>... --cuemap [--force] [--json]
 
-One line per file: length, sample rate, channels, peak and RMS (dBFS). A file that can't be
+Without --cuemap (engine track.summary): one line per file with length, sample rate, channels,
+peak and RMS (dBFS). With --cuemap (engine track.analyze): beats, bars, sections, hits and Fit
+to length for 30/60/90/120 s, written to <stem>.cuemap.json beside each file (atomically: temp
+file, then rename), which is what Storyboard mode's Start screen reads. A file that can't be
 decoded prints its reason and the rest carry on; the exit code is 1 if any failed. Limits: 20
-minutes, 8 channels, 8-384 kHz, 512 MiB. Phase A1 prints the summary only (--summary is the
-default); beats, sections and fits come with later phases.
+minutes, 8 channels, 8-384 kHz, 512 MiB.
 
 OPTIONS:
-    --summary        The summary (default)
-    --json           A JSON array of track.summary results ({path, error} for failures)
+    --summary        The summary (default without --cuemap)
+    --cuemap         Analyse and write <stem>.cuemap.json beside each file
+    --force          With --cuemap: replace an existing cue map (otherwise it is kept and skipped)
+    --json           A JSON array of results ({path, error} for failures; the cue maps with --cuemap)
     -h, --help       Print help
 ";
 
@@ -191,7 +196,7 @@ OPTIONS:
 const LIST_SPEC: Spec = Spec { switches: &["--json", "--desc", "--hidden"], values: &["--sort"] };
 const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
-const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary"], values: &[] };
+const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary", "--cuemap", "--force"], values: &[] };
 const INFO_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
 const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
@@ -457,6 +462,9 @@ const MAX_ANALYZE_FILES: usize = 1_000;
 
 fn analyze(p: &Parsed, help: &'static str) -> Outcome {
     let files = positionals(p, 1, MAX_ANALYZE_FILES, "<audio>", help)?;
+    if p.has("--cuemap") {
+        return analyze_cuemaps(files, p.has("--force"), p.has("--json"));
+    }
     let mut s = session(None);
     let mut results = Vec::new();
     let mut failed = 0;
@@ -506,6 +514,77 @@ fn analyze(p: &Parsed, help: &'static str) -> Outcome {
     };
     if failed > 0 {
         // Print what worked, then fail.
+        print_out(&out);
+        return Err(Failure::Failed(format!("{failed} of {} file(s) could not be analysed", results.len())));
+    }
+    Ok(out)
+}
+
+/// `analyze --cuemap`: `track.analyze` per file, the cue map written to `<stem>.cuemap.json`
+/// beside it (kept and skipped when present, unless `force`).
+fn analyze_cuemaps(files: &[String], force: bool, json: bool) -> Outcome {
+    let mut s = session(None);
+    let mut results = Vec::new();
+    let mut out = String::new();
+    let mut failed = 0;
+    for f in files {
+        let file = absolute(f);
+        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let analysed = match path_str(&file) {
+            Ok(path) => s.execute("track.analyze", &json!({ "path": path })),
+            Err(_) => Err(CmdError::BadParams("path is not valid UTF-8".into())),
+        };
+        let v = match analysed {
+            Ok(v) => v,
+            Err(e) => {
+                failed += 1;
+                out.push_str(&format!("{name}: {e}\n"));
+                results.push(json!({ "path": file.to_string_lossy(), "error": e.to_string() }));
+                continue;
+            }
+        };
+        let cue_path = PathBuf::from(v["cueMapPath"].as_str().unwrap_or_default());
+        let cue_name = cue_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let cue = &v["cueMap"];
+        let fits = cue["fits"].as_object().map_or_else(String::new, |m| {
+            let mut secs: Vec<u32> = m.keys().filter_map(|k| k.parse().ok()).collect();
+            secs.sort_unstable();
+            secs.iter().map(u32::to_string).collect::<Vec<_>>().join("/")
+        });
+        let line = format!(
+            "{} BPM, {} bars, {} sections, {} hits, fits {} ({:.1} s)",
+            cue["bpm"],
+            cue["downbeats"].as_array().map_or(0, Vec::len),
+            cue["sections"].as_array().map_or(0, Vec::len),
+            cue["hits"].as_array().map_or(0, Vec::len),
+            if fits.is_empty() { "none" } else { fits.as_str() },
+            v["seconds"].as_f64().unwrap_or(0.0),
+        );
+        let path_json = file.to_string_lossy().into_owned();
+        let cue_path_json = cue_path.to_string_lossy().into_owned();
+        if !force && std::fs::symlink_metadata(&cue_path).is_ok() {
+            out.push_str(&format!("{cue_name}: kept (use --force to replace); analysis: {line}\n"));
+            results.push(json!({ "path": path_json, "cueMapPath": cue_path_json, "written": false, "cueMap": cue }));
+            continue;
+        }
+        let mut bytes = serde_json::to_vec_pretty(cue).unwrap_or_default();
+        bytes.push(b'\n');
+        match write_atomic(&cue_path, &bytes, force) {
+            Ok(()) => {
+                out.push_str(&format!("{cue_name}: {line}\n"));
+                results.push(json!({ "path": path_json, "cueMapPath": cue_path_json, "written": true, "cueMap": cue }));
+            }
+            Err(e) => {
+                failed += 1;
+                out.push_str(&format!("{cue_name}: can't write: {e}\n"));
+                results.push(
+                    json!({ "path": path_json, "cueMapPath": cue_path_json, "error": format!("can't write: {e}") }),
+                );
+            }
+        }
+    }
+    let out = if json { pretty(&Value::Array(results.clone())) } else { out };
+    if failed > 0 {
         print_out(&out);
         return Err(Failure::Failed(format!("{failed} of {} file(s) could not be analysed", results.len())));
     }
@@ -564,7 +643,10 @@ fn info(p: &Parsed, help: &'static str) -> Outcome {
                     let size = r["bounds"]["size"]
                         .as_array()
                         .map(|s| {
-                            s.iter().map(|v| format!("{:.3}", v.as_f64().unwrap_or(0.0))).collect::<Vec<_>>().join(" × ")
+                            s.iter()
+                                .map(|v| format!("{:.3}", v.as_f64().unwrap_or(0.0)))
+                                .collect::<Vec<_>>()
+                                .join(" × ")
                         })
                         .unwrap_or_else(|| "empty".into());
                     let attrs = match (r["normals"].as_bool(), r["uvs"].as_bool()) {

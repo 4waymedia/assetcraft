@@ -19,7 +19,9 @@ use crate::widgets::fit_at_most;
 use assetcraft_engine::{ModelBackground, ModelDisplay, ModelPrefs};
 use assetcraft_fs::{Entry, EntryKind};
 use assetcraft_probe::Format;
-use assetcraft_thumbs::model::{Background, DisplayMode, Lighting, ModelState, ModelView, RenderOptions, View, is_model};
+use assetcraft_thumbs::model::{
+    Background, DisplayMode, Lighting, ModelState, ModelView, RenderOptions, View, is_model,
+};
 use egui::{
     Align2, Color32, ColorImage, FontId, Id, Order, Rect, Response, TextureHandle, TextureOptions, Ui, Vec2, pos2, vec2,
 };
@@ -396,7 +398,8 @@ mod tests {
         let mut step = 0.0;
         while !saw_fast && std::time::Instant::now() < deadline {
             step += 6.0;
-            run(&mut nav, vec![egui::Event::PointerMoved(preview_center(&nav) + vec2(step, 0.0))]);
+            let at = preview_center(&nav) + vec2(step, 0.0);
+            run(&mut nav, vec![egui::Event::PointerMoved(at)]);
             saw_fast = nav.state.model.as_ref().is_some_and(ModelPreview::shows_fast_frame);
             std::thread::sleep(Duration::from_millis(10));
         }

@@ -324,7 +324,9 @@ dependencies = [
 name = "assetcraft-engine"
 version = "0.0.1"
 dependencies = [
+ "assetcraft-analysis",
  "assetcraft-audio",
+ "assetcraft-cache",
  "assetcraft-fs",
  "assetcraft-probe",
  "assetcraft-storyboard",
@@ -368,6 +370,7 @@ dependencies = [
 name = "assetcraft-storyboard"
 version = "0.0.1"
 dependencies = [
+ "assetcraft-analysis",
  "serde",
  "serde_json",
 ]

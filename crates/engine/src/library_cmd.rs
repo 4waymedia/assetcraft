@@ -2,7 +2,8 @@
 //!
 //! - `storyboard.musicFolder {path | null}`: where to look for music (saved in prefs).
 //! - `storyboard.tracks`: the music the Start screen offers, from the music folder and the folder
-//!   open in the Organizer. A track with a `<name>.cuemap.json` beside it is analysed (title,
+//!   open in the Organizer. A track with a `<name>.cuemap.json` beside it, or one the in-app
+//!   analyser stored (`storyboard.analyse`, `analyse_job.rs`), is analysed (title,
 //!   artist, licence, tempo, the lengths it fits); other audio files are listed as not analysed
 //!   yet (the Rust analyser, A2–A4, will cover them). Cue maps are read size-capped and validated
 //!   as hostile input; nothing else is opened.
@@ -119,9 +120,17 @@ pub(crate) fn sb_tracks(s: &mut Session, _: &Value) -> CmdResult {
     let files = s.library_files();
     // Cue maps first: each names its audio file.
     let mut by_audio: BTreeMap<PathBuf, Value> = BTreeMap::new();
-    for cue_path in files.iter().filter(|p| is_cue_map(p)) {
+    // Sidecars (`<song>.cuemap.json` beside the song) first, then what the in-app analyser stored
+    // for songs without one; a sidecar wins.
+    let sidecars = files.iter().filter(|p| is_cue_map(p)).cloned();
+    let stored: Vec<PathBuf> = files.iter().filter(|p| is_audio(p)).filter_map(|a| s.stored_cue(a)).collect();
+    for cue_path in sidecars.chain(stored).collect::<Vec<_>>().iter() {
         let Ok(cue) = read_cue(s, cue_path) else { continue };
-        let audio = track_path(cue_path, &cue);
+        let audio = track_path(s, cue_path, &cue);
+        // A stored analysis counts only for the listed song it was made for (its `.source` checks out).
+        if by_audio.contains_key(&audio) || (s.is_stored_cue(cue_path) && !files.contains(&audio)) {
+            continue;
+        }
         let sr = f64::from(cue.sample_rate.max(1));
         let seconds = cue.duration_frames as f64 / sr;
         let sections: Vec<Value> = cue
@@ -184,7 +193,9 @@ pub(crate) fn sb_tracks(s: &mut Session, _: &Value) -> CmdResult {
     for audio in files.iter().filter(|p| is_audio(p)) {
         by_audio.entry(audio.clone()).or_insert_with(|| {
             let title = audio.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            json!({ "audio": audio.to_string_lossy(), "cueMap": null, "analysed": false, "title": title })
+            let (status, error) = crate::analyse_job::row_status(s, audio);
+            json!({ "audio": audio.to_string_lossy(), "cueMap": null, "analysed": false, "title": title,
+                    "status": status, "error": error })
         });
     }
     let mut tracks: Vec<Value> = by_audio.into_values().collect();
@@ -196,6 +207,7 @@ pub(crate) fn sb_tracks(s: &mut Session, _: &Value) -> CmdResult {
         "musicFolder": s.music_folder.as_ref().map(|f| f.to_string_lossy()),
         "tracks": tracks,
         "truncated": truncated,
+        "analysis": crate::analyse_job::progress_json(s),
     }))
 }
 
@@ -211,7 +223,7 @@ pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
     let cue = read_cue(s, &path)?;
     let opts = GenerateOptions {
         name: cue.track.title.clone(),
-        track_path: track_path(&path, &cue).to_string_lossy().into_owned(),
+        track_path: track_path(s, &path, &cue).to_string_lossy().into_owned(),
         pacing,
         seconds,
         fit_mode: None,
