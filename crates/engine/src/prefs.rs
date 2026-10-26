@@ -245,6 +245,9 @@ pub struct Prefs {
     pub music_folder: Option<PathBuf>,
     /// Track preview volume in percent, 0–100 (`track.previewVolume`); `None` = the default.
     pub preview_volume: Option<u8>,
+    /// The AssetCraft working folder (`app.workingFolder`); `None` = the default,
+    /// `Documents/AssetCraft`.
+    pub working_folder: Option<PathBuf>,
     /// 3D preview settings (`view.model`).
     pub model: ModelPrefs,
 }
@@ -290,6 +293,7 @@ impl Prefs {
         }
         prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
         prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
+        prefs.working_folder = root.get("working_folder").and_then(Value::as_str).map(PathBuf::from);
         if let Some(Value::Object(model)) = root.get("model") {
             let m = &mut prefs.model;
             set_field(&mut m.turntable, model.get("turntable"));
@@ -310,6 +314,7 @@ impl Prefs {
         clean.favorites.retain(|p| p.to_str().is_some());
         clean.last_folder = clean.last_folder.filter(|p| p.to_str().is_some());
         clean.music_folder = clean.music_folder.filter(|p| p.to_str().is_some());
+        clean.working_folder = clean.working_folder.filter(|p| p.to_str().is_some());
         // Nothing left can fail to serialize; the fallback only guards future fields.
         serde_json::to_string_pretty(&clean).unwrap_or_else(|_| "{}".into())
     }
@@ -350,6 +355,9 @@ mod tests {
         assert_eq!(Prefs::from_json(&p.to_json()).preview_volume, Some(50));
         assert_eq!(Prefs::from_json(r#"{"preview_volume":900}"#).preview_volume, Some(100));
         assert_eq!(Prefs::from_json(r#"{"preview_volume":"loud"}"#).preview_volume, None);
+        p.working_folder = Some("/home/paul/AC".into());
+        assert_eq!(Prefs::from_json(&p.to_json()).working_folder, Some(PathBuf::from("/home/paul/AC")));
+        assert_eq!(Prefs::from_json(r#"{"working_folder":[1]}"#).working_folder, None);
     }
 
     #[test]

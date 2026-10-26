@@ -67,6 +67,7 @@ pub struct Effects {
 
 const READ: &[EffectClass] = &[EffectClass::Read];
 const APP: &[EffectClass] = &[EffectClass::WriteAppState];
+const COPY_IN: &[EffectClass] = &[EffectClass::WriteUserFile, EffectClass::WriteAppState];
 
 /// Note on commands that start another program (spec A4-F4: no `external-process` class yet).
 pub const STARTS_A_PROGRAM: &str =
@@ -94,6 +95,10 @@ impl Effects {
         Effects { idempotent: false, confirm_always: true, note: Some(STARTS_A_PROGRAM), ..Effects::APP };
     /// Runs a program the user picked (`file.run`). Anything can happen, and never remotely.
     pub const RUN: Effects = Effects { destructive: true, remote_allowed: false, ..Effects::LAUNCH };
+    /// Copies files into the AssetCraft working folder (`storyboard.musicImport`): new files only,
+    /// never an overwrite, originals untouched; a repeat skips what's there. Not destructive, but it
+    /// writes into a user-visible folder, so the derived rule asks remote callers to confirm.
+    pub const COPY: Effects = Effects { classes: COPY_IN, ..Effects::READ };
 
     /// Read only: MCP `readOnlyHint`.
     pub fn read_only(&self) -> bool {
@@ -148,7 +153,10 @@ mod tests {
         // Stage 1.5 section of docs/assetcraft-plan.md in the same change.
         assert_eq!(ids(|e| !e.allowed_remotely()), BTreeSet::from(["file.run"]));
         assert_eq!(ids(|e| e.destructive), BTreeSet::from(["file.run"]));
-        assert_eq!(ids(Effects::confirm), BTreeSet::from(["file.open", "file.openIn", "file.reveal", "file.run"]));
+        assert_eq!(
+            ids(Effects::confirm),
+            BTreeSet::from(["file.open", "file.openIn", "file.reveal", "file.run", "storyboard.musicImport"])
+        );
         assert_eq!(
             ids(Effects::read_only),
             BTreeSet::from([
@@ -167,11 +175,12 @@ mod tests {
                 "track.summary"
             ])
         );
-        assert!(
-            ids(|e| e.classes.iter().any(|c| matches!(c, EffectClass::WriteUserFile | EffectClass::ExternalNetwork)))
-                .is_empty(),
-            "nothing writes user files or talks to the network before Stage 2"
+        // Stage 2: the only user-file writer is the Copy import into the working folder (W1).
+        assert_eq!(
+            ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
+            BTreeSet::from(["storyboard.musicImport"])
         );
+        assert!(ids(|e| e.classes.contains(&EffectClass::ExternalNetwork)).is_empty(), "no network before Stage 5");
     }
 
     #[test]

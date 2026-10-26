@@ -287,19 +287,41 @@ fn analyse_poll(nav: &mut Navigator, ui: &Ui) -> AnalyseView {
     AnalyseView { pending: p.pending, available }
 }
 
-/// After a folder is picked: "Analyse all N audio files in this folder?" (Paul, 2026-10-25).
+/// What the folder prompt's buttons do.
+enum Answer {
+    /// Copy the folder's songs into AssetCraft's Music folder, then analyse the copies (W1).
+    Copy,
+    /// Analyse the songs where they are.
+    Here,
+    /// Not now.
+    Dismiss,
+}
+
+/// After a folder is picked (Paul, 2026-10-25): outside the working folder, "N audio files found.
+/// Copy them into your AssetCraft folder and analyse them?" (Copy & analyse · Analyse here · Not
+/// now; decision D-WF1: default to Copy); inside it, "Analyse all N audio files in this folder?".
 fn ask_banner(nav: &mut Navigator, ui: &mut Ui, all: &[Value], analyse: AnalyseView) {
-    let waiting = all.iter().filter(|t| t["analysed"] != true && t["status"] != "failed").count();
     if !nav.state.storyboard.start.ask_analyse {
         return;
     }
-    if waiting == 0 || !analyse.available || analyse.pending > 0 {
+    let folder = nav.session.music_folder().map(std::path::Path::to_path_buf);
+    let music = nav.session.working_music();
+    let in_working = folder.is_some() && folder == music;
+    let in_folder = |t: &&Value| {
+        let audio = t["audio"].as_str().map(std::path::Path::new);
+        folder.as_deref().is_some_and(|f| audio.and_then(std::path::Path::parent) == Some(f))
+    };
+    let songs = all.iter().filter(in_folder).count();
+    let waiting = all.iter().filter(|t| t["analysed"] != true && t["status"] != "failed").count();
+    let offer_copy = !in_working && music.is_some() && songs > 0;
+    if (!offer_copy && waiting == 0) || !analyse.available || analyse.pending > 0 {
         // Nothing to ask (yet): keep asking only while the list is still loading.
         if nav.state.storyboard.start.library_loaded() {
             nav.state.storyboard.start.ask_analyse = false;
         }
         return;
     }
+    let to = music.as_deref().map(|m| short_path(nav, m)).unwrap_or_default();
     let mut answer = None;
     egui::Frame::new()
         .fill(Color32::from_rgb(0x1a, 0x2a, 0x40))
@@ -308,34 +330,87 @@ fn ask_banner(nav: &mut Navigator, ui: &mut Ui, all: &[Value], analyse: AnalyseV
         .inner_margin(8)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let files = if waiting == 1 { "1 audio file" } else { "audio files" };
-            let question = if waiting == 1 {
-                format!("Analyse the {files} in this folder?")
+            let (question, detail) = if offer_copy {
+                let n = if songs == 1 { "1 audio file".to_string() } else { format!("{songs} audio files") };
+                (
+                    format!("{n} found. Copy them into your AssetCraft folder and analyse them?"),
+                    format!("Copies go to {to}. Your originals stay where they are."),
+                )
+            } else if waiting == 1 {
+                ("Analyse the 1 audio file in this folder?".to_string(), String::new())
             } else {
-                format!("Analyse all {waiting} {files} in this folder?")
+                (format!("Analyse all {waiting} audio files in this folder?"), String::new())
             };
             ui.label(RichText::new(question).strong());
-            ui.label(
-                RichText::new(
-                    "Finds beats, bars, sections and drops so you can build a storyboard. Your files aren't changed.",
-                )
-                .small()
-                .weak(),
-            );
-            ui.horizontal(|ui| {
-                if ui.button(RichText::new("Analyse all").color(Color32::WHITE)).clicked() {
-                    answer = Some(true);
+            let detail = if detail.is_empty() {
+                "Finds beats, bars, sections and drops so you can build a storyboard. Your files aren't changed.".into()
+            } else {
+                detail
+            };
+            ui.label(RichText::new(detail).small().weak());
+            ui.horizontal_wrapped(|ui| {
+                if offer_copy {
+                    if ui.button(RichText::new("Copy & analyse").color(Color32::WHITE)).clicked() {
+                        answer = Some(Answer::Copy);
+                    }
+                    if waiting > 0 && ui.button("Analyse here").clicked() {
+                        answer = Some(Answer::Here);
+                    }
+                } else if ui.button(RichText::new("Analyse all").color(Color32::WHITE)).clicked() {
+                    answer = Some(Answer::Here);
                 }
                 if ui.button("Not now").clicked() {
-                    answer = Some(false);
+                    answer = Some(Answer::Dismiss);
                 }
             });
         });
     match answer {
-        Some(true) => start_analysis(nav, json!({})),
-        Some(false) => nav.state.storyboard.start.ask_analyse = false,
+        Some(Answer::Copy) => copy_and_analyse(nav),
+        Some(Answer::Here) => start_analysis(nav, json!({})),
+        Some(Answer::Dismiss) => nav.state.storyboard.start.ask_analyse = false,
         None => {}
     }
+}
+
+/// `~/…` for a folder under home, for messages.
+fn short_path(nav: &Navigator, path: &std::path::Path) -> String {
+    match nav.session.services().home_dir().and_then(|h| path.strip_prefix(h).ok().map(std::path::Path::to_path_buf)) {
+        Some(rel) => format!("~/{}", rel.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// Copy the music folder's songs into AssetCraft's Music folder (`storyboard.musicImport`), show
+/// the Start screen that folder, analyse the copies, and say so (D-WF1: Copy + a notification).
+fn copy_and_analyse(nav: &mut Navigator) {
+    nav.state.storyboard.start.ask_analyse = false;
+    let Some(r) = nav.run("storyboard.musicImport", json!({})) else { return };
+    let start = &mut nav.state.storyboard.start;
+    if let Some(m) = r["music"].as_str()
+        && (r["copied"].as_u64().unwrap_or(0) + r["present"].as_u64().unwrap_or(0)) > 0
+    {
+        *start.folder_text_mut() = m.to_owned();
+        start.clear_track();
+    }
+    start.library_refresh();
+    let mut message = r["message"].as_str().unwrap_or("").to_owned();
+    let tracks = r["tracks"].clone();
+    if tracks.as_array().is_some_and(|t| !t.is_empty())
+        && nav.run("storyboard.analyse", json!({ "paths": tracks })).is_some_and(|a| a["queued"].as_u64() > Some(0))
+    {
+        message.push_str(" · analysing…");
+    }
+    if r["failed"].as_u64().unwrap_or(0) > 0 && r["copied"].as_u64().unwrap_or(0) == 0 {
+        nav.notify(message);
+    } else {
+        nav.inform(message);
+    }
+}
+
+/// Tests: answer the folder prompt with "Copy & analyse".
+#[cfg(test)]
+pub(crate) fn tests_copy_and_analyse(nav: &mut Navigator) {
+    copy_and_analyse(nav);
 }
 
 /// Width kept for a pending row's status (Analyse, Retry + failed, spinner + analysing).

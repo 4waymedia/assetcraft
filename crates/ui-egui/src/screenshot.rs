@@ -218,6 +218,8 @@ fn screenshot() {
         // An analysis folder too, so the Start screen offers Analyse (stored beside the PNG).
         nav.session.set_analysis_dir(out.with_file_name(format!("{stem}-analysis")));
         nav.run("storyboard.musicFolder", json!({ "path": music.to_string_lossy() }));
+        // As after Browse…: the folder prompt shows.
+        nav.state.storyboard.start.ask_analyse = true;
     }
     let mut start = None;
     // A few frames, then until the timeline's waveform has decoded (≤ 10 s).

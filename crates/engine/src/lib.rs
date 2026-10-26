@@ -26,6 +26,7 @@ mod text_cmd;
 mod track_cmd;
 mod watching;
 mod waveform;
+mod working_cmd;
 
 pub use analyse_job::{AnalyseProgress, AnalyseState};
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
@@ -188,6 +189,8 @@ pub struct Session {
     music_folder: Option<PathBuf>,
     /// Track preview volume, 0–1 (`track.previewVolume`).
     preview_volume: f32,
+    /// The AssetCraft working folder as set (`app.workingFolder`; `None` = the default).
+    working_folder: Option<PathBuf>,
     /// Where in-app track analyses are kept (`storyboard.analyse`; set by the app).
     analysis_dir: Option<std::path::PathBuf>,
     /// The background track analyser (`storyboard.analyse`).
@@ -232,6 +235,7 @@ impl Session {
             decodes: decode::Decodes::default(),
             music_folder: prefs.music_folder.clone(),
             preview_volume: prefs.preview_volume.map_or(audio_out::DEFAULT_PREVIEW_VOLUME, |p| f32::from(p) / 100.0),
+            working_folder: prefs.working_folder.clone(),
             analysis_dir: None,
             analyser: analyse_job::Analyser::default(),
         };
@@ -500,6 +504,7 @@ impl Session {
             music_folder: self.music_folder.clone().filter(|p| p.to_str().is_some()),
             preview_volume: Some((self.preview_volume * 100.0).round().clamp(0.0, 100.0) as u8),
             model: self.model,
+            working_folder: self.working_folder.clone().filter(|p| p.to_str().is_some()),
         }
     }
 
@@ -647,3 +652,5 @@ mod tests;
 mod text_tests;
 #[cfg(test)]
 mod track_tests;
+#[cfg(test)]
+mod working_cmd_tests;

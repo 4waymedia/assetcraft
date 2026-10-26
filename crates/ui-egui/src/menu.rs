@@ -40,6 +40,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.musicFolder",
     "storyboard.tracks",
     "storyboard.analyse",
+    "storyboard.musicImport",
+    "app.workingFolder",
     "storyboard.preview",
     "track.preview",
     "track.previewVolume",

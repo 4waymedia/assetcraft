@@ -264,6 +264,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         APP,
+        "app.workingFolder",
+        "Working Folder",
+        "Storyboard",
+        None,
+        "{path?: folder | null} → {workingFolder, default, music, custom} (no path = read; null = the default, Documents/AssetCraft; saved; created on first use)",
+        crate::working_cmd::working_folder
+    ),
+    cmd!(
+        APP,
         "storyboard.musicFolder",
         "Music Folder",
         "Storyboard",
@@ -288,6 +297,15 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{paths?: [audio]} → {queued, pending, message} (analyses in the background: beats, bars, sections, hits, fits; default every listed track not analysed yet; results kept in AssetCraft's own analysis folder, never beside the music; storyboard.tracks shows queued / analysing / failed and counts the queue in `analysis`)",
         crate::analyse_job::sb_analyse
+    ),
+    cmd!(
+        COPY,
+        "storyboard.musicImport",
+        "Copy Music Into AssetCraft",
+        "Storyboard",
+        None,
+        "{paths?: [audio], dryRun?: bool} → {music, dryRun, copied, present, failed, items: [{from, to?, action: copy|present|failed, error?}], tracks, message} (copies songs into <working folder>/Music; default every song in the music folder; never overwrites, originals untouched, same name + size = already there, else `name (2).ext`; then the music folder is Music)",
+        crate::working_cmd::music_import
     ),
     cmd!(
         READ,

@@ -849,3 +849,34 @@ fn analysing_from_the_start_screen_refreshes_the_list_and_notifies_when_done() {
     assert!(std::fs::read_dir(dir.join("music")).map(|d| d.count()).unwrap_or(0) == 1, "music folder untouched");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn copy_and_analyse_copies_into_the_working_folder_then_analyses_the_copies() {
+    let dir = std::env::temp_dir().join(format!("ac-copy-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(std::fs::create_dir_all(dir.join("downloads")).is_ok());
+    assert!(std::fs::write(dir.join("downloads").join("Pulse.wav"), click_wav(40.0)).is_ok());
+    let mut nav = nav();
+    nav.session.set_analysis_dir(dir.join("analysis"));
+    nav.run("app.workingFolder", json!({ "path": dir.join("AssetCraft").to_string_lossy() }));
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.join("downloads").to_string_lossy() }));
+    let ctx = Context::default();
+    let mut t = 0.0;
+    nav.state.storyboard.start.ask_analyse = true;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert!(nav.state.storyboard.start.ask_analyse, "asks: Copy & analyse");
+    super::start_tracks::tests_copy_and_analyse(&mut nav);
+    let music = dir.join("AssetCraft").join("Music");
+    let message = nav.state.message.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert!(message.starts_with("Copied 1 song to ") && message.ends_with(" · analysing…"), "{message}");
+    assert!(music.join("Pulse.wav").exists() && dir.join("downloads").join("Pulse.wav").exists(), "a copy");
+    assert_eq!(nav.session.music_folder(), Some(music.as_path()));
+    let done = frames_until(&ctx, &mut nav, &mut t, |n| {
+        n.state.storyboard.start.tracks_all().iter().any(|r| r["analysed"] == true && r["title"] == "Pulse")
+    });
+    assert!(done, "the copy is analysed");
+    let message = nav.state.message.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
+    assert_eq!(message, "Analysed 1 track");
+    let _ = std::fs::remove_dir_all(&dir);
+}
