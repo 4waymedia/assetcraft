@@ -287,7 +287,7 @@ fn item_interaction(nav: &mut Navigator, ui: &Ui, response: &Response, entry: &E
         if ui.button("Reveal in File Manager").clicked() {
             nav.run("file.reveal", json!({ "path": path }));
         }
-        if is_dir && ui.button("Add to Favorites").clicked() {
+        if is_dir && ui.button("Pin to My Folders").clicked() {
             nav.run("nav.favorite.add", json!({ "path": path }));
         }
     });

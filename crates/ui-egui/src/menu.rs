@@ -41,6 +41,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.tracks",
     "storyboard.analyse",
     "storyboard.musicImport",
+    // The Folders panel's My Folders context menu drives it.
+    "nav.favorite.scope",
     "app.workingFolder",
     "storyboard.preview",
     "track.preview",
@@ -263,7 +265,7 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 })
                 .collect();
             if entries.is_empty() {
-                entries.push(item("No favorites yet", None, false, cmd("nav.open", json!({}))));
+                entries.push(item("Nothing pinned yet", None, false, cmd("nav.open", json!({}))));
             }
             entries.push(MenuEntry::Separator);
             let path = here.map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
@@ -273,7 +275,7 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 is_favorite,
                 cmd(spec.id, json!({ "path": path })),
             ));
-            vec![MenuEntry::Sub { label: "Favorites".into(), entries }]
+            vec![MenuEntry::Sub { label: "My Folders".into(), entries }]
         }
         "view.mode" => vec![
             check("Grid", view.mode == ViewMode::Grid, true, cmd(spec.id, json!({ "mode": "grid" }))),

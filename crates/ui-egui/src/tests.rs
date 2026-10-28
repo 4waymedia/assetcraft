@@ -563,9 +563,9 @@ fn view_and_go_wrappers_pass_the_right_parameters() {
     assert_eq!(nav.session().location().path(), Some(Path::new("/home/paul")));
     assert!(nav.activate(&ctx, &find_item(&nav, "Go", "f")));
     assert_eq!(nav.session().location().path(), Some(Path::new("/f")));
-    assert!(nav.activate(&ctx, &find_item(&nav, "Go", "Remove from Favorites (Current Folder)")));
+    assert!(nav.activate(&ctx, &find_item(&nav, "Go", "Unpin from My Folders (Current Folder)")));
     assert!(nav.session().favorites().is_empty());
-    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Add to Favorites")));
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Pin to My Folders")));
     assert_eq!(nav.session().favorites(), [PathBuf::from("/f")]);
 }
 

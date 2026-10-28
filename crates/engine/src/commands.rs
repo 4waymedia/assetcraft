@@ -6,7 +6,7 @@ use crate::prefs::{THUMB_SIZE_RANGE, ThemeMode, ViewMode, panels_json_ok};
 use crate::select::ClickMode;
 use crate::sort::SortKey;
 use crate::storyboard;
-use crate::{CmdError, CmdResult, Location, Session, clean_user_path, same_path};
+use crate::{CmdError, CmdResult, Location, Session, clean_user_path};
 use assetcraft_fs::{EntryKind, KnownFolder};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -91,8 +91,25 @@ static COMMANDS: &[CommandSpec] = &[
         "{paths: [path]} | {rescan: true} (from the folder watcher; keeps selection)",
         |s, p| s.apply_changes(p)
     ),
-    cmd!(APP, "nav.favorite.add", "Add to Favorites", "File", None, "{path?} (default: current folder)", fav_add),
-    cmd!(APP, "nav.favorite.remove", "Remove from Favorites", "Go", None, "{path}", fav_remove),
+    cmd!(
+        APP,
+        "nav.favorite.add",
+        "Pin to My Folders",
+        "File",
+        None,
+        "{path?, scope?: all|app} (default: current folder, shared with all Crafting apps) → {favorites, pins}",
+        fav_add
+    ),
+    cmd!(APP, "nav.favorite.remove", "Unpin from My Folders", "Go", None, "{path}", fav_remove),
+    cmd!(
+        APP,
+        "nav.favorite.scope",
+        "Share Pinned Folder",
+        "Go",
+        None,
+        "{path, scope: all|app} → {favorites, pins: [{path, shared}]} (all = every Crafting app sees the pin in My Folders; app = AssetCraft only; saved in the suite's places.json)",
+        fav_scope
+    ),
     // View
     cmd!(APP, "view.mode", "View As", "View", None, "{mode: grid|list}", view_mode),
     cmd!(APP, "view.thumbSize", "Thumbnail Size", "View", None, "{px: 48..512}", view_thumb_size),
@@ -556,25 +573,49 @@ fn focus_child(s: &mut Session, came_from: &Location) {
     }
 }
 
+/// My Folders as `{favorites, pins: [{path, shared}]}`.
+fn pins_json(s: &Session) -> Value {
+    let pins: Vec<Value> =
+        s.favorites.iter().map(|f| json!({ "path": lossy(f), "shared": s.pin_shared(f).unwrap_or(true) })).collect();
+    json!({ "favorites": lossy_all(&s.favorites), "pins": pins })
+}
+
 fn fav_add(s: &mut Session, p: &Value) -> CmdResult {
     let path = match str_param(p, "path") {
         Some(p) => PathBuf::from(p),
         None => s.location.path().map(Path::to_path_buf).ok_or_else(|| CmdError::BadParams("need `path`".into()))?,
     };
+    if !path.has_root() {
+        return Err(CmdError::BadParams("`path` must be a full path".into()));
+    }
+    let scope = crate::places::scope_param(p, crate::places::PinScope::All)?;
     let entry = s.services.entry(&path)?;
     if entry.kind != EntryKind::Dir {
         return Err(CmdError::BadParams("favorites are folders".into()));
     }
-    if !s.favorites.iter().any(|f| same_path(f, &path)) {
-        s.favorites.push(path);
-    }
-    Ok(json!({ "favorites": lossy_all(&s.favorites) }))
+    s.edit_pins(|pins| crate::places::pin(pins, path, scope))?;
+    Ok(pins_json(s))
 }
 
 fn fav_remove(s: &mut Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(need_str(p, "path")?);
-    s.favorites.retain(|f| !same_path(f, &path));
-    Ok(json!({ "favorites": lossy_all(&s.favorites) }))
+    s.edit_pins(|pins| crate::places::unpin(pins, &path))?;
+    Ok(pins_json(s))
+}
+
+fn fav_scope(s: &mut Session, p: &Value) -> CmdResult {
+    let path = PathBuf::from(need_str(p, "path")?);
+    if p.get("scope").is_none_or(Value::is_null) {
+        return Err(CmdError::BadParams("need `scope`: all or app".into()));
+    }
+    let scope = crate::places::scope_param(p, crate::places::PinScope::All)?;
+    if s.pin_shared(&path).is_none() {
+        return Err(CmdError::BadParams("that folder isn't in My Folders".into()));
+    }
+    s.edit_pins(|pins| {
+        crate::places::set_scope(pins, &path, scope);
+    })?;
+    Ok(pins_json(s))
 }
 
 fn view_mode(s: &mut Session, p: &Value) -> CmdResult {
@@ -890,6 +931,7 @@ pub(crate) fn state_json(s: &Session) -> Value {
         "skipped": s.skipped,
         "view": s.view,
         "favorites": lossy_all(&s.favorites),
+        "recent": lossy_all(&s.recent),
         "selected": lossy_all(&s.selected_paths()),
         "focus": s.selection.focus().map(lossy),
         "mode": s.mode().as_str(),

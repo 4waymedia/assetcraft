@@ -74,6 +74,10 @@ fn main() -> ExitCode {
     if let Some(dir) = analysis_dir {
         session = session.with_analysis_dir(dir);
     }
+    // My Folders: the suite-wide list every Crafting app shares (Folders panel F1).
+    if let Some(places) = prefs_file::places_path() {
+        session = session.with_pins_file(places);
+    }
     let cache_root = assetcraft_cache::root::resolve_here(&assetcraft_cache::root::ASSETCRAFT, None);
     if let Some(root) = cache_root.dir {
         session = session.with_thumb_cache(DiskCache::open(root, DEFAULT_DISK_BUDGET));

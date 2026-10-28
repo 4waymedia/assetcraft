@@ -1,4 +1,6 @@
-//! Folders panel: Computer (volumes), known folders, favorites, and a lazily loaded tree.
+//! Folders panel (docs/design/folders-panel.md, F1; Paul, 2026-10-27): **System** (Computer and
+//! its drives, the OS sidebar's favorites, the AssetCraft folder, Recent, Network) and **My
+//! Folders** (pins shared with all Crafting apps or kept to AssetCraft), each a lazily loaded tree.
 //!
 //! A node's sub-folders are listed (one `Session::subfolders` call, one directory) only when
 //! the node is expanded, and cached per path until the next refresh. Nothing walks the disk.
@@ -15,6 +17,8 @@ use std::path::{Path, PathBuf};
 const MAX_DEPTH: usize = 48;
 /// Most sub-folders drawn under one node.
 const MAX_CHILDREN: usize = 2_000;
+/// Marks a pin shared with every Crafting app.
+const SHARED_MARK: &str = "⇄";
 
 /// Which root list a tree node hangs from, so the same folder can be open in one and closed in
 /// another.
@@ -22,7 +26,10 @@ const MAX_CHILDREN: usize = 2_000;
 enum Section {
     Computer,
     Places,
-    Favorites,
+    Working,
+    Recent,
+    Network,
+    Mine,
 }
 
 /// Expansion state and the per-path sub-folder cache.
@@ -40,7 +47,7 @@ impl Tree {
         self.children.clear();
     }
 
-    /// Expand a node under Places, as a click on its triangle would (tests).
+    /// Expand a node under System → Favorites, as a click on its triangle would (tests).
     #[cfg(test)]
     pub(crate) fn expand_place(&mut self, path: &Path) {
         self.expanded.insert((Section::Places, path.to_path_buf()));
@@ -49,42 +56,79 @@ impl Tree {
 
 pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     ScrollArea::both().id_salt("folders-panel").auto_shrink(false).show(ui, |ui| {
-        heading(ui, "Computer");
+        heading(ui, "SYSTEM");
         let at_computer = matches!(nav.session.location(), Location::Computer);
         if ui.selectable_label(at_computer, "Computer").clicked() {
             nav.run("nav.computer", json!({}));
         }
         // Cached in the session (rescanned by Computer / F5): never stat drives per frame.
-        for volume in nav.session.volumes().to_vec() {
+        let volumes = nav.session.volumes().to_vec();
+        for volume in volumes.iter().filter(|v| !v.network) {
             node(nav, ui, Section::Computer, &volume.path, &volume.name, 1);
         }
 
-        ui.add_space(6.0);
-        heading(ui, "Places");
-        for (which, path) in nav.session.known_folders().to_vec() {
-            node(nav, ui, Section::Places, &path, which.label(), 0);
+        let from_os = nav.session.system_places_from_os();
+        subheading(ui, "Favorites").on_hover_text(if from_os {
+            "Your system sidebar's favorites"
+        } else {
+            "Standard folders (your system sidebar couldn't be read)"
+        });
+        for (label, path) in nav.session.system_places() {
+            node(nav, ui, Section::Places, &path, &label, 0);
         }
 
-        ui.add_space(6.0);
-        heading(ui, "Favorites");
+        if let Some(work) = nav.session.working_folder().filter(|_| nav.session.working_folder_exists()) {
+            node(nav, ui, Section::Working, &work, "AssetCraft", 0);
+        }
+
+        let recent: Vec<PathBuf> = nav.session.recent().to_vec();
+        if !recent.is_empty() {
+            subheading(ui, "Recent");
+            for path in &recent {
+                node(nav, ui, Section::Recent, path, &assetcraft_fs::display_name(path), 0);
+            }
+        }
+
+        subheading(ui, "Network");
+        let shares: Vec<_> = volumes.iter().filter(|v| v.network).collect();
+        if shares.is_empty() {
+            ui.weak("No network shares mounted");
+        }
+        for volume in shares {
+            node(nav, ui, Section::Network, &volume.path, &volume.name, 0);
+        }
+
+        ui.add_space(8.0);
+        heading(ui, "MY FOLDERS").on_hover_text(format!(
+            "Folders you pin. {SHARED_MARK} = shown in every Crafting app; right-click to keep one to AssetCraft"
+        ));
         let favorites = nav.session.favorites().to_vec();
         if favorites.is_empty() {
-            ui.weak("Right-click a folder to add it here");
+            ui.weak("Right-click a folder to pin it here");
         }
         for path in &favorites {
-            node(nav, ui, Section::Favorites, path, &assetcraft_fs::display_name(path), 0);
+            let mut label = assetcraft_fs::display_name(path);
+            if nav.session.pin_shared(path) == Some(true) {
+                label = format!("{label} {SHARED_MARK}");
+            }
+            node(nav, ui, Section::Mine, path, &label, 0);
         }
         if let Some(here) = nav.session.location().path().map(Path::to_path_buf)
             && !favorites.iter().any(|f| same_path(f, &here))
-            && ui.small_button("+ Add current folder").clicked()
+            && ui.small_button("+ Pin current folder").clicked()
         {
             nav.run("nav.favorite.add", json!({ "path": here.to_string_lossy() }));
         }
     });
 }
 
-fn heading(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).small().strong().color(ui.visuals().weak_text_color()));
+fn heading(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.label(RichText::new(text).small().strong().color(ui.visuals().weak_text_color()))
+}
+
+fn subheading(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.add_space(4.0);
+    ui.label(RichText::new(text).small().color(ui.visuals().weak_text_color()))
 }
 
 fn node(nav: &mut Navigator, ui: &mut Ui, section: Section, path: &Path, label: &str, depth: usize) {
@@ -110,12 +154,21 @@ fn node(nav: &mut Navigator, ui: &mut Ui, section: Section, path: &Path, label: 
             if ui.button("Open").clicked() {
                 nav.run("nav.open", json!({ "path": path.to_string_lossy() }));
             }
+            let p = path.to_string_lossy();
             if is_favorite {
-                if ui.button("Remove from Favorites").clicked() {
-                    nav.run("nav.favorite.remove", json!({ "path": path.to_string_lossy() }));
+                // Who sees the pin (FP-4): every Crafting app, or AssetCraft only.
+                let shared = nav.session.pin_shared(path) == Some(true);
+                if ui.radio(shared, "Share with all Crafting apps").clicked() && !shared {
+                    nav.run("nav.favorite.scope", json!({ "path": p, "scope": "all" }));
                 }
-            } else if ui.button("Add to Favorites").clicked() {
-                nav.run("nav.favorite.add", json!({ "path": path.to_string_lossy() }));
+                if ui.radio(!shared, "AssetCraft only").clicked() && shared {
+                    nav.run("nav.favorite.scope", json!({ "path": p, "scope": "app" }));
+                }
+                if ui.button("Unpin from My Folders").clicked() {
+                    nav.run("nav.favorite.remove", json!({ "path": p }));
+                }
+            } else if ui.button("Pin to My Folders").clicked() {
+                nav.run("nav.favorite.add", json!({ "path": p }));
             }
             if ui.button("Reveal in File Manager").clicked() {
                 nav.run("file.reveal", json!({ "path": path.to_string_lossy() }));

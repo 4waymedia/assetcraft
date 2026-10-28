@@ -230,8 +230,11 @@ impl Default for ViewPrefs {
 pub struct Prefs {
     /// File format version, for future migrations.
     pub version: u32,
-    /// Favorite folders, in the user's order.
+    /// Favorite folders, in the user's order. Since F1 (2026-10-27) My Folders lives in the
+    /// suite's `places.json`; this keeps the list for older builds and seeds the first file.
     pub favorites: Vec<PathBuf>,
+    /// Recent folders, newest first (Folders panel → System → Recent).
+    pub recent: Vec<PathBuf>,
     /// The folder open when the app last closed.
     pub last_folder: Option<PathBuf>,
     /// View settings.
@@ -278,6 +281,10 @@ impl Prefs {
             prefs.favorites = items.iter().filter_map(Value::as_str).map(PathBuf::from).collect();
         }
         prefs.last_folder = root.get("last_folder").and_then(Value::as_str).map(PathBuf::from);
+        if let Some(Value::Array(items)) = root.get("recent") {
+            prefs.recent =
+                items.iter().filter_map(Value::as_str).map(PathBuf::from).take(crate::places::MAX_RECENT).collect();
+        }
         if let Some(Value::Object(view)) = root.get("view") {
             let v = &mut prefs.view;
             set_field(&mut v.mode, view.get("mode"));
@@ -312,6 +319,7 @@ impl Prefs {
     pub fn to_json(&self) -> String {
         let mut clean = self.clone();
         clean.favorites.retain(|p| p.to_str().is_some());
+        clean.recent.retain(|p| p.to_str().is_some());
         clean.last_folder = clean.last_folder.filter(|p| p.to_str().is_some());
         clean.music_folder = clean.music_folder.filter(|p| p.to_str().is_some());
         clean.working_folder = clean.working_folder.filter(|p| p.to_str().is_some());

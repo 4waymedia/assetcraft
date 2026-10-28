@@ -37,6 +37,25 @@ pub fn config_path() -> Option<PathBuf> {
     Some(dir.join(FILE_NAME))
 }
 
+/// The suite-wide My Folders file, shared by every Crafting app (docs/design/folders-panel.md):
+/// - Windows: `%APPDATA%\Crafting\places.json`
+/// - macOS: `~/Library/Application Support/Crafting/places.json`
+/// - elsewhere: `$XDG_CONFIG_HOME/crafting/places.json`, else `~/.config/crafting/places.json`
+pub fn places_path() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let dir = if cfg!(windows) {
+        var("APPDATA")?.join("Crafting")
+    } else if cfg!(target_os = "macos") {
+        var("HOME")?.join("Library").join("Application Support").join("Crafting")
+    } else {
+        match var("XDG_CONFIG_HOME") {
+            Some(xdg) if xdg.is_absolute() => xdg.join("crafting"),
+            _ => var("HOME")?.join(".config").join("crafting"),
+        }
+    };
+    Some(dir.join("places.json"))
+}
+
 /// Where thumbnails were cached before the suite cache (C1, 2026-10-16), so the app can delete
 /// them once (`assetcraft_thumbs::disk::retire_legacy`):
 /// - Windows: `%LOCALAPPDATA%\AssetCraft\thumbs`

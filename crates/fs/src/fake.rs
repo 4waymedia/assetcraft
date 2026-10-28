@@ -10,7 +10,7 @@
 //! assert_eq!(listing.entries.len(), 1); // the hidden file is filtered out
 //! ```
 
-use crate::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Listing, Services, Volume};
+use crate::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Listing, Services, SidebarItem, Volume};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,13 +33,17 @@ pub struct FakeFs {
     nodes: BTreeMap<PathBuf, Node>,
     known: HashMap<KnownFolder, PathBuf>,
     volumes: Vec<Volume>,
+    sidebar: Vec<SidebarItem>,
     clock: u64,
 }
 
 impl FakeFs {
     /// An empty file system with a `/` volume.
     pub fn new() -> Self {
-        let mut fs = Self { volumes: vec![Volume { name: "/".into(), path: PathBuf::from("/") }], ..Self::default() };
+        let mut fs = Self {
+            volumes: vec![Volume { name: "/".into(), path: PathBuf::from("/"), network: false }],
+            ..Self::default()
+        };
         fs.insert(Path::new("/"), EntryKind::Dir, 0, false, false);
         fs
     }
@@ -107,7 +111,23 @@ impl FakeFs {
     pub fn volume(mut self, name: &str, path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_path_buf();
         self = self.dir(&path);
-        self.volumes.push(Volume { name: name.into(), path });
+        self.volumes.push(Volume { name: name.into(), path, network: false });
+        self
+    }
+
+    /// Add a network share's root (creating it).
+    pub fn network_volume(mut self, name: &str, path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self = self.dir(&path);
+        self.volumes.push(Volume { name: name.into(), path, network: true });
+        self
+    }
+
+    /// Add a folder to the fake OS sidebar (creating it).
+    pub fn sidebar(mut self, path: impl AsRef<Path>, name: Option<&str>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self = self.dir(&path);
+        self.sidebar.push(SidebarItem { path, name: name.map(str::to_owned) });
         self
     }
 
@@ -207,6 +227,10 @@ impl Services for FakeFs {
 
     fn volumes(&self) -> Vec<Volume> {
         self.volumes.clone()
+    }
+
+    fn sidebar(&self) -> Vec<SidebarItem> {
+        self.sidebar.clone()
     }
 
     fn home_dir(&self) -> Option<PathBuf> {

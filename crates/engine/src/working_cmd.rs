@@ -41,11 +41,22 @@ fn is_audio(path: &Path) -> bool {
 
 impl Session {
     /// The default working folder: `Documents/AssetCraft`, else `<home>/AssetCraft`.
+    /// Read from the known folders found at the last rescan (never a disk call per frame).
     pub fn default_working_folder(&self) -> Option<PathBuf> {
-        self.services
-            .known_folder(KnownFolder::Documents)
-            .or_else(|| self.services.home_dir())
-            .map(|d| d.join(WORKING_NAME))
+        let find = |k: KnownFolder| self.known.iter().find(|(w, _)| *w == k).map(|(_, p)| p.clone());
+        find(KnownFolder::Documents).or_else(|| find(KnownFolder::Home)).map(|d| d.join(WORKING_NAME))
+    }
+
+    /// `true` when the working folder existed at the last rescan or import (the Folders panel
+    /// shows it then; cached so the panel never stats it per frame).
+    pub fn working_folder_exists(&self) -> bool {
+        self.working_exists
+    }
+
+    /// Re-check whether the working folder exists (rescan, `app.workingFolder`, an import).
+    pub(crate) fn recheck_working_folder(&mut self) {
+        self.working_exists =
+            self.working_folder().is_some_and(|w| self.services.entry(&w).is_ok_and(|e| e.kind == EntryKind::Dir));
     }
 
     /// The working folder in use (as set, else the default).
@@ -79,6 +90,7 @@ pub(crate) fn working_folder(s: &mut Session, p: &Value) -> CmdResult {
             s.working_folder = Some(path);
         }
     }
+    s.recheck_working_folder();
     let shown = |p: Option<PathBuf>| p.map(|p| p.to_string_lossy().into_owned());
     Ok(json!({
         "workingFolder": shown(s.working_folder()),
@@ -277,6 +289,7 @@ pub(crate) fn music_import(s: &mut Session, p: &Value) -> CmdResult {
     if failed > 0 {
         message.push_str(&format!(", {failed} couldn't be copied"));
     }
+    s.recheck_working_folder();
     // The Start screen now lists the working folder's music.
     if !dry_run && (copied + present) > 0 && s.services.entry(&music).is_ok() {
         s.music_folder = Some(music.clone());

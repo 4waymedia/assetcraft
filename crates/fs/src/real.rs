@@ -1,6 +1,6 @@
 //! [`RealFs`]: the actual disk, through `std::fs`. Read-only.
 
-use crate::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Listing, Services, Volume};
+use crate::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Listing, Services, SidebarItem, Volume};
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 
@@ -78,6 +78,10 @@ impl Services for RealFs {
         home_dir()
     }
 
+    fn sidebar(&self) -> Vec<SidebarItem> {
+        crate::sidebar::read(home_dir().as_deref())
+    }
+
     fn is_executable(&self, path: &Path) -> bool {
         #[cfg(unix)]
         {
@@ -105,6 +109,7 @@ impl Services for RealFs {
             KnownFolder::Downloads => &["Downloads"],
             KnownFolder::Pictures => &["Pictures"],
             KnownFolder::Videos => &["Videos", "Movies"],
+            KnownFolder::Music => &["Music"],
         };
         // The guess: `<home>\<Name>`, then OneDrive's usual redirect `<home>\OneDrive\<Name>`.
         let bases = [home.clone(), home.join("OneDrive")];
@@ -124,6 +129,7 @@ fn os_known_folder(which: KnownFolder) -> Option<PathBuf> {
         KnownFolder::Downloads => Id::Downloads,
         KnownFolder::Pictures => Id::Pictures,
         KnownFolder::Videos => Id::Videos,
+        KnownFolder::Music => Id::Music,
     };
     get_known_folder_path(id)
 }
@@ -180,16 +186,31 @@ fn home_dir() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn volumes() -> Vec<Volume> {
+    // Mapped network drives, from `net use` (drive letters only; no `unsafe` Win32 calls here).
+    use std::os::windows::process::CommandExt;
+    /// `CREATE_NO_WINDOW`: no console flashes up from the GUI app.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let net = std::process::Command::new("net")
+        .arg("use")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| crate::mounts::windows_mapped(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
     (b'A'..=b'Z')
         .map(|letter| format!("{}:\\", letter as char))
         .filter(|root| fs::metadata(root).is_ok())
-        .map(|root| Volume { name: root.trim_end_matches('\\').to_string(), path: PathBuf::from(root) })
+        .map(|root| {
+            let name = root.trim_end_matches('\\').to_string();
+            let network = net.iter().any(|d| d.eq_ignore_ascii_case(&name));
+            Volume { name, path: PathBuf::from(root), network }
+        })
         .collect()
 }
 
 #[cfg(not(windows))]
 fn volumes() -> Vec<Volume> {
-    let mut out = vec![Volume { name: "/".into(), path: PathBuf::from("/") }];
+    let network = crate::mounts::network_mounts();
+    let mut out = vec![Volume { name: "/".into(), path: PathBuf::from("/"), network: false }];
     let mut mount_parents = vec![PathBuf::from("/Volumes"), PathBuf::from("/mnt"), PathBuf::from("/media")];
     if let Some(user) = std::env::var_os("USER") {
         mount_parents.push(Path::new("/media").join(&user));
@@ -200,8 +221,15 @@ fn volumes() -> Vec<Volume> {
         for child in children.flatten() {
             let path = child.path();
             if path.is_dir() && !out.iter().any(|v| v.path == path) {
-                out.push(Volume { name: crate::display_name(&path), path });
+                let net = network.contains(&path);
+                out.push(Volume { name: crate::display_name(&path), path, network: net });
             }
+        }
+    }
+    // Network shares mounted elsewhere (say `~/nas`) are listed too.
+    for path in network {
+        if path.is_dir() && !out.iter().any(|v| v.path == path) {
+            out.push(Volume { name: crate::display_name(&path), path, network: true });
         }
     }
     out

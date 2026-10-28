@@ -17,6 +17,7 @@ mod library_cmd;
 mod model_cmd;
 pub mod open_in;
 pub mod paths;
+pub mod places;
 pub mod prefs;
 pub mod rename;
 pub mod select;
@@ -150,7 +151,18 @@ pub struct Session {
     truncated: bool,
     skipped: usize,
     selection: Selection,
+    /// My Folders as this app shows them (derived from `pins`).
     favorites: Vec<PathBuf>,
+    /// Every pin in My Folders, including those other Crafting apps keep to themselves.
+    pins: Vec<places::Pin>,
+    /// The suite-wide `places.json`, when the app gave one.
+    pins_file: Option<PathBuf>,
+    /// Recent folders, newest first (saved).
+    recent: Vec<PathBuf>,
+    /// Whether the working folder existed at the last check (see `working_folder_exists`).
+    working_exists: bool,
+    /// The OS sidebar's folders (rescanned with the volumes).
+    sidebar: Vec<assetcraft_fs::SidebarItem>,
     view: ViewPrefs,
     probes: HashMap<PathBuf, Result<Probe, String>>,
     /// Background probes for the UI (started on first use, so the CLI never spawns threads).
@@ -212,7 +224,12 @@ impl Session {
             truncated: false,
             skipped: 0,
             selection: Selection::default(),
-            favorites: prefs.favorites,
+            favorites: Vec::new(),
+            pins: prefs.favorites.iter().map(|p| places::Pin::legacy(p.clone())).collect(),
+            pins_file: None,
+            recent: prefs.recent.clone(),
+            working_exists: false,
+            sidebar: Vec::new(),
             view: prefs.view,
             probes: HashMap::new(),
             probe_pool: None,
@@ -239,6 +256,7 @@ impl Session {
             analysis_dir: None,
             analyser: analyse_job::Analyser::default(),
         };
+        session.refresh_favorites();
         session.rescan_places();
         let start = prefs
             .last_folder
@@ -496,6 +514,7 @@ impl Session {
         Prefs {
             version: prefs::PREFS_VERSION,
             favorites: self.favorites.clone(),
+            recent: self.recent.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
             // A non-UTF-8 folder can't be written to prefs JSON; don't let it void the file.
             last_folder: self.location.path().filter(|p| p.to_str().is_some()).map(Path::to_path_buf),
             view: self.view.clone(),
@@ -518,7 +537,9 @@ impl Session {
     /// Re-read volumes, known folders and installed sibling apps.
     fn rescan_places(&mut self) {
         self.volumes = self.services.volumes();
+        self.sidebar = self.services.sidebar();
         self.known = KnownFolder::ALL.iter().filter_map(|k| self.services.known_folder(*k).map(|p| (*k, p))).collect();
+        self.recheck_working_folder();
         self.rescan_apps();
     }
 
@@ -560,6 +581,9 @@ impl Session {
     /// and points the folder watcher at it.
     fn load(&mut self, loc: &Location) -> Result<(), CmdError> {
         let (items, truncated, skipped) = self.list(loc)?;
+        if let Location::Folder(path) = loc {
+            self.note_recent(path);
+        }
         self.item_paths = items.iter().map(|e| e.path.clone()).collect();
         self.items = items;
         self.truncated = truncated;
@@ -642,6 +666,8 @@ mod generate_tests;
 mod library_tests;
 #[cfg(test)]
 mod open_in_tests;
+#[cfg(test)]
+mod places_tests;
 #[cfg(test)]
 mod rename_tests;
 #[cfg(test)]

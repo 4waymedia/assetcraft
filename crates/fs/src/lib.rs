@@ -9,7 +9,9 @@
 //! unreadable entry never fails a whole listing.
 
 mod fake;
+pub mod mounts;
 mod real;
+pub mod sidebar;
 mod walk;
 
 pub use fake::FakeFs;
@@ -100,6 +102,17 @@ pub struct Volume {
     pub name: String,
     /// Root path.
     pub path: PathBuf,
+    /// A network share (SMB, NFS, AFP, WebDAV, SSHFS, a mapped drive): listed under Network.
+    pub network: bool,
+}
+
+/// A folder in the OS's own sidebar (Finder Favorites, Explorer Quick Access, GTK bookmarks).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidebarItem {
+    /// The folder.
+    pub path: PathBuf,
+    /// The OS's label for it, when it has its own (else the folder name).
+    pub name: Option<String>,
 }
 
 /// Well-known user folders shown at the top of the Folders panel.
@@ -117,12 +130,14 @@ pub enum KnownFolder {
     Pictures,
     /// Videos (Movies on macOS).
     Videos,
+    /// Music.
+    Music,
 }
 
 impl KnownFolder {
     /// Every known folder, in Folders-panel order.
-    pub const ALL: [KnownFolder; 6] =
-        [Self::Home, Self::Desktop, Self::Documents, Self::Downloads, Self::Pictures, Self::Videos];
+    pub const ALL: [KnownFolder; 7] =
+        [Self::Home, Self::Desktop, Self::Documents, Self::Downloads, Self::Pictures, Self::Music, Self::Videos];
 
     /// Display label.
     pub fn label(self) -> &'static str {
@@ -132,7 +147,14 @@ impl KnownFolder {
             Self::Documents => "Documents",
             Self::Downloads => "Downloads",
             Self::Pictures => "Pictures",
-            Self::Videos => "Videos",
+            Self::Videos => {
+                if cfg!(target_os = "macos") {
+                    "Movies"
+                } else {
+                    "Videos"
+                }
+            }
+            Self::Music => "Music",
         }
     }
 }
@@ -202,6 +224,12 @@ pub trait Services: Send + Sync {
 
     /// The user's home folder.
     fn home_dir(&self) -> Option<PathBuf>;
+
+    /// The folders in the OS's own sidebar, in its order (empty when it can't be read: the
+    /// caller falls back to the known folders). Read on demand, never per frame.
+    fn sidebar(&self) -> Vec<SidebarItem> {
+        Vec::new()
+    }
 
     /// A well-known folder, if it exists.
     fn known_folder(&self, which: KnownFolder) -> Option<PathBuf>;
