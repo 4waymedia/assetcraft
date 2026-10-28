@@ -62,21 +62,6 @@ fn paint_icon(ui: &Ui, icon: Icon, r: Rect, stroke: Stroke) {
     }
 }
 
-/// A disclosure triangle for the folder tree. Returns the click response.
-pub(crate) fn disclosure(ui: &mut Ui, open: bool) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(14.0, 16.0), Sense::click());
-    let color = if response.hovered() { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
-    let c = rect.center();
-    let s = 3.5;
-    let points = if open {
-        vec![pos2(c.x - s, c.y - s * 0.6), pos2(c.x + s, c.y - s * 0.6), pos2(c.x, c.y + s * 0.8)]
-    } else {
-        vec![pos2(c.x - s * 0.6, c.y - s), pos2(c.x + s * 0.8, c.y), pos2(c.x - s * 0.6, c.y + s)]
-    };
-    ui.painter().add(Shape::convex_polygon(points, color, Stroke::NONE));
-    response
-}
-
 /// A folder glyph filling `rect` (kept 4:3 and centred).
 pub(crate) fn paint_folder(ui: &Ui, rect: Rect) {
     let size = vec2(rect.width(), rect.width() * 0.75).min(vec2(rect.height() / 0.75, rect.height())) * 0.7;

@@ -151,6 +151,18 @@ fn screenshot() {
     let reaper = reaper.canonicalize().unwrap_or(reaper);
     assert!(nav.open_folder(&reaper));
     nav.run("select.click", json!({ "path": reaper.join("reaper_concept_final.png") }));
+    // `AC_FOLDER_TAB=computer|favorites|craft` picks the Folders panel's tab (Craft also pins two
+    // folders, one shared and one kept to AssetCraft, to show both).
+    match std::env::var("AC_FOLDER_TAB").as_deref() {
+        Ok("computer") => nav.state.tree.tab = crate::folders::FolderTab::Computer,
+        Ok("craft") => {
+            nav.state.tree.tab = crate::folders::FolderTab::Craft;
+            nav.run("nav.favorite.add", json!({ "path": reaper.to_string_lossy() }));
+            let library = reaper.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default();
+            nav.run("nav.favorite.add", json!({ "path": library.to_string_lossy(), "scope": "app" }));
+        }
+        _ => {}
+    }
     let mut textures = HashMap::new();
     let mut t = 0.0;
     let mut shot = None;

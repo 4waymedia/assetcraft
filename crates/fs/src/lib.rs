@@ -9,6 +9,7 @@
 //! unreadable entry never fails a whole listing.
 
 mod fake;
+pub mod finder;
 pub mod mounts;
 mod real;
 pub mod sidebar;

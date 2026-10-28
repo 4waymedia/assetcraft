@@ -34,6 +34,7 @@ COMMANDS:
     thumb <file> --out <png>   Render a thumbnail to a PNG file
     analyze <audio>...         Track facts, or --cuemap: write <stem>.cuemap.json for Storyboard mode
     info <model>...            3D model facts: counts, bounds, materials, images, warnings
+    sidebar                    The OS sidebar favorites the Folders panel shows (Finder on macOS)
     commands                   List every engine command
     describe <id>              One command as JSON: params, effects, enabled now and why not
     exec <id> [<json>]         Run one engine command headlessly; prints its JSON result
@@ -47,6 +48,22 @@ For agents and scripts: `assetcraft-cli commands --json` lists every command id 
 parameters, effects and whether it can run now, `describe <id>` shows one, and
 `assetcraft-cli exec <id> '<json>' [--dir <folder>]` runs one, so anything the UI can do is
 scriptable. Exit codes: 0 ok, 1 failed, 2 usage error.
+";
+
+const SIDEBAR_HELP: &str = "\
+assetcraft-cli sidebar: the folders the Folders panel's Favorites tab shows, read the way the
+app reads them (macOS: Finder's sidebar Favorites; Linux: GTK bookmarks; Windows: the standard
+list until Quick Access pins are read)
+
+USAGE:
+    assetcraft-cli sidebar [--json]
+
+Prints where the list came from, then one folder per line. When the OS sidebar can't be read,
+says so and prints the standard folders the app falls back to. Reads only.
+
+OPTIONS:
+    --json           {source, file?, items: [{name, path}]}
+    -h, --help       Print help
 ";
 
 const INFO_HELP: &str = "\
@@ -198,6 +215,7 @@ const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
 const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary", "--cuemap", "--force"], values: &[] };
 const INFO_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
+const SIDEBAR_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
 const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
@@ -271,6 +289,7 @@ fn run(argv: &[String]) -> Outcome {
         "thumb" => with(rest, &THUMB_SPEC, THUMB_HELP, thumb),
         "analyze" => with(rest, &ANALYZE_SPEC, ANALYZE_HELP, analyze),
         "info" => with(rest, &INFO_SPEC, INFO_HELP, info),
+        "sidebar" => with(rest, &SIDEBAR_SPEC, SIDEBAR_HELP, sidebar),
         "commands" => with(rest, &COMMANDS_SPEC, COMMANDS_HELP, list_commands),
         "describe" => with(rest, &DESCRIBE_SPEC, DESCRIBE_HELP, describe),
         "exec" => with(rest, &EXEC_SPEC, EXEC_HELP, exec),
@@ -290,6 +309,7 @@ fn sub_help(name: &str) -> Option<&'static str> {
         "thumb" => THUMB_HELP,
         "analyze" => ANALYZE_HELP,
         "info" => INFO_HELP,
+        "sidebar" => SIDEBAR_HELP,
         "commands" => COMMANDS_HELP,
         "describe" => DESCRIBE_HELP,
         "exec" => EXEC_HELP,
@@ -595,6 +615,32 @@ fn analyze_cuemaps(files: &[String], force: bool, json: bool) -> Outcome {
 
 /// Most files one `info` run takes.
 const MAX_INFO_FILES: usize = 1_000;
+
+// ---- sidebar -------------------------------------------------------------------------------
+
+fn sidebar(p: &Parsed, help: &'static str) -> Outcome {
+    let _ = positionals(p, 0, 0, "", help)?;
+    let s = session(None);
+    let from_os = s.system_places_from_os();
+    let source = match (from_os, cfg!(target_os = "macos"), cfg!(windows)) {
+        (true, true, _) => "Finder sidebar Favorites",
+        (true, false, _) => "GTK bookmarks",
+        (false, true, _) => "standard folders (Finder's sidebar file couldn't be read)",
+        (false, _, true) => "standard folders (Quick Access pins come with step F3)",
+        (false, _, _) => "standard folders (no GTK bookmarks)",
+    };
+    let items = s.system_places();
+    if p.has("--json") {
+        let items: Vec<Value> =
+            items.iter().map(|(n, path)| json!({ "name": n, "path": path.to_string_lossy() })).collect();
+        return Ok(pretty(&json!({ "source": source, "fromOs": from_os, "items": items })));
+    }
+    let mut out = format!("{source}: {} folder(s)\n", items.len());
+    for (name, path) in items {
+        out.push_str(&format!("  {name:<24} {}\n", path.display()));
+    }
+    Ok(out)
+}
 
 fn info(p: &Parsed, help: &'static str) -> Outcome {
     let files = positionals(p, 1, MAX_INFO_FILES, "<model>", help)?;

@@ -17,28 +17,39 @@ _2026-10-27 · Stage 1 follow-up (Organizer) · F1 built, F2–F4 planned_
 | FP-2  | System's favorites **mirror the OS sidebar**: Finder Favorites (macOS), Quick Access pins (Windows), GTK bookmarks (Linux) |
 | FP-3  | System extras: **Recent** folders, the **AssetCraft** working folder, **Network** shares                   |
 | FP-4  | My Folders is **shared by all Crafting apps**; each pin is set to **All Crafting apps** or **This app only** |
+| FP-5  | (2026-10-27, after trying F1: "still very clunky") **Three tabs** in the Folders panel: **Computer** (each hard drive, network drives), **Favorites** (the OS's favorite folders; Recent below), **Craft** (the AssetCraft folder and the folders the user pins). Supersedes FP-1's single System / My Folders list |
 
 Defaults chosen by Claude (cheap to change): a new pin is *All Crafting apps*; AssetCraft's old
 Favorites move into My Folders as *All Crafting apps*; Recent keeps the last 8 folders; when the
 OS sidebar can't be read, System shows the standard list (Home, Desktop, Documents, Downloads,
 Pictures, Music, Movies / Videos).
 
-## Layout
+## Layout (FP-5)
 
 ```
-SYSTEM
-  Computer
-    /            Macintosh HD            (drives; network ones go under Network)
-  Favorites                              (the OS sidebar, else the standard list)
-    Desktop  Documents  Downloads  …
-  AssetCraft                             (the working folder, when it exists)
-  Recent                                 (last 8 folders opened in AssetCraft)
-  Network                                (mounted shares: smbfs / nfs / afp / cifs …, mapped drives)
-MY FOLDERS                               (pins; ⇄ = shared with all Crafting apps)
-  Reapers concepts ⇄
-  Plates (this app only)
-  + Add current folder
+ Computer   Favorites   Craft          ← tab strip (underline on the open tab)
+ ─────────────────────────────
+ Drives                                 Computer tab
+   🖥 Computer
+   ▭ Macintosh HD                       (/ and /Volumes/Macintosh HD are one entry)
+   ▭ USB Stick
+ Network
+   🌐 Media                             (smbfs / nfs / afp / cifs …, mapped drives)
+
+ System                                 Favorites tab
+   📁 Desktop  Documents  Downloads …   (the OS sidebar, else the standard list)
+ Recent
+   📁 last 8 folders opened
+
+   📁 AssetCraft                        Craft tab (the working folder)
+ My Folders                         +   (+ pins the current folder)
+   📁 Reapers concepts            ⚭     (⚭ = shared with all Crafting apps)
+   📁 Plates                            (AssetCraft only)
 ```
+
+Rows are Finder-style: full-width highlight, a glyph, names that end in "…" when long, a
+disclosure chevron shown on hover or when open (sub-folders load only when opened). Group
+headings (Drives, Network, System, Recent, My Folders) collapse with a click.
 
 Right-click a pin: Open · **Share with all Crafting apps** / **AssetCraft only** · Remove · Reveal.
 Right-click any other folder: Open · Pin to My Folders · Reveal.
@@ -76,6 +87,6 @@ One file for the whole suite, beside the shared cache's naming:
 | Step | Delivers                                                                                       | Owner         | Status |
 |------|------------------------------------------------------------------------------------------------|---------------|--------|
 | F1   | System / My Folders layout; Recent (prefs, 8); AssetCraft folder; Network (`mount` on macOS, `/proc/mounts` on Linux, `net use` on Windows); Music in the standard list; Linux GTK bookmarks; `places.json` with per-pin scope; `nav.favorite.scope`; old Favorites carried over | Claude | built 2026-10-27 |
-| F2   | macOS: read Finder Favorites (`~/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.FavoriteItems.sfl3`, an NSKeyedArchiver plist of bookmarks) as hostile input; fall back to the standard list | Claude (Paul: test on the Mac) | planned |
+| F2   | macOS: the app reads the user's own Finder Favorites (`~/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.FavoriteItems.sfl3`, else `.sfl2`; an NSKeyedArchiver plist of bookmarks, `crates/fs/src/finder.rs`) as hostile input at startup and on Refresh; falls back to the standard list; `assetcraft-cli sidebar` prints what it read | Claude (Paul: check against Finder) | built 2026-10-27, to verify on the Mac |
 | F3   | Windows: read Quick Access pins (shell namespace `{679f85cb-0220-4080-b29b-5540cc05aab6}`, without `unsafe` in our crates); fall back to the standard list | Claude (Paul: test on Windows) | planned |
 | F4   | craft-libs proposal: a tiny `crafting-places` reader/writer so DesignCraft, FilmCraft and the other forks show the same My Folders | Claude drafts, Paul files | planned |

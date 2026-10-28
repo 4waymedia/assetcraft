@@ -12,6 +12,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Finder sidebar Favorites (an NSKeyedArchiver binary plist). Parsed on every platform so the
+# reader is tested everywhere; only macOS reads the real file.
+plist = { workspace = true }
 
 # Windows Known Folder API (SHGetKnownFolderPath) for Desktop/Documents/Downloads/Pictures/Videos
 # when they are redirected (OneDrive). MIT OR Apache-2.0; depends only on windows-sys.

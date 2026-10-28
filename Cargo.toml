@@ -41,6 +41,8 @@ serde_json = "1"
 siphasher = "1"
 # Windows Known Folder API wrapper (MIT OR Apache-2.0, artichoke/known-folders-rs); fs only.
 known-folders = "1.4"
+# Apple property lists (MIT; ebarnard/rust-plist): reads Finder's sidebar Favorites (fs, F2).
+plist = { version = "1.7", default-features = false }
 # Folder watching (CC0-1.0). Default features keep FSEvents on macOS.
 notify = "8.2"
 # Native file / folder dialogs (MIT; PolyMeilex/rfd), the UI layer only (Browse… for the music folder).

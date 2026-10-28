@@ -329,7 +329,7 @@ fn usage_help_and_version() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("USAGE"));
     assert!(ok(&["--help"]).contains("exec"));
     assert!(ok(&["-h"]).contains("USAGE"));
-    for sub in ["list", "probe", "thumb", "analyze", "info", "commands", "describe", "exec"] {
+    for sub in ["list", "probe", "thumb", "analyze", "info", "sidebar", "commands", "describe", "exec"] {
         assert!(ok(&[sub, "--help"]).contains(&format!("assetcraft-cli {sub}")), "{sub}");
         assert_eq!(ok(&["help", sub]), ok(&[sub, "-h"]));
     }

@@ -220,6 +220,14 @@ fn volumes() -> Vec<Volume> {
         let Ok(children) = fs::read_dir(&parent) else { continue };
         for child in children.flatten() {
             let path = child.path();
+            // macOS lists the startup disk again as `/Volumes/Macintosh HD`, a link back to `/`:
+            // one entry, with the disk's name (the Folders panel showed "/" and "Macintosh HD").
+            if fs::canonicalize(&path).is_ok_and(|real| real == Path::new("/")) {
+                if let Some(root) = out.first_mut() {
+                    root.name = crate::display_name(&path);
+                }
+                continue;
+            }
             if path.is_dir() && !out.iter().any(|v| v.path == path) {
                 let net = network.contains(&path);
                 out.push(Volume { name: crate::display_name(&path), path, network: net });

@@ -1,6 +1,7 @@
 //! The OS's own sidebar folders (Folders panel → System → Favorites; docs/design/folders-panel.md
 //! FP-2). Linux reads GTK bookmarks (F1); macOS Finder Favorites (F2) and Windows Quick Access
 //! pins (F3) come next and return nothing until then, so the panel shows the standard list.
+//! macOS: Finder's Favorites (F2, `crate::finder`).
 //!
 //! Bookmark files are hostile input: size-capped, `file://` URIs only, percent-decoded, absolute
 //! paths that exist as folders, at most [`MAX_ITEMS`].
@@ -47,9 +48,28 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Finder's Favorites for the user whose home is `home` (macOS 14+ writes `.sfl3`, older `.sfl2`).
+/// Empty when macOS refuses access or the file can't be used.
+pub fn finder_favorites(home: &Path) -> Vec<SidebarItem> {
+    let dir = home.join("Library").join("Application Support").join("com.apple.sharedfilelist");
+    for name in ["com.apple.LSSharedFileList.FavoriteItems.sfl3", "com.apple.LSSharedFileList.FavoriteItems.sfl2"] {
+        let file = dir.join(name);
+        let ok = std::fs::metadata(&file).is_ok_and(|m| m.is_file() && m.len() <= crate::finder::MAX_FILE_BYTES);
+        if let Some(bytes) = ok.then(|| std::fs::read(&file).ok()).flatten() {
+            let items = crate::finder::parse_sfl(&bytes);
+            if !items.is_empty() {
+                return items;
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// This machine's sidebar folders that exist (empty when there's no readable sidebar).
 pub fn read(home: Option<&Path>) -> Vec<SidebarItem> {
-    let items = if cfg!(any(windows, target_os = "macos")) {
+    let items = if cfg!(target_os = "macos") {
+        home.map(finder_favorites).unwrap_or_default()
+    } else if cfg!(windows) {
         Vec::new()
     } else {
         let config = std::env::var_os("XDG_CONFIG_HOME")
