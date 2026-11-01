@@ -38,7 +38,7 @@ AssetCraft adds one rule the siblings don't have, from AGENTS.md rule 5 ("batch 
 dry run"): **every command that writes the user's files can be previewed without writing**, and
 the CLI exposes that as `--dry-run` (§3.4).
 
-## 2. Shipped today (`main` @ `0887ed8` + C1)
+## 2. Shipped today (`main` @ `bd054c2`: C1 and V0.4 `info`)
 
 | Subcommand                                         | What                                                      | Engine path                     |
 |----------------------------------------------------|-----------------------------------------------------------|---------------------------------|
@@ -47,6 +47,7 @@ the CLI exposes that as `--dry-run` (§3.4).
 | `thumb <file> --out <png> [--size px] [--force] [--heic]` | A thumbnail PNG (atomic write, never overwrites without `--force`) | `assetcraft_thumbs::render` (the only direct call) |
 | `analyze <audio>… [--json]`                        | Duration, rate, channels, peak, RMS                       | `track.summary`                 |
 | `analyze <audio>… --cuemap [--force] [--json]`     | Beats, bars, sections, hits, fits → `<stem>.cuemap.json` beside each file (atomic write; kept unless `--force`); what the Start screen reads | `track.analyze` (A2c-1, 2026-10-25) |
+| `info <model>… [--json]`                           | 3D model facts: triangles, vertices, materials, images (sizes from headers), normals / UVs, bounds, warnings; GLB, glTF, OBJ; ≤ 1,000 files, exit 1 if any failed | `asset.meshInfo`                |
 | `commands [<filter>] [--json] [--dir <folder>]`    | Every command (id or label containing the filter), with ENABLED / `enabled` + `disabledReason` for a fresh session at `--dir` | `Session::command_infos` (`app.commands`) |
 | `describe <id> [--dir <folder>]`                   | One command's `app.commands` entry as JSON                | `Session::command_info`         |
 | `exec <id> [<json>] [--dir <folder>]`              | One command; pretty JSON result                           | `Session::execute`              |
@@ -71,6 +72,7 @@ SUBCOMMANDS
   probe <file> [--json]
   thumb <file> --out <png> [--size px] [--force] [--heic]
   analyze <audio>… [--json] [--cuemap [--force]]
+  info <model>… [--json]
   mcp                                  MCP server on stdio (headless, or --bridge to the live app)
   serve --control <port|0>             headless control server (control-protocol.md)
   help [<subcommand>] | --help | -V | --version | version
@@ -106,7 +108,7 @@ GLOBAL OPTIONS
 | `run --keep-going`                           | every result; failures as `{"line","error"}` | summary                          | 1 if any failed |
 | Closed pipe (`… \| head`)                     | dropped                                  | —                                   | 0 (work completes) |
 
-`list`, `commands` and `analyze` keep their human tables without `--json`; everything else prints JSON.
+`list`, `commands`, `analyze` and `info` keep their human tables without `--json`; everything else prints JSON.
 
 ### 3.3 `commands --json` and `describe` (suite shape)
 
