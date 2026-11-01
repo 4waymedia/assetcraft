@@ -65,6 +65,50 @@ pub fn finder_favorites(home: &Path) -> Vec<SidebarItem> {
     Vec::new()
 }
 
+/// Where Finder's Favorites reading stops on this Mac, step by step (`assetcraft-cli sidebar
+/// --why`): which files exist, whether macOS lets us read them, then [`crate::finder::diagnose`].
+pub fn finder_report(home: &Path) -> Vec<String> {
+    let dir = home.join("Library").join("Application Support").join("com.apple.sharedfilelist");
+    let mut out = vec![format!("folder: {}", dir.display())];
+    match std::fs::read_dir(&dir) {
+        Ok(entries) => {
+            let mut names: Vec<String> = entries
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.contains("FavoriteItems") || n.ends_with(".sfl3") || n.ends_with(".sfl2"))
+                .collect();
+            names.sort();
+            out.push(format!(
+                "sidebar files there: {}",
+                if names.is_empty() { "none".into() } else { names.join(", ") }
+            ));
+        }
+        Err(e) => out.push(format!("can't list it: {e} ({:?})", e.kind())),
+    }
+    for name in ["com.apple.LSSharedFileList.FavoriteItems.sfl3", "com.apple.LSSharedFileList.FavoriteItems.sfl2"] {
+        let file = dir.join(name);
+        match std::fs::metadata(&file) {
+            Err(e) => out.push(format!("{name}: {e} ({:?})", e.kind())),
+            Ok(m) if m.len() > crate::finder::MAX_FILE_BYTES => {
+                out.push(format!("{name}: too large ({} bytes)", m.len()))
+            }
+            Ok(m) => match std::fs::read(&file) {
+                Err(e) => out.push(format!(
+                    "{name}: {} bytes, but reading failed: {e} ({:?}){}",
+                    m.len(),
+                    e.kind(),
+                    if e.kind() == std::io::ErrorKind::PermissionDenied { " — macOS privacy protection" } else { "" }
+                )),
+                Ok(bytes) => {
+                    out.push(format!("{name}: {} bytes read", bytes.len()));
+                    out.extend(crate::finder::diagnose(&bytes));
+                }
+            },
+        }
+    }
+    out
+}
+
 /// This machine's sidebar folders that exist (empty when there's no readable sidebar).
 pub fn read(home: Option<&Path>) -> Vec<SidebarItem> {
     let items = if cfg!(target_os = "macos") {

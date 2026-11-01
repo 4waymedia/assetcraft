@@ -63,6 +63,7 @@ says so and prints the standard folders the app falls back to. Reads only.
 
 OPTIONS:
     --json           {source, file?, items: [{name, path}]}
+    --why            macOS: where reading Finder's sidebar stops (file, permission, layout, bookmarks)
     -h, --help       Print help
 ";
 
@@ -215,7 +216,7 @@ const PROBE_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--size", "--out"] };
 const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary", "--cuemap", "--force"], values: &[] };
 const INFO_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
-const SIDEBAR_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
+const SIDEBAR_SPEC: Spec = Spec { switches: &["--json", "--why"], values: &[] };
 const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
 const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
 const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
@@ -618,8 +619,22 @@ const MAX_INFO_FILES: usize = 1_000;
 
 // ---- sidebar -------------------------------------------------------------------------------
 
+/// The user's home folder, as the app finds it.
+fn s_home() -> Option<PathBuf> {
+    use assetcraft_fs::Services;
+    RealFs::new().home_dir()
+}
+
 fn sidebar(p: &Parsed, help: &'static str) -> Outcome {
     let _ = positionals(p, 0, 0, "", help)?;
+    if p.has("--why") {
+        let home = s_home();
+        let lines = match home {
+            Some(h) => assetcraft_fs::sidebar::finder_report(&h),
+            None => vec!["no home folder".into()],
+        };
+        return Ok(lines.join("\n") + "\n");
+    }
     let s = session(None);
     let from_os = s.system_places_from_os();
     let source = match (from_os, cfg!(target_os = "macos"), cfg!(windows)) {

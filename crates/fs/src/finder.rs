@@ -62,6 +62,73 @@ pub fn parse_sfl(bytes: &[u8]) -> Vec<SidebarItem> {
     out
 }
 
+/// Why [`parse_sfl`] found what it found, step by step (for `assetcraft-cli sidebar --why`). Lists
+/// the archive's keys and each item's keys, bookmark header and decoded path; reads only.
+pub fn diagnose(bytes: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let keys = |d: &plist::Dictionary| d.keys().take(20).cloned().collect::<Vec<_>>().join(", ");
+    let root = match Value::from_reader(std::io::Cursor::new(bytes)) {
+        Ok(r) => r,
+        Err(e) => return vec![format!("not a property list: {e}")],
+    };
+    let Some(archive) = root.as_dictionary() else { return vec!["the top level isn't a dictionary".into()] };
+    out.push(format!("archive keys: {}", keys(archive)));
+    let Some(objects) = archive.get("$objects").and_then(Value::as_array) else {
+        out.push("no $objects: not an NSKeyedArchiver archive".into());
+        return out;
+    };
+    out.push(format!("$objects: {}", objects.len()));
+    let Some(top) = archive.get("$top").and_then(Value::as_dictionary) else {
+        out.push("no $top".into());
+        return out;
+    };
+    out.push(format!("$top keys: {}", keys(top)));
+    let Some(list) = top.get("root").and_then(|r| resolve(objects, r, 0)) else {
+        out.push("$top has no usable `root`".into());
+        return out;
+    };
+    match list.as_dictionary() {
+        Some(d) => out.push(format!("root keys: {}", keys(d))),
+        None => out.push(format!("root is not a dictionary: {list:?}").chars().take(200).collect()),
+    }
+    let Some(items) = list.as_dictionary().and_then(|d| d.get("items")).and_then(|i| resolve(objects, i, 0)) else {
+        out.push("root has no `items`".into());
+        return out;
+    };
+    let Some(items) = ns_array(objects, &items) else {
+        out.push("`items` isn't an array or NSArray".into());
+        return out;
+    };
+    out.push(format!("items: {}", items.len()));
+    for (n, item) in items.iter().take(MAX_ITEMS).enumerate() {
+        let Some(dict) = resolve(objects, item, 0).and_then(Value::into_dictionary) else {
+            out.push(format!("  #{n}: not a dictionary"));
+            continue;
+        };
+        let bookmark = dict.get("Bookmark").and_then(|b| resolve(objects, b, 0)).and_then(|b| ns_data(objects, &b));
+        let line = match bookmark {
+            None => format!("  #{n}: keys [{}]; no Bookmark data", keys(&dict)),
+            Some(b) => {
+                let head: String =
+                    b.iter().take(4).map(|c| if c.is_ascii_graphic() { *c as char } else { '.' }).collect();
+                let header = u32_at(&b, 12).map_or("?".into(), |h| h.to_string());
+                match bookmark_path(&b) {
+                    Some(p) => {
+                        format!("  #{n}: bookmark {} bytes \"{head}\" header {header} → {}", b.len(), p.display())
+                    }
+                    None => format!(
+                        "  #{n}: keys [{}]; bookmark {} bytes \"{head}\" header {header}, no path found",
+                        keys(&dict),
+                        b.len()
+                    ),
+                }
+            }
+        };
+        out.push(line);
+    }
+    out
+}
+
 /// Follow `NSKeyedArchiver` references (`Uid` → `$objects[i]`), at most [`MAX_DEPTH`] deep.
 fn resolve(objects: &[Value], v: &Value, depth: usize) -> Option<Value> {
     if depth > MAX_DEPTH {
