@@ -233,6 +233,8 @@ Original first-release list:
 | E     | One music-timed template with an authored cue map; locked-timing warnings                  | Templates                |
 | F     | FilmCraft assembly beyond OTIO: titles, transitions, export through the command adapter    | Finished video           |
 
+**Proposed (2026-11-01), pending decision D-AI2:** slice C gets a **manual provider path first**: AssetCraft builds a deterministic prompt from the user's direction and the real cue map, the user runs it in any AI, pastes the JSON back, and AssetCraft validates, previews and inserts it as one undo step. Same schema and validator the providers will use later. Design: [design/ai-prompt-insert.md](design/ai-prompt-insert.md); request: [requests/2026-11-01-ai-prompt-insert.md](requests/2026-11-01-ai-prompt-insert.md).
+
 ## 11. Providers (Preferences)
 
 One trait, many providers, chosen per capability in Preferences:
