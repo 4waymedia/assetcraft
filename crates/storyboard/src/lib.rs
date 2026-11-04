@@ -26,6 +26,7 @@ pub mod cuemap;
 pub mod fill;
 pub mod generate;
 pub mod model;
+pub mod motion;
 pub mod recut;
 pub mod sample;
 pub mod shape;
@@ -42,6 +43,10 @@ pub use generate::{
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
     Transition,
+};
+pub use motion::{
+    Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, clear_motion, set_motion,
+    swap_motion,
 };
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;

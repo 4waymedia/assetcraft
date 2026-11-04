@@ -130,6 +130,28 @@ sections and timing from BPM and length; AssetCraft uses the real cue map for ev
 - **Deviations:** the mock-up's "AI:" line is labelled **Analysis** (measured from the cue map; AI
   stays optional); "Analyse n" waits for the built-in analyser (A2–A4).
 
+## Clip motion (SB-3D1)
+
+Design: [design/clip-motion-handoff.md](design/clip-motion-handoff.md) (from Paul's canvas, 2026-11-04);
+brief: [design/clip-motion-brief.md](design/clip-motion-brief.md).
+
+- **Data** (`crates/storyboard/src/motion.rs`, step 1, built 2026-11-04): `Clip.motion: Option<Motion>`
+  (`None` = holds still, left out of the file); `Motion { preset, start: Camera, amount: Camera, ease }`;
+  `Camera { yaw, pitch, zoom, pan: [x, y] }` — radians, a factor, a fraction of the frame; as a *start* it
+  is where the clip begins (an offset from the shot as framed), as an *amount* what is added over the clip
+  (`End = Start + amount`, zoom multiplies). `Motion::at(t)` is the camera at `t ∈ 0..=1` of the clip,
+  eased (`Ease::Linear | InOut | Out`), so a Re-cut re-times it for free. `MotionKind::of_clip`: Orbit
+  for a `.glb` / `.gltf` / `.obj` hero, PanZoom for a still, `None` for a title card or an empty shot.
+  Presets (`MotionPreset`): Turntable (orbit only, +360°, linear), Push in (×1.6, in-out), Pull out,
+  Pan left / right (orbit ∓30° yaw, still ∓12 % pan; ease out), Rise (orbit +20° pitch, still 12 % up),
+  Custom. Ranges are the Inspector's slider ranges; out of range is refused, never clamped.
+- **Command:** `storyboard.motion {clip, preset?, start?, amount?, ease?, swap?, clear?}` (EDIT, one undo
+  step, a refusal or a no-op records none). Cameras in JSON are `{yaw?, pitch?, zoom?, pan?}` with
+  **degrees**; a field left out keeps its value; a preset given with a start / amount / ease is applied
+  first. The reply carries `motion` (with `end` and the Strip `glyph` ↻ ⤢ ⇆) and `kind`.
+- **Next:** step 2, the Inspector's MOTION section and Strip glyphs; then 3 Viewer playback, 4 Set from
+  Viewer (`storyboard.motion.capture`), 5 Apply to all.
+
 ## Decisions (Paul)
 
 | ID | Question                                                                                         | Recommendation / decision                                                                                         | Needed by |

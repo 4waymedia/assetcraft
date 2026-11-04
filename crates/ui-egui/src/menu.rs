@@ -53,6 +53,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // `assetcraft-cli analyze --cuemap` and automation; the app analyses through storyboard.analyse.
     "track.analyze",
     "storyboard.text.style",
+    // The Inspector's MOTION section drives it (SB-3D1).
+    "storyboard.motion",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

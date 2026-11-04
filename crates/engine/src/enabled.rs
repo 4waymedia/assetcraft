@@ -42,6 +42,7 @@ impl Session {
             | "storyboard.place"
             | "storyboard.text.kind"
             | "storyboard.text.style"
+            | "storyboard.motion"
             | "storyboard.pause"
             | "storyboard.seek" => self.board().map(|_| ()),
             "storyboard.delete" => {

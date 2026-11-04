@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::motion::Motion;
 use crate::text::{TextKind, TextStyle};
 use crate::time::{Bpm, Ticks};
 
@@ -169,6 +170,9 @@ pub struct Clip {
     /// How the clip's text looks: theme, animation, overlay position.
     #[serde(default, skip_serializing_if = "TextStyle::is_default")]
     pub text_style: TextStyle,
+    /// How the camera moves over the clip (see [`crate::motion`]); `None` holds still.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Motion>,
 }
 
 impl Clip {
@@ -188,6 +192,7 @@ impl Clip {
             notes: String::new(),
             overlay: None,
             text_style: TextStyle::default(),
+            motion: None,
         }
     }
 

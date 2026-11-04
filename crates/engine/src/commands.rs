@@ -399,6 +399,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.motion",
+        "Clip Motion",
+        "Storyboard",
+        None,
+        "{clip: number, preset?: turntable|pushIn|pullOut|panLeft|panRight|rise|custom, start?: {yaw?, pitch?, zoom?, pan?: [x, y]}, amount?: {…}, ease?: linear|inOut|out, swap?: true, clear?: true} (angles in degrees; End = Start + amount; one undo step)",
+        crate::motion_cmd::sb_motion
+    ),
+    cmd!(
+        EDIT,
         "storyboard.recut",
         "Re-cut to Track",
         "Storyboard",

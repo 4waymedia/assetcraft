@@ -15,6 +15,7 @@ pub mod generate_cmd;
 pub mod launch;
 mod library_cmd;
 mod model_cmd;
+mod motion_cmd;
 pub mod open_in;
 pub mod paths;
 pub mod places;
@@ -670,6 +671,8 @@ mod enabled_tests;
 mod generate_tests;
 #[cfg(test)]
 mod library_tests;
+#[cfg(test)]
+mod motion_tests;
 #[cfg(test)]
 mod open_in_tests;
 #[cfg(test)]

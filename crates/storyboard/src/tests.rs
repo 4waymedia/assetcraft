@@ -740,3 +740,143 @@ fn family_and_hero_have_their_own_character() {
     assert!(Pacing::Hero.suits(130.0) && !Pacing::Family.suits(130.0));
     assert_eq!(Pacing::from_id("hero"), Some(Pacing::Hero));
 }
+
+// ---- Motion (SB-3D1 step 1) ----------------------------------------------------------------
+
+/// The sample board with a model in clip 2 and a still in clip 3 (both plain shots).
+fn board_with_shots() -> (Storyboard, ClipId, ClipId, ClipId) {
+    let mut board = sample();
+    let card = board.clips[0].id;
+    let model = board.clips[1].id;
+    let still = board.clips[2].id;
+    assert!(board.clips[1].shot_type.accepts_assets() && board.clips[2].shot_type.accepts_assets());
+    board.clips[1].asset_ids = vec![AssetId("/art/orc-warrior.glb".into())];
+    board.clips[2].asset_ids = vec![AssetId("/art/concept.png".into())];
+    (board, card, model, still)
+}
+
+#[test]
+fn motion_kind_comes_from_the_hero() {
+    let (board, card, model, still) = board_with_shots();
+    assert_eq!(MotionKind::of_clip(board.clip(card).unwrap()), None, "a title card has nothing to move");
+    assert_eq!(MotionKind::of_clip(board.clip(model).unwrap()), Some(MotionKind::Orbit));
+    assert_eq!(MotionKind::of_clip(board.clip(still).unwrap()), Some(MotionKind::PanZoom));
+    assert_eq!(MotionKind::of_clip(&Clip::new(ClipId(9), SceneId(1), ShotType::Ws, Ticks(1))), None, "empty shot");
+    assert_eq!(MotionKind::of_path("F:\\models\\Horse.GLTF"), MotionKind::Orbit);
+    assert_eq!(MotionKind::of_path("/a/b.obj"), MotionKind::Orbit);
+    assert_eq!(MotionKind::of_path("/a/b.mp4"), MotionKind::PanZoom);
+}
+
+#[test]
+fn presets_fill_amount_and_ease_and_edits_make_custom() {
+    let (mut board, _, model, still) = board_with_shots();
+    let turn = MotionEdit { preset: Some(MotionPreset::Turntable), ..Default::default() };
+    assert!(set_motion(&mut board, model, turn).unwrap());
+    let m = board.clip(model).unwrap().motion.unwrap();
+    assert_eq!((m.preset, m.ease), (MotionPreset::Turntable, Ease::Linear));
+    assert!((m.amount.yaw - std::f32::consts::TAU).abs() < 1e-6 && m.amount.zoom == 1.0);
+    assert_eq!(m.glyph(), Some("↻"));
+    assert!(!set_motion(&mut board, model, turn).unwrap(), "same preset again: no change");
+
+    // Turntable is orbit only; a still pans instead.
+    assert_eq!(
+        set_motion(&mut board, still, turn),
+        Err(MotionError::NotForKind(MotionPreset::Turntable, MotionKind::PanZoom))
+    );
+    assert_eq!(board.clip(still).unwrap().motion, None, "a refusal changes nothing");
+    let pan = MotionEdit { preset: Some(MotionPreset::PanRight), ..Default::default() };
+    assert!(set_motion(&mut board, still, pan).unwrap());
+    let m = board.clip(still).unwrap().motion.unwrap();
+    assert_eq!((m.amount.pan, m.ease, m.glyph()), ([0.12, 0.0], Ease::Out, Some("⇆")));
+
+    // Editing an amount flips the chip to Custom and keeps the start.
+    let zoom = MotionEdit { amount: Some(Camera { zoom: 1.6, ..Camera::NONE }), ..Default::default() };
+    assert!(set_motion(&mut board, still, zoom).unwrap());
+    let m = board.clip(still).unwrap().motion.unwrap();
+    assert_eq!((m.preset, m.glyph(), m.ease), (MotionPreset::Custom, Some("⤢"), Ease::Out));
+    // An ease change alone also makes it Custom; a preset on top resets both.
+    assert!(set_motion(&mut board, model, MotionEdit { ease: Some(Ease::Out), ..Default::default() }).unwrap());
+    assert_eq!(board.clip(model).unwrap().motion.unwrap().preset, MotionPreset::Custom);
+    let push = MotionEdit { preset: Some(MotionPreset::PushIn), ..Default::default() };
+    assert!(set_motion(&mut board, model, push).unwrap());
+    let m = board.clip(model).unwrap().motion.unwrap();
+    assert_eq!((m.preset, m.ease, m.amount.zoom, m.amount.yaw), (MotionPreset::PushIn, Ease::InOut, 1.6, 0.0));
+    for p in MotionPreset::ALL {
+        assert_eq!(MotionPreset::from_id(p.id()), Some(p));
+    }
+    for e in Ease::ALL {
+        assert_eq!(Ease::from_id(e.id()), Some(e));
+    }
+}
+
+#[test]
+fn motion_at_is_eased_from_start_to_end() {
+    let start = Camera { yaw: 0.5, pitch: 0.1, zoom: 2.0, pan: [0.1, 0.0] };
+    let m = Motion::preset(MotionPreset::Turntable, MotionKind::Orbit, start);
+    assert_eq!(m.at(0.0), start);
+    assert_eq!(m.at(-3.0), start, "clamped");
+    let end = m.at(1.0);
+    assert!((end.yaw - (0.5 + std::f32::consts::TAU)).abs() < 1e-5 && end.zoom == 2.0 && end.pan == [0.1, 0.0]);
+    assert_eq!(m.at(f32::NAN), start, "not finite: the start");
+    assert!((m.at(0.5).yaw - (0.5 + std::f32::consts::PI)).abs() < 1e-5, "linear: halfway at t = 0.5");
+    // Ease in-out is symmetric and slow at the ends; ease out is ahead of linear.
+    assert_eq!(Ease::InOut.apply(0.5), 0.5);
+    assert!(Ease::InOut.apply(0.1) < 0.1 && Ease::InOut.apply(0.9) > 0.9);
+    assert!(Ease::Out.apply(0.25) > 0.25 && Ease::Out.apply(1.0) == 1.0 && Ease::Out.apply(0.0) == 0.0);
+    // Zoom interpolates geometrically: a 4× push is 2× halfway.
+    let push = Motion { amount: Camera { zoom: 4.0, ..Camera::NONE }, ease: Ease::Linear, ..Motion::default() };
+    assert!((push.at(0.5).zoom - 2.0).abs() < 1e-6);
+    // Swap runs it backwards and lands on the old start.
+    let back = push.swapped();
+    assert_eq!(back.start, push.end());
+    let there = back.end();
+    assert!((there.zoom - 1.0).abs() < 1e-6 && there.yaw == 0.0);
+    assert_eq!(back.preset, MotionPreset::Custom);
+}
+
+#[test]
+fn motion_refuses_out_of_range_and_round_trips() {
+    let (mut board, card, model, still) = board_with_shots();
+    let e = |amount| MotionEdit { amount: Some(amount), ..Default::default() };
+    assert_eq!(set_motion(&mut board, card, e(Camera::NONE)), Err(MotionError::NoShot(card)));
+    assert_eq!(set_motion(&mut board, ClipId(999), e(Camera::NONE)), Err(MotionError::NoClip(ClipId(999))));
+    for bad in [
+        Camera { yaw: 7.0, ..Camera::NONE },
+        Camera { pitch: 1.5, ..Camera::NONE },
+        Camera { zoom: 0.1, ..Camera::NONE },
+        Camera { zoom: f32::NAN, ..Camera::NONE },
+        Camera { yaw: f32::INFINITY, ..Camera::NONE },
+    ] {
+        assert_eq!(set_motion(&mut board, model, e(bad)), Err(MotionError::OutOfRange("amount")), "{bad:?}");
+    }
+    for bad in [Camera { pan: [0.6, 0.0], ..Camera::NONE }, Camera { zoom: 5.0, ..Camera::NONE }] {
+        assert_eq!(set_motion(&mut board, still, e(bad)), Err(MotionError::OutOfRange("amount")), "{bad:?}");
+    }
+    let s = |start| MotionEdit { start: Some(start), ..Default::default() };
+    assert_eq!(
+        set_motion(&mut board, still, s(Camera { zoom: 0.5, ..Camera::NONE })),
+        Err(MotionError::OutOfRange("start"))
+    );
+    assert_eq!(
+        set_motion(&mut board, model, s(Camera { pitch: 2.0, ..Camera::NONE })),
+        Err(MotionError::OutOfRange("start"))
+    );
+    assert!(board.clips.iter().all(|c| c.motion.is_none()), "refusals change nothing");
+
+    // A saved board carries the motion, and one without it loads as `None`.
+    let json = board.to_json().unwrap();
+    assert!(!json.contains("motion"), "no motion: left out");
+    assert!(
+        set_motion(&mut board, model, MotionEdit { preset: Some(MotionPreset::Rise), ..Default::default() }).unwrap()
+    );
+    assert!(set_motion(&mut board, model, s(Camera { yaw: 0.6, pitch: 0.42, zoom: 1.0, pan: [0.0, 0.0] })).unwrap());
+    let json = board.to_json().unwrap();
+    assert!(json.contains("\"preset\": \"rise\"") && json.contains("\"ease\": \"inOut\""), "{json}");
+    assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
+    assert!(swap_motion(&mut board, model).unwrap());
+    assert_eq!(board.clip(model).unwrap().motion.unwrap().preset, MotionPreset::Custom);
+    assert!(clear_motion(&mut board, model).unwrap());
+    assert!(!clear_motion(&mut board, model).unwrap());
+    assert!(!swap_motion(&mut board, model).unwrap());
+    assert_eq!(board.clip(model).unwrap().motion, None);
+}
