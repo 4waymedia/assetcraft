@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn walk_counts_every_test_file() {
         let summary = walk(&RealFs, &library(), &WalkLimits::default());
-        assert_eq!(summary.files, 37); // 24 images + PSD, DNG, HEIC, a PDF, 4 videos and 4 models (Stage 1; 3D viewer V0.1 added the textured cube)
+        assert_eq!(summary.files, 36); // 24 images + PSD, DNG, HEIC, a PDF, 4 videos and 4 models (3D viewer V0.1 added the textured cube; V0.2 bumps this when its fixture is committed)
         assert_eq!(summary.dirs, 11); // root + 10 folders
         assert!(!summary.truncated);
     }

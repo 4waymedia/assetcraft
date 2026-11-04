@@ -48,6 +48,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "track.preview",
     "track.previewVolume",
     "track.peaks",
+    // `assetcraft-cli info` and the 3D viewer call it; no menu item.
+    "asset.meshInfo",
     // `assetcraft-cli analyze --cuemap` and automation; the app analyses through storyboard.analyse.
     "track.analyze",
     "storyboard.text.style",

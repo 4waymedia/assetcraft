@@ -44,5 +44,5 @@ folder would change the folder-count tests). Regenerate with
 | `environments/frozen_lake_pan.avi`           | AVI (`RIFF … AVI `), Motion JPEG                              |
 
 Video poster frames need `filmcraft-cli`; without it the videos show their type icon.
-35 files in all (3 of them 3D models in `props/models/`), about 1.9 MB.
+36 files in all (4 of them 3D models in `props/models/`), about 1.9 MB.
 

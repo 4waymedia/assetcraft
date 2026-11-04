@@ -104,7 +104,7 @@ impl Format {
             Avi => "AVI",
             Wav => "WAV",
             Mp3 => "MP3",
-            Glb => "glTF binary",
+            Glb => "GLB",
             Gltf => "glTF",
             Obj => "OBJ",
             Zip => "ZIP",

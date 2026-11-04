@@ -353,10 +353,11 @@ fn info_prints_mesh_facts_and_fails_per_file() {
     assert_eq!(r["format"], json!("GLB"));
     assert_eq!(r["warnings"].as_array().map(Vec::len), Some(0));
     let size = r["bounds"]["size"].as_array().unwrap();
-    assert!(
-        size.iter().all(|v| (v.as_f64().unwrap() - 2.0).abs() < 1e-3),
-        "a unit cube rotated about Y keeps its height: {size:?}"
-    );
+    // The fixture's node turns the 2-unit cube 30° about Y (make_model_fixtures.py): world bounds
+    // keep its height and widen X and Z to 2·(cos 30° + sin 30°) ≈ 2.732.
+    let side = |i: usize| size[i].as_f64().unwrap_or(f64::NAN);
+    assert!((side(1) - 2.0).abs() < 1e-3, "a cube rotated about Y keeps its height: {size:?}");
+    assert!((side(0) - 2.732).abs() < 1e-3 && (side(2) - 2.732).abs() < 1e-3, "{size:?}");
 
     let human = ok(&["info", &lib("props/models/tombstone.obj")]);
     assert!(human.starts_with("tombstone.obj: "), "{human}");

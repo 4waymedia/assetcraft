@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-11-01_
+_Last updated: 2026-11-04_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -15,7 +15,7 @@ _Last updated: 2026-11-01_
 | Stage 4 Storyboard        | Steps 1–5, G1, TC1, A1, PR3, S1–S2, B1–B9 done                                                        | B4b (range re-cut with Tone); presets PR2                              | Claude                 |
 | Track analysis            | A1, A2a, A2b done; **A2c-1 + A2c-2 built 2026-10-25** (analyser; Analyse / Analyse all / folder prompt in the app); **W1 built** (working folder + Copy & analyse); AN1.2 PR built | Paul: try Copy & analyse on the Mac; confirm D-WF1 (a), (c) defaults; Claude: W2 (undo the last import; a Preferences row for the folder) | Paul, Claude           |
 | Audit 2026-10-28          | 4-agent audit (Storyboard, 3D viewer, cross-cutting, Develop readiness), merged and spot-checked: [docs/audit/2026-10-28-audit.md](docs/audit/2026-10-28-audit.md); ~60 findings, waves 0–4 | Paul: decisions D1–D8; Claude: wave 0 (bugs + cheap wins)                   | Paul, Claude           |
-| Audit wave 0              | **Built 2026-11-01 on `fix/audit-wave0`, to review**: SB-9, AR-2, AR-4, AR-5, V3-1, AR-9 fixed with tests; V3-6 deferred (mirrored-winding fix first); [docs/status/audit-wave0.md](docs/status/audit-wave0.md) | Paul: review and commit; Claude: V3-6 winding fix, then wave 1 (write seam) | Paul, Claude           |
+| Audit wave 0              | **Built 2026-11-01 on `fix/audit-wave0`, to review**: SB-9, AR-2, AR-4, AR-5, V3-1, AR-9 fixed with tests; W0-1, W0-2 (Mac) and CI1 a–d fixed 2026-11-04, whole suite green; V3-6 deferred (mirrored-winding fix first); [docs/status/audit-wave0.md](docs/status/audit-wave0.md) | Paul: review and commit; Claude: V3-6 winding fix, then wave 1 (write seam) | Paul, Claude           |
 | AI Prompt & Insert        | **Reviewed 2026-11-01, not started**: Paul's request mapped onto the code; schema v1 on existing types, 3 commands, 5 steps; [docs/design/ai-prompt-insert.md](docs/design/ai-prompt-insert.md) | Paul: review, decide D-AI1..D-AI3; then Claude: step 1 (engine only)        | Paul, Claude           |
 | Folders panel             | **F1 built 2026-10-27**: three tabs, Computer · Favorites · Craft (FP-5), Finder-style rows; My Folders in the shared `places.json` with per-pin scope; spec [docs/design/folders-panel.md](docs/design/folders-panel.md) | Paul: try it on the Mac; Claude: F2 Finder Favorites (needs a look at your sidebar file), F3 Quick Access, F4 craft-libs proposal | Paul, Claude           |
 | EffectCraft in AssetCraft | E1 `2ec05ef`                                                                                          | E2 `.ecproj` thumbnails                                                | Claude                 |
