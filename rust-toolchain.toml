@@ -1,3 +1,6 @@
 [toolchain]
-channel = "stable"
+# Pinned (R3, 2026-11-04): the Mac, the PC, CI and the forks lint identically. Clippy adds lints
+# every release ("stable" drifted 1.97 → 1.99 between machines and broke `cargo xtask ci`). Bump
+# deliberately: change the version, run `cargo xtask ci` on every OS, commit the fixes with it.
+channel = "1.99.0"
 components = ["rustfmt", "clippy"]

@@ -217,6 +217,32 @@ fn folder_tree_lists_only_expanded_nodes() {
 }
 
 #[test]
+fn a_click_in_favorites_or_craft_reveals_the_folder_in_the_computer_tab() {
+    use crate::folders::FolderTab;
+    let ctx = Context::default();
+    let (mut nav, _) = navigator(fake().volume("Root", "/"), Prefs::default());
+    frame(&ctx, &mut nav);
+    assert_eq!(nav.state.tree.tab, FolderTab::Favorites, "the panel opens on Favorites");
+    let volumes = nav.session().volumes().to_vec();
+    let target = Path::new("/home/paul/Pictures/reapers");
+    assert!(nav.state.tree.reveal(target, &volumes));
+    assert_eq!(nav.state.tree.tab, FolderTab::Computer);
+    for above in ["/", "/home", "/home/paul", "/home/paul/Pictures"] {
+        assert!(nav.state.tree.is_open_in_computer(Path::new(above)), "{above} is expanded");
+    }
+    assert!(!nav.state.tree.is_open_in_computer(target), "the folder itself stays closed");
+    for _ in 0..3 {
+        frame(&ctx, &mut nav);
+    }
+    assert_eq!(nav.state.tree.listings, 4, "one listing per expanded level, nothing deeper");
+    // A folder on no listed drive (a share that isn't mounted) leaves the tab alone.
+    let (mut nav, _) = navigator(fake(), Prefs::default());
+    frame(&ctx, &mut nav);
+    assert!(!nav.state.tree.reveal(Path::new("/nowhere/else"), &[]));
+    assert_eq!(nav.state.tree.tab, FolderTab::Favorites);
+}
+
+#[test]
 fn favorites_and_panel_layout_reach_prefs() {
     let ctx = Context::default();
     let (mut nav, _) = navigator(fake(), Prefs::default());

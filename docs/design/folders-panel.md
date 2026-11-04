@@ -18,6 +18,7 @@ _2026-10-27 · Stage 1 follow-up (Organizer) · F1 built, F2–F4 planned_
 | FP-3  | System extras: **Recent** folders, the **AssetCraft** working folder, **Network** shares                   |
 | FP-4  | My Folders is **shared by all Crafting apps**; each pin is set to **All Crafting apps** or **This app only** |
 | FP-5  | (2026-10-27, after trying F1: "still very clunky") **Three tabs** in the Folders panel: **Computer** (each hard drive, network drives), **Favorites** (the OS's favorite folders; Recent below), **Craft** (the AssetCraft folder and the folders the user pins). Supersedes FP-1's single System / My Folders list |
+| FP-6  | (2026-11-04) A click on a folder in **Favorites** or **Craft** opens it *and* **reveals it in Computer**: the panel switches to the Computer tab, expands the drive and every folder above it (one lazy listing per level) and scrolls the row into view. The right-click **Open** does the same. A folder on no listed drive (an unmounted share) opens without switching. `folders.rs` `Tree::reveal`, test `a_click_in_favorites_or_craft_reveals_the_folder_in_the_computer_tab` |
 
 Defaults chosen by Claude (cheap to change): a new pin is *All Crafting apps*; AssetCraft's old
 Favorites move into My Folders as *All Crafting apps*; Recent keeps the last 8 folders; when the

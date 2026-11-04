@@ -185,7 +185,7 @@ fn is_windows_path(s: &str) -> bool {
 }
 
 fn utf16(bytes: &[u8]) -> String {
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     String::from_utf16_lossy(&units).trim_end_matches('\0').to_owned()
 }
 
@@ -259,7 +259,7 @@ mod cfb {
     }
 
     fn u32s(b: &[u8]) -> impl Iterator<Item = u32> + '_ {
-        b.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        b.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c))
     }
 
     fn open(bytes: &[u8]) -> Option<File<'_>> {
@@ -307,7 +307,7 @@ mod cfb {
         let root = dir.get(..DIR_ENTRY_LEN)?;
         let mini_cutoff = u32_at(bytes, 56)? as usize;
         let wanted: Vec<u8> = name.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        for entry in dir.chunks_exact(DIR_ENTRY_LEN) {
+        for entry in dir.as_chunks::<DIR_ENTRY_LEN>().0 {
             let name_len = usize::from(u16_at(entry, 64)?);
             let is_stream = entry[66] == STREAM_ENTRY;
             if !is_stream || !(2..=64).contains(&name_len) || entry[..name_len - 2] != wanted[..] {

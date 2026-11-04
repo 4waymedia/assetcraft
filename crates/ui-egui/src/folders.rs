@@ -5,10 +5,15 @@
 //!
 //! A node's sub-folders are listed (one `Session::subfolders` call, one directory) only when
 //! the node is expanded, and cached per path until the next refresh. Nothing walks the disk.
+//!
+//! A click on a folder in Favorites or Craft opens it and also *reveals* it in Computer: the
+//! panel switches tab, expands the drive and every folder above it, and scrolls the row into
+//! view (Paul, 2026-11-04). Still lazy: one listing per expanded level.
 
 use crate::Navigator;
 use crate::widgets::paint_folder;
 use assetcraft_engine::{Location, same_path};
+use assetcraft_fs::Volume;
 use egui::{Align2, Color32, FontId, Rect, ScrollArea, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -31,6 +36,22 @@ enum Section {
     Mine,
 }
 
+impl Section {
+    /// Drawn in the Computer tab (Drives, Network).
+    fn is_computer(self) -> bool {
+        matches!(self, Section::Computer | Section::Network)
+    }
+}
+
+/// Open `path` in the Content panel; from Favorites or Craft, also reveal it in Computer.
+fn open_folder(nav: &mut Navigator, section: Section, path: &Path) {
+    nav.run("nav.open", json!({ "path": path.to_string_lossy() }));
+    if !section.is_computer() {
+        let volumes = nav.session.volumes().to_vec();
+        nav.state.tree.reveal(path, &volumes);
+    }
+}
+
 /// Expansion state and the per-path sub-folder cache.
 #[derive(Debug, Default)]
 pub(crate) struct Tree {
@@ -42,6 +63,8 @@ pub(crate) struct Tree {
     children: HashMap<PathBuf, Result<Vec<PathBuf>, String>>,
     /// `Session::subfolders` calls made (tests check the tree stays lazy).
     pub(crate) listings: usize,
+    /// A row to scroll into view once, after [`Tree::reveal`].
+    reveal: Option<PathBuf>,
 }
 
 impl Tree {
@@ -54,6 +77,30 @@ impl Tree {
     #[cfg(test)]
     pub(crate) fn expand_place(&mut self, path: &Path) {
         self.expanded.insert((Section::Places, path.to_path_buf()));
+    }
+
+    /// Show `path` in the Computer tab: switch to it and expand its drive and every folder above
+    /// it, so the row is visible; the next frame scrolls to it. `false` (and no change) when no
+    /// listed drive holds the path, e.g. a share that isn't mounted.
+    pub(crate) fn reveal(&mut self, path: &Path, volumes: &[Volume]) -> bool {
+        let Some(volume) =
+            volumes.iter().filter(|v| path.starts_with(&v.path)).max_by_key(|v| v.path.as_os_str().len())
+        else {
+            return false;
+        };
+        let section = if volume.network { Section::Network } else { Section::Computer };
+        self.tab = FolderTab::Computer;
+        for above in path.ancestors().skip(1).take_while(|a| a.starts_with(&volume.path)) {
+            self.expanded.insert((section, above.to_path_buf()));
+        }
+        self.reveal = Some(path.to_path_buf());
+        true
+    }
+
+    /// Whether `path` is expanded under Computer or Network (tests).
+    #[cfg(test)]
+    pub(crate) fn is_open_in_computer(&self, path: &Path) -> bool {
+        [Section::Computer, Section::Network].iter().any(|s| self.expanded.contains(&(*s, path.to_path_buf())))
     }
 }
 
@@ -387,6 +434,10 @@ fn node(nav: &mut Navigator, ui: &mut Ui, section: Section, path: &Path, label: 
     let is_favorite = nav.session.favorites().iter().any(|f| same_path(f, path));
     let shared = section == Section::Mine && depth == 0 && nav.session.pin_shared(path) == Some(true);
     let hit = row(ui, egui::Id::new(("folders-row", section, path)), depth, icon, label, current, Some(open), shared);
+    if section.is_computer() && nav.state.tree.reveal.as_deref() == Some(path) {
+        hit.response.scroll_to_me(Some(egui::Align::Center));
+        nav.state.tree.reveal = None;
+    }
     if hit.toggled {
         if open {
             nav.state.tree.expanded.remove(&key);
@@ -395,13 +446,13 @@ fn node(nav: &mut Navigator, ui: &mut Ui, section: Section, path: &Path, label: 
         }
     }
     if hit.clicked {
-        nav.run("nav.open", json!({ "path": path.to_string_lossy() }));
+        open_folder(nav, section, path);
     }
     let tip =
         if shared { format!("{}\nShared with all Crafting apps", path.display()) } else { path.display().to_string() };
     hit.response.on_hover_text(tip).context_menu(|ui| {
         if ui.button("Open").clicked() {
-            nav.run("nav.open", json!({ "path": path.to_string_lossy() }));
+            open_folder(nav, section, path);
         }
         let p = path.to_string_lossy();
         if is_favorite {

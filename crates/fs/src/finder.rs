@@ -352,7 +352,9 @@ mod tests {
             let mut bad = good.clone();
             bad[i] ^= 0xff;
             if let Some(p) = bookmark_path(&bad) {
-                assert!(p.is_absolute() && !p.components().any(|c| c.as_os_str() == ".."));
+                // A Finder path is rooted at `/`; `has_root`, not `is_absolute`, so the test
+                // holds on Windows too, where an absolute path needs a drive.
+                assert!(p.has_root() && !p.components().any(|c| c.as_os_str() == ".."));
             }
         }
         assert_eq!(bookmark_path(&build::bookmark("/a/../etc")), None, "no `..` in a sidebar path");
