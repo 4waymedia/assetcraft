@@ -63,7 +63,8 @@ says so and prints the standard folders the app falls back to. Reads only.
 
 OPTIONS:
     --json           {source, file?, items: [{name, path}]}
-    --why            macOS: where reading Finder's sidebar stops (file, permission, layout, bookmarks)
+    --why            where reading the OS sidebar stops: macOS Finder Favorites (file, permission, layout,
+                     bookmarks) or Windows Quick Access (file, compound-file layout, each pin)
     -h, --help       Print help
 ";
 
@@ -628,10 +629,13 @@ fn s_home() -> Option<PathBuf> {
 fn sidebar(p: &Parsed, help: &'static str) -> Outcome {
     let _ = positionals(p, 0, 0, "", help)?;
     if p.has("--why") {
-        let home = s_home();
-        let lines = match home {
-            Some(h) => assetcraft_fs::sidebar::finder_report(&h),
-            None => vec!["no home folder".into()],
+        let lines = if cfg!(windows) {
+            assetcraft_fs::quick_access::report(assetcraft_fs::sidebar::appdata_dir().as_deref())
+        } else {
+            match s_home() {
+                Some(h) => assetcraft_fs::sidebar::finder_report(&h),
+                None => vec!["no home folder".into()],
+            }
         };
         return Ok(lines.join("\n") + "\n");
     }
@@ -639,9 +643,10 @@ fn sidebar(p: &Parsed, help: &'static str) -> Outcome {
     let from_os = s.system_places_from_os();
     let source = match (from_os, cfg!(target_os = "macos"), cfg!(windows)) {
         (true, true, _) => "Finder sidebar Favorites",
-        (true, false, _) => "GTK bookmarks",
+        (true, _, true) => "Explorer Quick Access pins",
+        (true, false, false) => "GTK bookmarks",
         (false, true, _) => "standard folders (Finder's sidebar file couldn't be read)",
-        (false, _, true) => "standard folders (Quick Access pins come with step F3)",
+        (false, _, true) => "standard folders (no Quick Access pins, or the file couldn't be read)",
         (false, _, _) => "standard folders (no GTK bookmarks)",
     };
     let items = s.system_places();

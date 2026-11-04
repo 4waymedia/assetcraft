@@ -79,7 +79,7 @@ impl Services for RealFs {
     }
 
     fn sidebar(&self) -> Vec<SidebarItem> {
-        crate::sidebar::read(home_dir().as_deref())
+        crate::sidebar::read(home_dir().as_deref(), &|which| self.known_folder(which))
     }
 
     fn is_executable(&self, path: &Path) -> bool {

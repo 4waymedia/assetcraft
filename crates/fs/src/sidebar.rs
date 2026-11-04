@@ -1,12 +1,12 @@
 //! The OS's own sidebar folders (Folders panel → System → Favorites; docs/design/folders-panel.md
-//! FP-2). Linux reads GTK bookmarks (F1); macOS Finder Favorites (F2) and Windows Quick Access
-//! pins (F3) come next and return nothing until then, so the panel shows the standard list.
-//! macOS: Finder's Favorites (F2, `crate::finder`).
+//! FP-2). Linux reads GTK bookmarks (F1), macOS Finder's Favorites (F2, `crate::finder`), Windows
+//! Explorer's Quick Access pins (F3, `crate::quick_access`). Empty when the OS's file can't be
+//! read, so the panel shows the standard list.
 //!
 //! Bookmark files are hostile input: size-capped, `file://` URIs only, percent-decoded, absolute
 //! paths that exist as folders, at most [`MAX_ITEMS`].
 
-use crate::SidebarItem;
+use crate::{KnownFolder, SidebarItem};
 use std::path::{Path, PathBuf};
 
 /// Most sidebar folders read.
@@ -109,12 +109,17 @@ pub fn finder_report(home: &Path) -> Vec<String> {
     out
 }
 
-/// This machine's sidebar folders that exist (empty when there's no readable sidebar).
-pub fn read(home: Option<&Path>) -> Vec<SidebarItem> {
+/// This machine's sidebar folders that exist (empty when there's no readable sidebar). `known`
+/// resolves the known folders Windows pins by GUID (Documents, Downloads, …) to this machine's
+/// locations.
+pub fn read(home: Option<&Path>, known: &dyn Fn(KnownFolder) -> Option<PathBuf>) -> Vec<SidebarItem> {
     let items = if cfg!(target_os = "macos") {
         home.map(finder_favorites).unwrap_or_default()
     } else if cfg!(windows) {
-        Vec::new()
+        match appdata_dir() {
+            Some(appdata) => crate::quick_access::read(&appdata, known),
+            None => Vec::new(),
+        }
     } else {
         let config = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
@@ -128,6 +133,11 @@ pub fn read(home: Option<&Path>) -> Vec<SidebarItem> {
             .unwrap_or_default()
     };
     items.into_iter().filter(|i| i.path.is_dir()).collect()
+}
+
+/// `%APPDATA%` (Windows), when set and absolute.
+pub fn appdata_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
 #[cfg(test)]

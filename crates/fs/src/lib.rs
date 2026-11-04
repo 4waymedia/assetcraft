@@ -11,6 +11,7 @@
 mod fake;
 pub mod finder;
 pub mod mounts;
+pub mod quick_access;
 mod real;
 pub mod sidebar;
 mod walk;
