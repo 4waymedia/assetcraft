@@ -149,7 +149,7 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
         .filter(|_| song_mode)
         .map(|(p, loading)| (p.to_string_lossy().into_owned(), loading));
     // The footer: an analyse line (when there's something to analyse) above the counts + volume line.
-    let not_analysed = all.iter().filter(|t| t["analysed"] != true).count();
+    let not_analysed = all.iter().filter(|t| t["analysed"] != true && t["status"] != "failed").count();
     let analyse_line = analyse.pending > 0 || (analyse.available && not_analysed > 0);
     let footer_h = if analyse_line { 54.0 } else { 28.0 };
     let list_h = (ui.available_height() - footer_h).max(80.0);
@@ -200,8 +200,9 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
                 ui.spinner();
                 ui.label(RichText::new(format!("Analysing… {} to go", analyse.pending)).small().color(TEXT_AI));
             } else {
+                // Counts what it will queue: failed songs are retried from their own row.
                 let all_btn = ui
-                    .small_button(format!("Analyse all ({waiting})"))
+                    .small_button(format!("Analyse all ({not_analysed})"))
                     .on_hover_text("Find beats, bars, sections and drops in every song not analysed yet");
                 if all_btn.clicked() {
                     to_analyse = Some(json!({}));

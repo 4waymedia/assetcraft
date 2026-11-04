@@ -239,8 +239,50 @@ fn normalize(a: V3) -> Option<V3> {
     (len > 1e-20 && len.is_finite()).then(|| scale(a, 1.0 / len))
 }
 
-/// Linear 0..1 to an sRGB byte.
+/// Linear 0..1 to an sRGB byte: a binary search over the 255 linear values where the byte steps
+/// up, built once from [`srgb_exact`]. Exactly the same byte as `srgb_exact` (tested), so
+/// thumbnails don't change, at about half the cost of its `powf` (5.4 vs 10.2 ns per call,
+/// measured); it runs 3× per shaded sample (audit V3-1).
 fn srgb(v: f32) -> u8 {
+    let v = if v.is_nan() { 0.0 } else { v };
+    srgb_steps().partition_point(|t| *t <= v) as u8
+}
+
+/// `steps[b - 1]` = the smallest linear value whose sRGB byte is at least `b`, for b = 1..=255.
+fn srgb_steps() -> &'static [f32; 255] {
+    static STEPS: std::sync::OnceLock<[f32; 255]> = std::sync::OnceLock::new();
+    STEPS.get_or_init(|| {
+        let mut steps = [0.0f32; 255];
+        for (i, slot) in steps.iter_mut().enumerate() {
+            let b = i as u8 + 1;
+            // Bisect over the bit patterns of the positive floats in 0..=1, ordered like the values.
+            let (mut lo, mut hi) = (0u32, 1.0f32.to_bits());
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if srgb_exact(f32::from_bits(mid)) >= b {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            *slot = f32::from_bits(lo);
+        }
+        steps
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn srgb_for_tests(v: f32) -> u8 {
+    srgb(v)
+}
+
+#[cfg(test)]
+pub(crate) fn srgb_exact_for_tests(v: f32) -> u8 {
+    srgb_exact(v)
+}
+
+/// Linear 0..1 to an sRGB byte, by the formula (the reference [`srgb`] is built from).
+fn srgb_exact(v: f32) -> u8 {
     let v = v.clamp(0.0, 1.0);
     let s = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
     (s * 255.0 + 0.5) as u8

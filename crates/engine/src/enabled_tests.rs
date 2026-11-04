@@ -115,3 +115,27 @@ fn app_commands_carries_the_suite_shape() {
         assert_eq!(s.enabled(spec.id), Ok(()), "{}", spec.id);
     }
 }
+
+#[test]
+fn every_id_enabled_rs_matches_on_is_a_registered_command() {
+    // `enabled()` matches on id strings; a typo or a renamed command would silently leave a
+    // command always enabled (audit AR-9). Every `"area.name"` literal in the file must resolve.
+    let src = include_str!("enabled.rs");
+    let ids: Vec<&str> = src
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|s| {
+            let mut parts = s.split('.');
+            let head = parts.next().unwrap_or("");
+            !head.is_empty()
+                && head.bytes().all(|b| b.is_ascii_lowercase())
+                && s.contains('.')
+                && s.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+        })
+        .collect();
+    assert!(ids.len() >= 15, "found the match arms: {ids:?}");
+    for id in ids {
+        assert!(crate::find(id).is_some(), "enabled.rs names `{id}`, which isn't a registered command");
+    }
+}

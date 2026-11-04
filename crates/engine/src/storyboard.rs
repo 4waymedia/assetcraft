@@ -355,7 +355,11 @@ pub(crate) fn sb_recut(s: &mut Session, p: &Value) -> CmdResult {
         clip.duration = *d;
     }
     if let Some(t) = next.track.as_mut() {
-        *t = Track { bpm, duration: len, ..t.clone() };
+        // A new length no longer matches the Fit to length edit the board was generated with:
+        // drop it, so the music plays the song as is instead of the old edit (audit SB-9).
+        // `poll_audio` restarts playing music when the edit changes.
+        let edit = if len == t.duration { t.edit.clone() } else { None };
+        *t = Track { bpm, duration: len, edit, ..t.clone() };
     }
     let name = next.track.as_ref().map(|t| t.name.clone()).unwrap_or_default();
     s.boards.checkpoint();

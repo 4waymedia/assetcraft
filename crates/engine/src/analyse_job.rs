@@ -167,7 +167,12 @@ impl Analyser {
                     next
                 };
                 let Some(audio) = next else { break };
-                let result = analyse_one(services.as_ref(), &dir, &audio);
+                // The decoder and analyser read untrusted files: a panic fails this song only and
+                // the queue carries on (audit AR-2; the thumbnail decoders do the same).
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    analyse_one(services.as_ref(), &dir, &audio)
+                }))
+                .unwrap_or_else(|_| Err("the decoder crashed on this file".into()));
                 let mut jobs = lock(&shared);
                 jobs.current = None;
                 match result {
@@ -266,7 +271,7 @@ impl Session {
 }
 
 /// `storyboard.analyse {paths?: [audio]}` → `{queued, pending, message}`: analyse tracks in the
-/// background (default: every listed track that isn't analysed and isn't already queued).
+/// background (default: every listed track that isn't analysed, queued or failed; failed ones need explicit `paths`, the row's Retry).
 pub(crate) fn sb_analyse(s: &mut Session, p: &Value) -> CmdResult {
     let Some(dir) = s.analysis_dir.clone() else {
         return Err(CmdError::Unavailable("no folder to keep analyses in (the app sets one)".into()));
@@ -278,7 +283,9 @@ pub(crate) fn sb_analyse(s: &mut Session, p: &Value) -> CmdResult {
                 .as_array()
                 .map(|a| {
                     a.iter()
-                        .filter(|t| t["analysed"] != true)
+                        // Failed songs wait for their row's Retry (explicit paths): "Analyse all"
+                        // re-queuing them made a fast machine retry a bad file on every call.
+                        .filter(|t| t["analysed"] != true && t["status"] != "failed")
                         .filter_map(|t| t["audio"].as_str().map(PathBuf::from))
                         .collect()
                 })

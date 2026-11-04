@@ -99,6 +99,34 @@ pub fn cache_dir_for(os: Os, var: impl Fn(&str) -> Option<PathBuf>) -> Option<Pa
     Some(base.join("thumbs"))
 }
 
+/// `true` when `a` and `b` differ in a setting the user chose: everything but the navigation
+/// state (`last_folder`, `recent`) and the file version. Destructured without `..`, so a new
+/// `Prefs` field fails to compile here until someone decides whether it autosaves (audit AR-4:
+/// the old field-by-field check silently left 9 of 12 fields to exit only).
+fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
+    let Prefs {
+        version: _,
+        favorites,
+        recent: _,
+        last_folder: _,
+        view,
+        panels,
+        formats,
+        music_folder,
+        preview_volume,
+        working_folder,
+        model,
+    } = a;
+    *favorites != b.favorites
+        || *view != b.view
+        || *panels != b.panels
+        || *formats != b.formats
+        || *music_folder != b.music_folder
+        || *preview_volume != b.preview_volume
+        || *working_folder != b.working_folder
+        || *model != b.model
+}
+
 /// Load prefs from `path`. A missing, oversized or unreadable file gives defaults: bad prefs
 /// must never stop the app from starting. A file that exists but can't be used at all
 /// (oversized, not UTF-8, not a JSON object) is first renamed to `prefs.json.bad`, so the next
@@ -190,12 +218,11 @@ impl PrefsStore {
         self.last_error.as_deref()
     }
 
-    /// Call every frame with the session's prefs. Writes when favorites, view or panels
-    /// changed (the last folder alone is saved on exit). Returns `true` if it wrote.
+    /// Call every frame with the session's prefs. Writes when any setting the user chose
+    /// changed; where they browse (the last folder and Recent) alone waits for exit, so
+    /// navigating doesn't write. Returns `true` if it wrote.
     pub fn maybe_save(&mut self, prefs: &Prefs) -> bool {
-        let changed = prefs.favorites != self.saved.favorites
-            || prefs.view != self.saved.view
-            || prefs.panels != self.saved.panels;
+        let changed = settings_differ(prefs, &self.saved);
         let due = self.last_write.is_none_or(|t| t.elapsed() >= SAVE_INTERVAL);
         changed && due && self.write(prefs)
     }

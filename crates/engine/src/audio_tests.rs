@@ -273,3 +273,20 @@ fn the_timeline_previews_the_cut_and_the_track_column_the_song() {
         assert!(s.execute("track.preview", &json!({ "path": song, "cut": bad })).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn recut_to_a_new_length_drops_the_old_audio_edit_and_undo_brings_it_back() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
+    let edit = |s: &mut Session| run(s, "storyboard.state", json!({}))["board"]["track"]["edit"].clone();
+    assert!(!edit(&mut s).is_null(), "the 30 s fit gives an audio edit");
+    // Same length: the edit stays.
+    run(&mut s, "storyboard.recut", json!({ "bpm": 120 }));
+    assert!(!edit(&mut s).is_null());
+    // A new length: the edit no longer matches, so it goes (picture and music agree again).
+    run(&mut s, "storyboard.recut", json!({ "bpm": 120, "seconds": 20 }));
+    assert!(edit(&mut s).is_null(), "a 20 s recut must not keep the 10 s audio edit");
+    run(&mut s, "storyboard.undo", json!({}));
+    assert!(!edit(&mut s).is_null(), "undo restores it");
+}

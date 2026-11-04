@@ -277,12 +277,18 @@ impl Session {
     /// Run a command. This is the only way state changes.
     pub fn execute(&mut self, id: &str, params: &Value) -> CmdResult {
         let spec = find(id).ok_or_else(|| CmdError::Unknown(id.to_string()))?;
-        self.generation = self.generation.wrapping_add(1);
+        // A read changes nothing a cache could derive from, so it leaves the generation alone:
+        // the Start screen polls `track.peaks` every frame while a song loads, and that used to
+        // empty every generation-keyed UI cache each frame (audit AR-5).
+        if !spec.effects.read_only() {
+            self.generation = self.generation.wrapping_add(1);
+        }
         (spec.run)(self, params)
     }
 
-    /// A counter that changes whenever a command has run (successfully or not). State only
-    /// changes through commands, so anything derived from it can be cached until this moves.
+    /// A counter that changes whenever a command that can change state has run (successfully or
+    /// not); read-only commands (`Effects::read_only`) leave it alone. State only changes through
+    /// commands, so anything derived from it can be cached until this moves.
     pub fn generation(&self) -> u64 {
         self.generation
     }

@@ -83,8 +83,10 @@ fn analyse_stores_cue_maps_outside_the_music_folder_and_the_tracks_become_usable
     // Analyse all: both queued, the bad one fails with a reason, the good one is stored.
     let r = run(&mut s, "storyboard.analyse", json!({}));
     assert_eq!(r["queued"], 2, "{r}");
+    // Asked again at once: whatever is queued, running or already failed is not queued twice (on a
+    // fast machine broken.mp3 has failed by now; a failed song waits for its Retry).
     let again = run(&mut s, "storyboard.analyse", json!({}));
-    assert!(again["queued"] == 0 || s.analyse_progress().pending == 0, "already queued tracks aren't queued twice");
+    assert_eq!(again["queued"], 0, "{again}");
     wait_idle(&s);
     let p = s.analyse_progress();
     assert_eq!((p.pending, p.done, p.failed), (0, 1, 1));
@@ -141,4 +143,67 @@ fn analyse_needs_a_store_and_checks_its_params() {
         assert!(matches!(s.execute("storyboard.analyse", &bad), Err(CmdError::BadParams(_))), "{bad}");
     }
     assert_eq!(run(&mut s, "storyboard.analyse", json!({ "paths": [] }))["queued"], 0);
+}
+
+/// Real disk, except reading any file named `boom*` panics (a decoder bug on a hostile file).
+struct PanickyFs(RealFs);
+
+impl assetcraft_fs::Services for PanickyFs {
+    fn list_entries(
+        &self,
+        dir: &std::path::Path,
+        opts: &assetcraft_fs::ListOptions,
+    ) -> Result<assetcraft_fs::Listing, assetcraft_fs::FsError> {
+        self.0.list_entries(dir, opts)
+    }
+    fn entry(&self, path: &std::path::Path) -> Result<assetcraft_fs::Entry, assetcraft_fs::FsError> {
+        self.0.entry(path)
+    }
+    fn read_head(&self, path: &std::path::Path, max: usize) -> Result<Vec<u8>, assetcraft_fs::FsError> {
+        assert!(!path.to_string_lossy().contains("boom"), "simulated decoder panic");
+        self.0.read_head(path, max)
+    }
+    fn read_range(&self, path: &std::path::Path, offset: u64, len: usize) -> Result<Vec<u8>, assetcraft_fs::FsError> {
+        assert!(!path.to_string_lossy().contains("boom"), "simulated decoder panic");
+        self.0.read_range(path, offset, len)
+    }
+    fn volumes(&self) -> Vec<assetcraft_fs::Volume> {
+        self.0.volumes()
+    }
+    fn home_dir(&self) -> Option<PathBuf> {
+        self.0.home_dir()
+    }
+    fn known_folder(&self, which: KnownFolder) -> Option<PathBuf> {
+        self.0.known_folder(which)
+    }
+}
+
+#[test]
+fn a_panicking_decoder_fails_one_song_and_the_queue_carries_on() {
+    let music = temp("panic");
+    let store = temp("panic-store");
+    std::fs::write(music.join("boom.wav"), song_wav(20.0, 10.0)).unwrap();
+    std::fs::write(music.join("good.wav"), song_wav(20.0, 10.0)).unwrap();
+    let mut s = Session::new(Arc::new(PanickyFs(RealFs)), Arc::new(RecordingLauncher::default()), Prefs::default())
+        .with_analysis_dir(store.clone());
+    run(&mut s, "storyboard.musicFolder", json!({ "path": music.to_string_lossy() }));
+    let r = run(&mut s, "storyboard.analyse", json!({}));
+    assert_eq!(r["queued"], 2);
+    wait_idle(&s);
+    let p = s.analyse_progress();
+    assert_eq!((p.pending, p.done, p.failed), (0, 1, 1), "the panic failed one song; the other was analysed");
+    let tracks = run(&mut s, "storyboard.tracks", json!({}));
+    let boom = tracks["tracks"].as_array().unwrap().iter().find(|t| t["title"] == "boom").cloned().unwrap();
+    assert_eq!(boom["status"], "failed");
+    assert!(boom["error"].as_str().unwrap().contains("crashed"), "{boom}");
+    // "Analyse all" leaves the failed song alone; Retry (explicit paths) runs it, so the analyser
+    // is still alive.
+    assert_eq!(run(&mut s, "storyboard.analyse", json!({}))["queued"], 0);
+    assert_eq!(
+        run(&mut s, "storyboard.analyse", json!({ "paths": [music.join("boom.wav").to_string_lossy()] }))["queued"],
+        1
+    );
+    wait_idle(&s);
+    let _ = std::fs::remove_dir_all(&music);
+    let _ = std::fs::remove_dir_all(&store);
 }

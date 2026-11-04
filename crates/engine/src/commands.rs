@@ -312,7 +312,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Analyse Tracks",
         "Storyboard",
         None,
-        "{paths?: [audio]} → {queued, pending, message} (analyses in the background: beats, bars, sections, hits, fits; default every listed track not analysed yet; results kept in AssetCraft's own analysis folder, never beside the music; storyboard.tracks shows queued / analysing / failed and counts the queue in `analysis`)",
+        "{paths?: [audio]} → {queued, pending, message} (analyses in the background: beats, bars, sections, hits, fits; default every listed track not analysed, queued or failed (Retry passes `paths`); results kept in AssetCraft's own analysis folder, never beside the music; storyboard.tracks shows queued / analysing / failed and counts the queue in `analysis`)",
         crate::analyse_job::sb_analyse
     ),
     cmd!(

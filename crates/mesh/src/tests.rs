@@ -639,3 +639,16 @@ fn threaded_rendering_is_identical_to_single_threaded() {
         render_with(&pup, &[Some(tex)], FRONT, &RenderOptions { threads: 5, ..RenderOptions::new(40, 24) }).unwrap();
     assert_eq!(a, b);
 }
+
+#[test]
+fn the_srgb_table_matches_the_formula_exactly() {
+    // Every 1/65536 step of 0..1, both sides of every byte boundary, and out-of-range input.
+    for i in 0..=65_536u32 {
+        let v = i as f32 / 65_536.0;
+        assert_eq!(crate::raster::srgb_for_tests(v), crate::raster::srgb_exact_for_tests(v), "at {v}");
+    }
+    for v in [-1.0f32, -0.0, 1.0, 1.5, f32::INFINITY, f32::NEG_INFINITY, f32::MIN_POSITIVE] {
+        assert_eq!(crate::raster::srgb_for_tests(v), crate::raster::srgb_exact_for_tests(v), "at {v}");
+    }
+    assert_eq!(crate::raster::srgb_for_tests(f32::NAN), 0);
+}

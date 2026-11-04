@@ -271,6 +271,23 @@ fn prefs_save_and_load_round_trip_atomically() {
     assert!(!store.maybe_save(&changed), "the last folder alone waits for exit");
     assert!(store.save_now(&changed));
     assert_eq!(prefs_file::load(&path).last_folder, changed.last_folder);
+    // Every chosen setting autosaves, not just favorites, view and panels (audit AR-4); the
+    // navigation state (last folder, Recent) alone does not.
+    type Edit = (&'static str, fn(&mut Prefs));
+    let edits: [Edit; 6] = [
+        ("music folder", |p| p.music_folder = Some("/music".into())),
+        ("working folder", |p| p.working_folder = Some("/work".into())),
+        ("preview volume", |p| p.preview_volume = Some(12)),
+        ("3D settings", |p| p.model.turntable = !p.model.turntable),
+        ("formats", |p| p.formats.heic = !p.formats.heic),
+        ("recent (must not)", |p| p.recent.push("/somewhere".into())),
+    ];
+    for (what, change) in edits {
+        let mut store = PrefsStore::new(Some(path.clone()), changed.clone());
+        let mut next = changed.clone();
+        change(&mut next);
+        assert_eq!(store.maybe_save(&next), !what.ends_with("(must not)"), "{what}");
+    }
 
     // Junk on disk falls back to defaults, and is kept aside before anything overwrites it.
     std::fs::write(&path, b"{ not json").unwrap();

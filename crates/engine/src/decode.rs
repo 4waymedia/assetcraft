@@ -52,12 +52,18 @@ impl Decodes {
         let slot: Slot = Arc::new(Mutex::new(Load::Loading));
         let (services, file, out) = (Arc::clone(services), path.to_path_buf(), Arc::clone(&slot));
         let spawned = std::thread::Builder::new().name("assetcraft-track-decode".into()).spawn(move || {
-            let result = match assetcraft_audio::load(services.as_ref(), &file) {
-                Ok(a) => {
+            // Untrusted file, third-party decoder: a panic is a failed load, never a slot stuck
+            // at Loading (audit AR-2).
+            let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assetcraft_audio::load(services.as_ref(), &file).map(|a| {
                     let overview = Arc::new(a.overview(OVERVIEW_BUCKETS));
-                    Load::Ready(Arc::new(Decoded { audio: Arc::new(a), overview }))
-                }
-                Err(e) => Load::Failed(e.to_string()),
+                    (a, overview)
+                })
+            }));
+            let result = match decoded {
+                Ok(Ok((a, overview))) => Load::Ready(Arc::new(Decoded { audio: Arc::new(a), overview })),
+                Ok(Err(e)) => Load::Failed(e.to_string()),
+                Err(_) => Load::Failed("the decoder crashed on this file".into()),
             };
             *out.lock().unwrap_or_else(PoisonError::into_inner) = result;
         });

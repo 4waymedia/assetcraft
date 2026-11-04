@@ -671,6 +671,9 @@ fn real_notify_watcher_sees_a_copied_file_through_the_session() {
     let dir = std::env::temp_dir().join(format!("assetcraft-engine-watch-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    // macOS: canonical, so paths match what FSEvents reports (/var → /private/var), as in
+    // stage1_exit.rs; elsewhere a no-op.
+    let dir = dir.canonicalize().unwrap_or(dir);
     std::fs::write(dir.join("a.png"), b"x").unwrap();
     let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
     run(&mut s, "nav.open", json!({"path": dir}));
@@ -783,4 +786,19 @@ fn theme_command_sets_and_persists_the_theme() {
     assert_eq!(s.view().theme, ThemeMode::System);
     assert!(s.execute("view.theme", &json!({"mode": "neon"})).is_err());
     assert_eq!(s.view().theme, ThemeMode::System, "a bad mode changes nothing");
+}
+
+#[test]
+fn reads_leave_the_generation_alone_and_changes_move_it() {
+    let (mut s, _) = session(fake());
+    let g = s.generation();
+    for id in ["app.state", "app.commands", "storyboard.state", "storyboard.tracks"] {
+        let _ = s.execute(id, &json!({}));
+        assert_eq!(s.generation(), g, "{id} is a read (audit AR-5)");
+    }
+    let _ = s.execute("nav.refresh", &json!({}));
+    assert_ne!(s.generation(), g, "a state change moves it");
+    let g = s.generation();
+    let _ = s.execute("nav.open", &json!({ "path": "/nowhere" }));
+    assert_ne!(s.generation(), g, "a failed change still moves it");
 }
