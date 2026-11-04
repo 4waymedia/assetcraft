@@ -37,8 +37,8 @@ pub fn parse_sfl(bytes: &[u8]) -> Vec<SidebarItem> {
     let Some(objects) = archive.get("$objects").and_then(Value::as_array) else { return Vec::new() };
     let resolve = |v: &Value| -> Option<Value> { resolve(objects, v, 0) };
     let Some(top) = archive.get("$top").and_then(Value::as_dictionary) else { return Vec::new() };
-    let Some(list) = top.get("root").and_then(&resolve) else { return Vec::new() };
-    let Some(items) = list.as_dictionary().and_then(|d| d.get("items")).and_then(&resolve) else {
+    let Some(list) = top.get("root").and_then(resolve) else { return Vec::new() };
+    let Some(items) = list.as_dictionary().and_then(|d| d.get("items")).and_then(resolve) else {
         return Vec::new();
     };
     let Some(items) = ns_array(objects, &items) else { return Vec::new() };
@@ -46,12 +46,12 @@ pub fn parse_sfl(bytes: &[u8]) -> Vec<SidebarItem> {
     for item in items.iter().take(MAX_ITEMS) {
         let Some(item) = resolve(item) else { continue };
         let Some(dict) = item.as_dictionary() else { continue };
-        let Some(bookmark) = dict.get("Bookmark").and_then(&resolve).and_then(|b| ns_data(objects, &b)) else {
+        let Some(bookmark) = dict.get("Bookmark").and_then(resolve).and_then(|b| ns_data(objects, &b)) else {
             continue;
         };
         let Some(path) = bookmark_path(&bookmark) else { continue };
         // Finder shows the folder's own name; a custom one is kept in `Name` when it differs.
-        let name = dict.get("Name").and_then(&resolve).and_then(|n| n.as_string().map(str::to_owned));
+        let name = dict.get("Name").and_then(resolve).and_then(|n| n.as_string().map(str::to_owned));
         let name = name.filter(|n| {
             !n.is_empty() && n.len() <= 255 && Some(n.as_str()) != path.file_name().and_then(|f| f.to_str())
         });
