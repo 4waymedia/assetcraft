@@ -4,10 +4,16 @@ use super::*;
 use crate::launch::RecordingLauncher;
 use assetcraft_fs::{FakeFs, RealFs};
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn run(s: &mut Session, id: &str, params: Value) -> Value {
     s.execute(id, &params).unwrap_or_else(|e| panic!("{id}: {e}"))
+}
+
+/// A path the command reported, compared component-wise so the test holds on Windows too, where
+/// joining onto a Unix-style fake folder yields `/home/paul/Documents\AssetCraft`.
+fn path(v: &Value) -> PathBuf {
+    PathBuf::from(v.as_str().unwrap_or_else(|| panic!("not a path: {v}")))
 }
 
 fn temp(tag: &str) -> PathBuf {
@@ -26,12 +32,12 @@ fn the_working_folder_defaults_to_documents_assetcraft_and_is_saved() {
         .file("/home/paul/notes.txt", 10);
     let mut s = Session::new(Arc::new(fake), Arc::new(RecordingLauncher::default()), Prefs::default());
     let v = run(&mut s, "app.workingFolder", json!({}));
-    assert_eq!(v["workingFolder"], "/home/paul/Documents/AssetCraft");
-    assert_eq!(v["music"], "/home/paul/Documents/AssetCraft/Music");
+    assert_eq!(path(&v["workingFolder"]), Path::new("/home/paul/Documents/AssetCraft"));
+    assert_eq!(path(&v["music"]), Path::new("/home/paul/Documents/AssetCraft/Music"));
     assert_eq!(v["custom"], false);
     assert_eq!(s.prefs().working_folder, None);
     let v = run(&mut s, "app.workingFolder", json!({ "path": "/home/paul/Studio" }));
-    assert_eq!((&v["workingFolder"], &v["custom"]), (&json!("/home/paul/Studio"), &json!(true)));
+    assert_eq!((path(&v["workingFolder"]), &v["custom"]), (PathBuf::from("/home/paul/Studio"), &json!(true)));
     assert_eq!(s.prefs().working_folder, Some(PathBuf::from("/home/paul/Studio")), "saved");
     for bad in [json!({ "path": "relative" }), json!({ "path": "/home/paul/notes.txt" }), json!({ "path": 3 })] {
         assert!(matches!(s.execute("app.workingFolder", &bad), Err(CmdError::BadParams(_))), "{bad}");
