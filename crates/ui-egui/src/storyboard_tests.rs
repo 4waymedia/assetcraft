@@ -880,3 +880,97 @@ fn copy_and_analyse_copies_into_the_working_folder_then_analyses_the_copies() {
     assert_eq!(message, "Analysed 1 track");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_motion_section_draws_for_every_clip_kind_and_only_commands_change_the_board() {
+    use assetcraft_storyboard::{Camera, ClipId};
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.place", json!({ "asset": "/art/orc-warrior.glb", "clip": 2 }));
+    nav.run("storyboard.place", json!({ "asset": "/art/concept.png", "clip": 3 }));
+    nav.run("storyboard.motion", json!({ "clip": 2, "preset": "turntable" }));
+    nav.run("storyboard.motion", json!({ "clip": 3, "preset": "panRight", "amount": { "zoom": 1.5 } }));
+    let board = nav.session().storyboard().unwrap().clone();
+    assert_eq!(crate::motion_view::status(&board).as_deref(), Some("2 clips with motion"));
+    assert_eq!(crate::motion_view::glyph(board.clip(ClipId(2)).unwrap()), Some("↻"));
+    assert_eq!(
+        crate::motion_view::glyph(board.clip(ClipId(3)).unwrap()),
+        Some("⇆"),
+        "a pan with a zoom is still a pan"
+    );
+    assert_eq!(crate::motion_view::glyph(board.clip(ClipId(1)).unwrap()), None);
+
+    // Drawing the Inspector for a title card, a model and a still changes nothing.
+    let can_undo = |nav: &mut Navigator| nav.run("storyboard.state", json!({})).unwrap()["canUndo"].clone();
+    assert_eq!(can_undo(&mut nav), json!(true));
+    let mut t = 0.0;
+    for clip in [1, 2, 3, 4] {
+        nav.run("storyboard.select", json!({ "clip": clip }));
+        for _ in 0..2 {
+            frame(&ctx, &mut nav, Vec::new(), t);
+            t += 0.05;
+        }
+    }
+    assert_eq!(nav.session().storyboard().unwrap(), &board);
+    nav.run("storyboard.undo", json!({}));
+    nav.run("storyboard.undo", json!({}));
+    assert!(
+        nav.session().storyboard().unwrap().clips.iter().all(|c| c.motion.is_none()),
+        "two edits, two undo steps, none from drawing"
+    );
+    assert!(nav.state.storyboard.motion_drag.is_none());
+
+    // The still's window: centred on the pan, 1 / zoom wide, never outside the picture.
+    let w = crate::motion_view::window(Camera { zoom: 2.0, pan: [0.1, 0.0], ..Camera::NONE });
+    assert!((w.min.x - 0.35).abs() < 1e-6 && (w.max.x - 0.85).abs() < 1e-6 && (w.height() - 0.5).abs() < 1e-6);
+    let w = crate::motion_view::window(Camera { zoom: 1.0, pan: [0.4, -0.4], ..Camera::NONE });
+    assert_eq!((w.min.x, w.min.y, w.max.x, w.max.y), (0.0, 0.0, 1.0, 1.0), "zoom 1 shows it all");
+    let w = crate::motion_view::window(Camera { zoom: 4.0, pan: [0.5, 0.5], ..Camera::NONE });
+    assert!((w.max.x - 1.0).abs() < 1e-6 && (w.max.y - 1.0).abs() < 1e-6, "pan clamps to the edge");
+}
+
+#[test]
+fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
+    use assetcraft_storyboard::{Camera, ClipId, Ticks};
+    let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+    let crate_glb = models.join("rune_crate_textured.glb");
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.place", json!({ "asset": crate_glb.to_string_lossy(), "clip": 2 }));
+    nav.run("storyboard.motion", json!({ "clip": 2, "preset": "turntable" }));
+    nav.run("storyboard.select", json!({ "clip": 2 }));
+    // Seek to the middle of clip 2: the Viewer shows it half-way through its turn.
+    let board = nav.session().storyboard().unwrap().clone();
+    let start = board.starts()[1];
+    let clip = board.clip(ClipId(2)).unwrap().clone();
+    let mid = Ticks(start.0 + clip.duration.0 / 2);
+    nav.run("storyboard.seek", json!({ "seconds": mid.as_secs_f64() }));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut t = 0.0;
+    while !nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.has_frame())
+        && std::time::Instant::now() < deadline
+    {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.016;
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let player = nav.state.storyboard.motion_player.as_ref().expect("a player for the model clip");
+    assert!(player.has_frame(), "a rendered frame arrived");
+    let view = player.last_view.expect("a frame was requested");
+    let base = assetcraft_thumbs::model::View::default();
+    let half_turn = crate::motion_view::orbit_view(Camera { yaw: std::f32::consts::PI, ..Camera::NONE });
+    assert!((view.yaw - half_turn.yaw).abs() < 1e-4, "half-way through a 360° turn: {view:?}");
+    assert!((view.pitch - base.pitch).abs() < 1e-6 && (view.zoom - base.zoom).abs() < 1e-6);
+    assert_eq!(crate::motion_view::progress(&clip, f64::INFINITY), 0.0, "at rest shows the start");
+    assert_eq!(crate::motion_view::progress(&clip, clip.duration.as_secs_f64() * 2.0), 1.0, "past the end: the end");
+    // A still clip with motion needs no player; drawing it changes nothing.
+    nav.run("storyboard.place", json!({ "asset": "/art/concept.png", "clip": 3 }));
+    nav.run("storyboard.motion", json!({ "clip": 3, "preset": "pushIn" }));
+    nav.run("storyboard.select", json!({ "clip": 3 }));
+    let before = nav.session().storyboard().unwrap().clone();
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert_eq!(nav.session().storyboard().unwrap(), &before);
+    assert_eq!(nav.message(), Some("Clip #03: Push in"), "the command's message reaches the status bar");
+}

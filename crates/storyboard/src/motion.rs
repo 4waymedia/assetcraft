@@ -314,16 +314,16 @@ impl Motion {
         Motion { preset: MotionPreset::Custom, start: self.end(), amount, ease: self.ease }
     }
 
-    /// The Strip card's glyph: ↻ for a turn, ⤢ for a zoom, ⇆ for a pan, `None` when nothing
-    /// moves.
+    /// The Strip card's glyph: ↻ for a turn, ⇆ for a pan (even with a zoom), ⤢ for a zoom alone,
+    /// `None` when nothing moves.
     pub fn glyph(&self) -> Option<&'static str> {
         let a = self.amount;
         if a.yaw != 0.0 || a.pitch != 0.0 {
             Some("↻")
-        } else if a.zoom != 1.0 {
-            Some("⤢")
         } else if a.pan != [0.0, 0.0] {
             Some("⇆")
+        } else if a.zoom != 1.0 {
+            Some("⤢")
         } else {
             None
         }

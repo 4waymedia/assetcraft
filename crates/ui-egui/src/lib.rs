@@ -15,6 +15,7 @@ mod inspector;
 mod keys;
 mod menu;
 mod model_preview;
+mod motion_view;
 mod pathbar;
 pub mod prefs_file;
 mod rename_dialog;

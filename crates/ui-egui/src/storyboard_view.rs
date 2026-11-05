@@ -464,6 +464,8 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
                 nav.run("storyboard.place", json!({ "asset": p.to_string_lossy(), "clip": clip.id.0 }));
             }
         }
+        ui.add_space(6.0);
+        crate::motion_view::inspector_section(nav, ui, &board, &clip);
     });
 }
 
@@ -509,6 +511,10 @@ pub(crate) fn status(nav: &Navigator, ui: &mut Ui) {
             ui.label(format!("{} selected", usize::from(nav.session.selected_clip().is_some())));
             ui.separator();
             ui.label(format!("{} assets assigned", board.assets_assigned()));
+            if let Some(moving) = crate::motion_view::status(board) {
+                ui.separator();
+                ui.label(moving);
+            }
         }
         None => {
             ui.label("No storyboard");

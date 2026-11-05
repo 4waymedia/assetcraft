@@ -72,6 +72,10 @@ pub(crate) struct SbUi {
     pub(crate) index: Option<(u64, Arc<Index>)>,
     /// Scrubbing the ruler started while the Cut was playing: play on from where it stops.
     pub(crate) scrub_resume: bool,
+    /// An Inspector amount slider mid-drag (SB-3D1), committed as one edit when it ends.
+    pub(crate) motion_drag: Option<crate::motion_view::MotionDrag>,
+    /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
+    pub(crate) motion_player: Option<crate::motion_view::MotionPlayer>,
 }
 
 /// Where the playhead is now. While the track plays it is the audio clock (so pictures follow
@@ -162,6 +166,59 @@ fn thumb(nav: &mut Navigator, ui: &Ui, path: &Path, side_pt: f32, index: &Index)
     nav.thumbs.get(&ctx, ThumbKey::new(path, side).with_modified(modified), 1)
 }
 
+/// The Content panel's source folder, as a menu: the Organizer's open folder, switchable here
+/// to a recent folder, a My Folders pin or a known folder without leaving Storyboard mode (Paul,
+/// 2026-11-04: going back to the Organizer to change it "is somewhat odd behavior"), or
+/// "Browse in the Organizer…" for anything else.
+fn source_folder(nav: &mut Navigator, ui: &mut Ui) {
+    let folder = nav.session.location().label();
+    let mut open: Option<PathBuf> = None;
+    let mut browse = false;
+    ui.horizontal(|ui| {
+        ui.weak("From:");
+        ui.menu_button(format!("{folder} ▾"), |ui| {
+            ui.set_min_width(220.0);
+            let here = nav.session.location().path().map(Path::to_path_buf);
+            let mut group = |ui: &mut Ui, title: &str, paths: &[PathBuf]| {
+                if paths.is_empty() {
+                    return;
+                }
+                ui.label(RichText::new(title).size(10.0).weak());
+                for p in paths {
+                    let current = here.as_deref() == Some(p.as_path());
+                    if ui
+                        .selectable_label(current, assetcraft_fs::display_name(p))
+                        .on_hover_text(p.display().to_string())
+                        .clicked()
+                    {
+                        open = Some(p.clone());
+                        ui.close();
+                    }
+                }
+                ui.separator();
+            };
+            let recent: Vec<PathBuf> = nav.session.recent().to_vec();
+            group(ui, "RECENT", &recent);
+            let mine: Vec<PathBuf> = nav.session.favorites().to_vec();
+            group(ui, "MY FOLDERS", &mine);
+            let known: Vec<PathBuf> = nav.session.known_folders().iter().map(|(_, p)| p.clone()).collect();
+            group(ui, "FOLDERS", &known);
+            if ui.button("Browse in the Organizer…").clicked() {
+                browse = true;
+                ui.close();
+            }
+        })
+        .response
+        .on_hover_text("The folder the Content panel shows; pick another without leaving the storyboard");
+    });
+    if let Some(p) = open {
+        nav.run("nav.open", json!({ "path": p.to_string_lossy() }));
+    }
+    if browse {
+        nav.run("app.mode", json!({ "mode": "organizer" }));
+    }
+}
+
 /// Strip or Quick fill, by the session's view.
 pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
     let Some(board) = nav.session.storyboard().cloned() else { return };
@@ -210,8 +267,7 @@ fn content_panel(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &I
     if fill {
         next_card(nav, ui, board);
     }
-    let folder = nav.session.location().label();
-    ui.weak(format!("From the Organizer: {folder}"));
+    source_folder(nav, ui);
     ui.separator();
     let files: Vec<PathBuf> =
         nav.session.items().iter().filter(|e| e.kind == EntryKind::File).map(|e| e.path.clone()).collect();
@@ -432,7 +488,15 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
     }
     match clip.asset_ids.first() {
         Some(hero) => {
-            if let Cell::Ready(texture, size) = thumb(nav, ui, Path::new(&hero.0), 512.0, index) {
+            let still = match thumb(nav, ui, Path::new(&hero.0), 512.0, index) {
+                Cell::Ready(texture, size) => Some((texture, size)),
+                _ => None,
+            };
+            // A clip with motion draws through its camera (SB-3D1 step 3); the rest hold still.
+            let playing = nav.session.transport().playing;
+            if !crate::motion_view::show(nav, ui, frame, clip, still, elapsed, playing)
+                && let Some((texture, size)) = still
+            {
                 let target = contain(frame, size);
                 let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                 ui.painter().image(texture, target, uv, Color32::WHITE);
@@ -740,7 +804,11 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
     let info = pos2(body.left() + 5.0, body.bottom() - 30.0);
     let label = format!("#{number:02} {}", clip.shot_type.code());
     painter.text(info, Align2::LEFT_TOP, label, FontId::monospace(10.0), text);
-    let secs = format!("{:.1}s", clip.duration.as_secs_f64());
+    // The motion glyph (↻ turn, ⤢ zoom, ⇆ pan) sits before the duration (SB-3D1).
+    let secs = match crate::motion_view::glyph(clip) {
+        Some(g) => format!("{g} {:.1}s", clip.duration.as_secs_f64()),
+        None => format!("{:.1}s", clip.duration.as_secs_f64()),
+    };
     painter.text(info + vec2(0.0, 14.0), Align2::LEFT_TOP, secs, FontId::monospace(10.0), Color32::from_gray(0x8a));
     let border = if title { rgb(0xe5243b) } else { Color32::from_gray(0x3a) };
     painter.rect_stroke(rect, 3, Stroke::new(1.0, border), StrokeKind::Inside);

@@ -149,8 +149,29 @@ brief: [design/clip-motion-brief.md](design/clip-motion-brief.md).
   step, a refusal or a no-op records none). Cameras in JSON are `{yaw?, pitch?, zoom?, pan?}` with
   **degrees**; a field left out keeps its value; a preset given with a start / amount / ease is applied
   first. The reply carries `motion` (with `end` and the Strip `glyph` ↻ ⤢ ⇆) and `kind`.
-- **Next:** step 2, the Inspector's MOTION section and Strip glyphs; then 3 Viewer playback, 4 Set from
-  Viewer (`storyboard.motion.capture`), 5 Apply to all.
+- **Step 2 built (2026-11-04)** — `crates/ui-egui/src/motion_view.rs`: the MOTION section under SHOT
+  (header with the kind, dimmed "No shot to move" for a title card or empty shot; chips None · the seven
+  presets · Custom, Turntable disabled for a still; Start / End 128 × 72 frames — a still through its
+  pan / zoom window, a model as its still with the camera's numbers until step 3 — and ⇄ Swap; the three
+  amount sliders in the Inspector's units, committed as **one** `storyboard.motion` when a drag ends
+  (`SbUi::motion_drag`); the ease segments; "Follows the clip · n s" with a scrub that seeks the Cut inside
+  the clip (D-M1); Clear motion). Strip cards show ↻ ⇆ ⤢ before the duration; the status bar adds
+  "n clips with motion". Absent until their step: Set from Viewer (4), Apply to all (5).
+- **Step 3 built (2026-11-04)** — the Viewer plays the motion: `motion_view::show` draws a clip with
+  motion through `Motion::at(t)` (`t` = seconds into the clip ÷ its duration; at rest, the start). A model
+  goes through `MotionPlayer` (`SbUi::motion_player`: one `ModelView` thread for the hero, re-used frame
+  after frame; `orbit_view` = the thumbnails' 3/4 view plus the camera; budgeted fast frames while the
+  Cut plays, a full one when it stops; the still until the first frame lands). A still draws through its
+  pan / zoom `window`, with the end framing dashed in `SELECT` at the start. Both get the mono badge
+  (`TURN 180° · RISE 0° · 1.00×` / `START · END FRAME 1.60×` / `PAN +6 % +0 % · 1.30×`) and the
+  "Start ▸ End" line. Test `the_viewer_plays_a_model_clips_motion_through_its_camera` (real GLB, headless:
+  half-way through a turntable the requested view is the 3/4 view + 180°).
+- **SB-F1 (Paul, 2026-11-04: changing the source folder from the storyboard meant going back to the
+  Organizer, "somewhat odd behavior"):** the Content panel's "From the Organizer: …" line is now a menu —
+  Recent, My Folders, known folders (`nav.open` in place) and "Browse in the Organizer…" (`app.mode`).
+- **Next:** step 4 Set from Viewer (orbit / pan in the Storyboard Viewer, `storyboard.motion.capture`);
+  5 Apply to all. Opportunity: preload the next clip's model during playback (a new hero loads when
+  its clip starts, so the first frames of a model clip are its still).
 
 ## Decisions (Paul)
 
