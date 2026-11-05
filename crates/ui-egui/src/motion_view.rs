@@ -346,25 +346,50 @@ pub(crate) fn status(board: &Storyboard) -> Option<String> {
     (n > 0).then(|| format!("{n} clip{} with motion", if n == 1 { "" } else { "s" }))
 }
 
-// ---- Viewer playback (step 3) ---------------------------------------------------------------
+// ---- Viewer playback (steps 3 and 3b) -------------------------------------------------------
 
-/// The Viewer's 3D model while a clip with motion shows: one `ModelView` thread for the hero,
-/// re-used frame after frame, replaced when the hero changes. Stills need no player (they draw
-/// through [`window`]).
+/// Frames of the Cut per second: how finely a clip's motion is sampled for playback.
+pub(crate) const PLAY_FPS: f32 = 24.0;
+/// Largest frame rendered for the Viewer, in pixels on a side.
+const PLAY_MAX_SIDE: f32 = 1024.0;
+/// Most bytes of rendered frames the player keeps (RGBA, in memory; the shown one is uploaded).
+const CACHE_BYTES: usize = 192 << 20;
+
+/// What a cached frame set was rendered for: a change in any of these empties it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FrameKey {
+    clip: u32,
+    motion: Motion,
+    size: [u32; 2],
+    prefs: assetcraft_engine::ModelPrefs,
+}
+
+/// The Viewer's 3D model while a clip with motion shows (FilmCraft's `frames.rs` shape, step
+/// 3b): the motion is deterministic, so one `ModelView` thread renders **full-quality** frames
+/// — the same render a paused Viewer shows — ahead of the playhead into a byte-budgeted cache,
+/// on-screen frame first, then the next ones; the Viewer draws the nearest cached frame and
+/// never renders itself. The cache is re-used frame after frame and emptied when the clip,
+/// its motion, the Viewer size or the look changes. Stills need no player ([`window`]).
 pub(crate) struct MotionPlayer {
     path: std::path::PathBuf,
     model: assetcraft_thumbs::model::ModelView,
+    key: Option<FrameKey>,
+    /// Rendered frames by index, `0..count`.
+    frames: std::collections::BTreeMap<u32, assetcraft_thumbs::model::Image>,
+    bytes: usize,
+    /// The index being rendered, if one is.
+    pending: Option<u32>,
     texture: Option<egui::TextureHandle>,
-    fast_frame: bool,
-    requested: Option<(assetcraft_thumbs::model::View, [u32; 2], bool)>,
-    /// The last camera a frame was asked for (tests).
+    /// The index the texture holds.
+    shown: Option<u32>,
+    /// The camera of the first frame asked for (tests: the on-screen frame comes first).
     #[cfg(test)]
-    pub(crate) last_view: Option<assetcraft_thumbs::model::View>,
+    pub(crate) first_view: Option<assetcraft_thumbs::model::View>,
 }
 
 impl std::fmt::Debug for MotionPlayer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MotionPlayer({}, frame: {})", self.path.display(), self.texture.is_some())
+        write!(f, "MotionPlayer({}, {} frames, {} KiB)", self.path.display(), self.frames.len(), self.bytes / 1024)
     }
 }
 
@@ -374,12 +399,75 @@ impl MotionPlayer {
     pub(crate) fn has_frame(&self) -> bool {
         self.texture.is_some()
     }
+
+    /// Frames cached (tests).
+    #[cfg(test)]
+    pub(crate) fn cached(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Forget every frame (the key changed).
+    fn clear(&mut self, key: FrameKey) {
+        self.key = Some(key);
+        self.frames.clear();
+        self.bytes = 0;
+        self.pending = None;
+        self.shown = None;
+    }
+
+    /// The next frame worth rendering: the one wanted, else the first missing one after it
+    /// (ahead of the playhead), else the first missing one before it (for a scrub back) —
+    /// `None` when the cache is full or complete.
+    fn next_to_render(&self, want: u32, count: u32, frame_bytes: usize) -> Option<u32> {
+        if !self.frames.contains_key(&want) {
+            return Some(want);
+        }
+        if self.bytes + frame_bytes > CACHE_BYTES {
+            return None;
+        }
+        (want + 1..count).chain(0..want).find(|i| !self.frames.contains_key(i))
+    }
+
+    /// Make room for one more frame: drop the cached frame farthest from `want`.
+    fn evict_for(&mut self, want: u32, frame_bytes: usize) {
+        while self.bytes + frame_bytes > CACHE_BYTES && !self.frames.is_empty() {
+            let Some(&farthest) = self.frames.keys().max_by_key(|i| i.abs_diff(want)) else { break };
+            if let Some(image) = self.frames.remove(&farthest) {
+                self.bytes = self.bytes.saturating_sub(image.rgba.len());
+            }
+        }
+    }
+
+    /// The cached frame to show for `want`: itself, else the nearest before it, else the
+    /// nearest after it.
+    fn nearest(&self, want: u32) -> Option<u32> {
+        if self.frames.contains_key(&want) {
+            return Some(want);
+        }
+        self.frames
+            .range(..want)
+            .next_back()
+            .map(|(i, _)| *i)
+            .or_else(|| self.frames.range(want..).next().map(|(i, _)| *i))
+    }
 }
 
-/// Largest frame rendered for the Viewer, in pixels on a side.
-const PLAY_MAX_SIDE: f32 = 1024.0;
-/// How far a fast (budgeted) frame may be scaled up.
-const PLAY_MAX_UPSCALE: f32 = 4.0;
+/// How many playback frames a clip has at [`PLAY_FPS`] (at least one).
+pub(crate) fn frame_count(clip: &Clip) -> u32 {
+    ((clip.duration.as_secs_f64() * f64::from(PLAY_FPS)).ceil() as u32).max(1)
+}
+
+/// The frame index at `t` of the clip.
+pub(crate) fn frame_index(clip: &Clip, t: f32) -> u32 {
+    let count = frame_count(clip);
+    ((t * count as f32).floor() as u32).min(count - 1)
+}
+
+/// Where frame `index` sits in the clip, `0..=1`.
+pub(crate) fn frame_time(clip: &Clip, index: u32) -> f32 {
+    let count = frame_count(clip);
+    if count <= 1 { 0.0 } else { index as f32 / (count - 1) as f32 }
+}
 
 /// The camera's orbit view: an offset from the shot as the thumbnails frame it (the 3/4 view).
 pub(crate) fn orbit_view(cam: Camera) -> assetcraft_thumbs::model::View {
@@ -402,9 +490,8 @@ pub(crate) fn progress(clip: &Clip, elapsed: f64) -> f32 {
     (elapsed / clip.duration.as_secs_f64()).clamp(0.0, 1.0) as f32
 }
 
-/// Draw `clip`'s hero in `frame` as its motion shows it `elapsed` seconds in. `playing` asks the
-/// renderer for budgeted (fast) frames. Returns `false` when the clip has no motion or no hero,
-/// so the caller draws it the usual way.
+/// Draw `clip`'s hero in `frame` as its motion shows it `elapsed` seconds in. Returns `false`
+/// when the clip has no motion or no hero, so the caller draws it the usual way.
 pub(crate) fn show(
     nav: &mut Navigator,
     ui: &Ui,
@@ -412,10 +499,8 @@ pub(crate) fn show(
     clip: &Clip,
     thumb: Option<(egui::TextureId, egui::Vec2)>,
     elapsed: f64,
-    playing: bool,
 ) -> bool {
-    let (Some(motion), Some(hero), Some(kind)) = (clip.motion, clip.asset_ids.first(), MotionKind::of_clip(clip))
-    else {
+    let (Some(motion), Some(kind)) = (clip.motion, MotionKind::of_clip(clip)) else {
         return false;
     };
     let t = progress(clip, elapsed);
@@ -451,7 +536,7 @@ pub(crate) fn show(
             }
         }
         MotionKind::Orbit => {
-            let drew = orbit_frame(nav, ui, frame, Path::new(&hero.0), cam, playing);
+            let drew = orbit_frame(nav, ui, frame, clip, &motion, t);
             if !drew && let Some((texture, size)) = thumb {
                 let target = crate::storyboard_view::contain(frame, size);
                 painter.image(texture, target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
@@ -463,9 +548,11 @@ pub(crate) fn show(
     true
 }
 
-/// Ask the player for the model at `cam` and draw the latest frame it has. `false` until the
-/// first frame arrives.
-fn orbit_frame(nav: &mut Navigator, ui: &Ui, frame: Rect, path: &Path, cam: Camera, playing: bool) -> bool {
+/// Draw the cached frame nearest to the clip's point `t`, and keep the renderer one frame ahead
+/// of the playhead. `false` until the first frame arrives (the caller draws the still).
+fn orbit_frame(nav: &mut Navigator, ui: &Ui, frame: Rect, clip: &Clip, motion: &Motion, t: f32) -> bool {
+    let path = clip.asset_ids.first().map(|a| Path::new(a.0.as_str()));
+    let Some(path) = path else { return false };
     let ctx = ui.ctx().clone();
     let same = nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.path == path);
     if !same {
@@ -473,55 +560,74 @@ fn orbit_frame(nav: &mut Navigator, ui: &Ui, frame: Rect, path: &Path, cam: Came
         nav.state.storyboard.motion_player = Some(MotionPlayer {
             path: path.to_path_buf(),
             model: assetcraft_thumbs::model::ModelView::open(services, path.to_path_buf()),
+            key: None,
+            frames: std::collections::BTreeMap::new(),
+            bytes: 0,
+            pending: None,
             texture: None,
-            fast_frame: false,
-            requested: None,
+            shown: None,
             #[cfg(test)]
-            last_view: None,
+            first_view: None,
         });
     }
     let prefs = nav.session.model();
-    let Some(player) = nav.state.storyboard.motion_player.as_mut() else { return false };
-    if let Some(got) = player.model.poll() {
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [got.image.width as usize, got.image.height as usize],
-            &got.image.rgba,
-        );
-        match &mut player.texture {
-            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
-            None => {
-                player.texture = Some(ctx.load_texture("assetcraft-motion-player", image, egui::TextureOptions::LINEAR))
-            }
-        }
-        player.fast_frame = got.fast;
-    }
-    let ready = matches!(player.model.state(), assetcraft_thumbs::model::ModelState::Ready { .. });
     let px = frame.size() * ctx.pixels_per_point();
     let scale = (PLAY_MAX_SIDE / px.x.max(px.y).max(1.0)).min(1.0);
     let size = [
         (px.x * scale).round().clamp(16.0, PLAY_MAX_SIDE) as u32,
         (px.y * scale).round().clamp(16.0, PLAY_MAX_SIDE) as u32,
     ];
-    let view = orbit_view(cam);
-    let wanted = (view, size, playing);
-    if ready && player.requested != Some(wanted) {
-        player.model.request_look(view, size[0], size[1], playing, &crate::model_preview::look(prefs));
-        player.requested = Some(wanted);
+    let key = FrameKey { clip: clip.id.0, motion: *motion, size, prefs };
+    let count = frame_count(clip);
+    let want = frame_index(clip, t);
+    let frame_bytes = size[0] as usize * size[1] as usize * 4;
+    let Some(player) = nav.state.storyboard.motion_player.as_mut() else { return false };
+    if player.key != Some(key) {
+        player.clear(key);
+    }
+    // A finished frame goes into the cache (a frame for an old key is dropped with the key).
+    if let Some(got) = player.model.poll()
+        && let Some(index) = player.pending.take()
+        && got.image.width == size[0]
+        && got.image.height == size[1]
+    {
+        player.evict_for(want, got.image.rgba.len());
+        player.bytes += got.image.rgba.len();
+        player.frames.insert(index, got.image);
+    }
+    let ready = matches!(player.model.state(), assetcraft_thumbs::model::ModelState::Ready { .. });
+    if ready
+        && player.pending.is_none()
+        && let Some(index) = player.next_to_render(want, count, frame_bytes)
+    {
+        let view = orbit_view(motion.at(frame_time(clip, index)));
+        player.model.request_look(view, size[0], size[1], false, &crate::model_preview::look(prefs));
+        player.pending = Some(index);
         #[cfg(test)]
         {
-            player.last_view = Some(view);
+            player.first_view.get_or_insert(view);
         }
     }
-    if player.model.is_busy() || !ready {
+    if !ready || player.pending.is_some() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
+    let Some(index) = player.nearest(want) else { return false };
+    if player.shown != Some(index)
+        && let Some(image) = player.frames.get(&index)
+    {
+        let color =
+            egui::ColorImage::from_rgba_unmultiplied([image.width as usize, image.height as usize], &image.rgba);
+        match &mut player.texture {
+            Some(texture) => texture.set(color, egui::TextureOptions::LINEAR),
+            None => {
+                player.texture = Some(ctx.load_texture("assetcraft-motion-player", color, egui::TextureOptions::LINEAR))
+            }
+        }
+        player.shown = Some(index);
     }
     match &player.texture {
         Some(texture) => {
-            let target = crate::widgets::fit_at_most(
-                frame,
-                texture.size_vec2() / ctx.pixels_per_point(),
-                if player.fast_frame { PLAY_MAX_UPSCALE } else { 1.0 },
-            );
+            let target = crate::widgets::fit_at_most(frame, texture.size_vec2() / ctx.pixels_per_point(), 1.0);
             ui.painter().image(
                 texture.id(),
                 target,

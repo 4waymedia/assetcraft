@@ -43,7 +43,7 @@ crate name `boards` (now `storyboard`; "Board" is on the design's do-not-use lis
 | TC1  | Text clips: Card \| Overlay per clip, themes, intro animations, overlay positions; click the kind chip to switch ([Text clips](#text-clips-tc1)) | done   |
 | S1   | Start storyboard (3b) with the preset picker (3c), song first: 1 · pick a song (music folder + open folder, `storyboard.tracks`, `storyboard.musicFolder`), 2 · pick a preset (style × the lengths the song fits, with a real clip strip from `storyboard.preview`), 3 · Create (+ auto-fill); shown with no board and from the mode bar's + New; new boards open in the Strip view | done (2026-10-16) |
 | 6    | Scenes view (2a), Clip editor modal (1d), Manual start (3e)                                                  | —      |
-| 7    | Save / open a storyboard document (needs decision D3)                                                        | —      |
+| 7    | Save / open a storyboard document (needs decision D3)                                                        | planned as SF1–SF2 (below) |
 | 8    | Tracks view (2c): text, shots and music tracks; waveform and beat grid (audio decode: opportunity O2)        | —      |
 | 9    | Style › Preset picker (3c; music-timed presets, see [storyboard-presets.md](storyboard-presets.md)), Start storyboard (3b), Tag content → Init story (3a)                            | —      |
 | 10   | OTIO export → FilmCraft (`crates/interchange`, slice B)                                                      | —      |
@@ -169,9 +169,48 @@ brief: [design/clip-motion-brief.md](design/clip-motion-brief.md).
 - **SB-F1 (Paul, 2026-11-04: changing the source folder from the storyboard meant going back to the
   Organizer, "somewhat odd behavior"):** the Content panel's "From the Organizer: …" line is now a menu —
   Recent, My Folders, known folders (`nav.open` in place) and "Browse in the Organizer…" (`app.mode`).
+- **Playback quality (D-M7, 2026-11-04) — step 3b built:** the Viewer never renders during playback.
+  `MotionPlayer` (`motion_view.rs`) samples the clip's motion at `PLAY_FPS` = 24 (`frame_count`, `frame_index`,
+  `frame_time`) and renders **full-quality** frames — the same render a paused Viewer shows — on the hero's
+  `ModelView` thread into a byte-budgeted cache (`CACHE_BYTES` 192 MiB of RGBA; the frame farthest from the
+  playhead is evicted first): on-screen frame first, then ahead of the playhead, then behind it for a
+  scrub back; the Viewer draws the nearest cached frame and uploads only the one shown. The cache is keyed
+  by clip, motion, Viewer size and the 3D look, and emptied when any changes. FilmCraft's `frames.rs`
+  shape, as Paul described it. With a cold cache the first seconds step between the frames that have
+  landed (clear, not soft); a warm cache (the clip was selected a moment before Play) is smooth. Budgeted
+  fast frames (`set_max_stride`, `set_budget`) stay in `thumbs` for the Organizer's drag.
 - **Next:** step 4 Set from Viewer (orbit / pan in the Storyboard Viewer, `storyboard.motion.capture`);
   5 Apply to all. Opportunity: preload the next clip's model during playback (a new hero loads when
   its clip starts, so the first frames of a model clip are its still).
+
+## Files: Save, Open, Send to, Export (SF; Paul, 2026-11-04: "our next features to implement are: Save, Open, Send to (App)" … "and Export")
+
+- **Scope:** the storyboard document (the Cut) as a file: writing it, reading it back, handing it to
+  another Crafting app, and getting deliverables out of it. **Goal served:** a Cut that survives a
+  restart, moves between machines (Mac ↔ PC) and goes on to FilmCraft for the real edit.
+  **Immediate area of improvement:** today a storyboard lives in memory only (plan step 7 open since
+  2026-10-15; decision D3 taken). Builds on `Storyboard::to_json` / `from_json_with(Limits)`
+  (`crates/storyboard/src/validate.rs:97-114`), the W1 working folder and the atomic prefs writer
+  (`crates/ui-egui/src/prefs_file.rs:175`).
+
+| Step | Delivers                                                                                                                                                                                                                                                                                                                                     | Owner  | Status  |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|---------|
+| SF1  | **Save / Save As.** `storyboard.save {path?}` (effects: write-files; no `path` = the document's own, else Save As; a new document with no path is refused with "give a path"), `storyboard.saveAs {path}`; D3 rules: write `<path>.tmp` in the same folder, flush, rename; never overwrite a *different* existing file without `overwrite: true` (the UI asks); only `.storyboard.json` paths under any folder the user picks. `Session` keeps `document: Option<PathBuf>` and `dirty: bool` (every undo-stack change sets it; save clears it); `storyboard.state` reports both; the title bar shows `Name •`. File menu: Save (Ctrl+S), Save As…; closing or New with unsaved changes asks. Default folder: `<working>/Storyboards/` (W1), created on first save. Tests: round trip, atomic (no `.tmp` left, a failed write leaves the old file), refuse-overwrite, dirty flag through undo/redo. | Claude | planned |
+| SF2  | **Open / Recent.** `storyboard.open {path}` → `from_json_with(Limits)` (hostile input: size cap, format version, invariants); assets are paths, so a missing one is reported per clip (`missing: [clip ids]`), never fatal — the card shows "file not found" and Quick fill can replace it; the track's cue map is re-read beside the song. `storyboard.recent` (READ, last 8 in prefs, like folders). File menu: Open… (native picker, `.storyboard.json`), Open Recent ›; Start screen: an "Open a storyboard" row above the song list; the Organizer: double-click a `.storyboard.json` opens it (probe `Format::Storyboard` by content, its own thumbnail: the first hero). Tests: round trip of a saved board, hostile files from `test_data/storyboards/`, missing-asset report, recent list. | Claude | planned |
+| SF3  | **Send to (App).** One command, `storyboard.sendTo {app, path?}` (effects: write-files + launch): writes the Cut in the target's format next to the document and opens it in the app through *that app's* command registry (local app control: `<app>-cli`, never the Storyteller API). First target **FilmCraft** via OTIO (plan step 10, `crates/interchange`): clips → one video track of stills / models (a model clip sends its hero's rendered still or, once SF5 exists, its rendered clip), the song as the audio track, scene markers, text cards as titles; then `filmcraft-cli run <script>` (`file.import` + `project.open`, the bridge `crates/thumbs/src/decoders/video.rs:11` already uses). Second target EffectCraft (its format TBD after a look at its registry). Menu: File › Send to › FilmCraft, EffectCraft (greyed when the app's CLI isn't on PATH / `ASSETCRAFT_FILMCRAFT_CLI`). Tests: the OTIO text against a fixture, the script written, a fake launcher records the call. | Claude | planned |
+| SF4  | **Export: shot list and stills.** `storyboard.export {kind: shotList | stills | contactSheet, folder}` (write-files, dry run first): a CSV / Markdown shot list (clip, shot type, start, duration, hero path, text, motion), every clip's hero at the Viewer's framing as PNG (`<nn>-<shot>.png`, models rendered through `ModelView` at full quality, stills through their window), and a contact-sheet PNG. Pure Rust, no codec. File › Export ›. | Claude | planned |
+| SF5  | **Export: the animatic as video.** Frames at a fixed rate from the same renderer (motion, text intros, cards) plus the song. Decision D-SF3 below picks the route: a pure-Rust encoder we can take (AV1 `rav1e`, BSD-2, with `isobmff`-style MP4 muxing from FilmCraft's crates if they are MIT/Apache; H.264 has no clean-room pure-Rust encoder to take) or **FilmCraft renders it** (SF3 hands the Cut over; FilmCraft's export does the encoding). | Claude | needs D-SF3 |
+
+Decisions for Paul:
+
+| ID    | Decision                                             | Recommendation                                                                                                                                                                                                                                       | Blocks |
+|-------|------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| D-SF1 | File name and place                                  | `<name>.storyboard.json`, default folder `<working>/Storyboards/` (W1); the document stores asset paths as today (absolute), plus a `relativeTo` hint so a folder moved whole still resolves (SF2 tries relative first, then absolute)                       | SF1    |
+| D-SF2 | Autosave                                             | Not in SF1: a dirty flag and an ask on close/New/Open. Autosave to `<name>.storyboard.json.autosave` every 30 s of changes can come after (FilmCraft-style), once SF1 has been used for a week                                                           | —      |
+| D-SF3 | Video export route                                   | **FilmCraft renders** (SF3 first, SF5 = "Send to FilmCraft, then export there"): no encoder in AssetCraft, no licence question, one place in the suite that encodes. A pure-Rust AV1/WebM export in AssetCraft stays an option if a standalone file is wanted without FilmCraft installed | SF5    |
+| D-SF4 | Send-to transport                                    | Files + the target's CLI (`<app>-cli run <script>`), the same shape as the video-thumbnail bridge: works with the app closed, needs no running control channel; the loopback `--control` channel is the upgrade when both apps are open (live hand-off) | SF3    |
+
+Order: SF1 → SF2 → SF4 → SF3 → SF5. Save/Open first because Send to and Export both start from a saved document; the shot-list/stills export is pure Rust and small; Send to needs the OTIO writer (plan step 10).
 
 ## Decisions (Paul)
 

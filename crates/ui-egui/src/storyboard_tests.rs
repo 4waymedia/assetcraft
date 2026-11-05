@@ -930,6 +930,10 @@ fn the_motion_section_draws_for_every_clip_kind_and_only_commands_change_the_boa
     assert!((w.max.x - 1.0).abs() < 1e-6 && (w.max.y - 1.0).abs() < 1e-6, "pan clamps to the edge");
 }
 
+fn motion_of(clip: &assetcraft_storyboard::Clip) -> assetcraft_storyboard::Motion {
+    clip.motion.expect("the clip has motion")
+}
+
 #[test]
 fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
     use assetcraft_storyboard::{Camera, ClipId, Ticks};
@@ -958,11 +962,28 @@ fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
     }
     let player = nav.state.storyboard.motion_player.as_ref().expect("a player for the model clip");
     assert!(player.has_frame(), "a rendered frame arrived");
-    let view = player.last_view.expect("a frame was requested");
+    // The first frame rendered is the one on screen: the playback frame nearest the middle.
+    let index = crate::motion_view::frame_index(&clip, 0.5);
+    let expected = crate::motion_view::orbit_view(motion_of(&clip).at(crate::motion_view::frame_time(&clip, index)));
+    let view = player.first_view.expect("a frame was requested");
     let base = assetcraft_thumbs::model::View::default();
     let half_turn = crate::motion_view::orbit_view(Camera { yaw: std::f32::consts::PI, ..Camera::NONE });
-    assert!((view.yaw - half_turn.yaw).abs() < 1e-4, "half-way through a 360° turn: {view:?}");
+    assert!((view.yaw - expected.yaw).abs() < 1e-4, "the on-screen frame first: {view:?} vs {expected:?}");
+    assert!((view.yaw - half_turn.yaw).abs() < 0.15, "about half-way through a 360° turn: {view:?}");
     assert!((view.pitch - base.pitch).abs() < 1e-6 && (view.zoom - base.zoom).abs() < 1e-6);
+    // Then it renders ahead: more frames land while nothing moves.
+    while nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached() < 3)
+        && std::time::Instant::now() < deadline
+    {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.016;
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached() >= 3),
+        "frames ahead of the playhead"
+    );
+    assert_eq!(crate::motion_view::frame_count(&clip), (clip.duration.as_secs_f64() * 24.0).ceil() as u32);
     assert_eq!(crate::motion_view::progress(&clip, f64::INFINITY), 0.0, "at rest shows the start");
     assert_eq!(crate::motion_view::progress(&clip, clip.duration.as_secs_f64() * 2.0), 1.0, "past the end: the end");
     // A still clip with motion needs no player; drawing it changes nothing.

@@ -50,6 +50,10 @@ const MARKER_H: f32 = 18.0;
 const CONTROLS_H: f32 = 30.0;
 const TIMELINE_H: f32 = RULER_H + MARKER_H + STRIP_H + 24.0;
 const NEXT_FILL: Color32 = Color32::from_rgb(0x1f, 0x33, 0x50);
+/// Picture-to-music sync: drift beyond this snaps the picture to the music; less is slewed away
+/// at this fraction per repaint (≈ 60 ms to close a 20 ms gap at 60 Hz, invisible).
+const SYNC_SNAP_SECS: f64 = 0.08;
+const SYNC_SLEW: f64 = 0.15;
 /// Re-cut width animation and toast time (design 4a).
 const RECUT_ANIM_SECS: f32 = 0.4;
 const TOAST_SECS: f64 = 3.8;
@@ -97,10 +101,17 @@ pub(crate) fn playhead(nav: &mut Navigator, ctx: &egui::Context) -> Ticks {
     let mut at = transport.position.checked_add(elapsed).unwrap_or(total);
     nav.session.poll_audio(at.min(total));
     if let Some(clock) = nav.session.audio_clock() {
-        // Follow the music, and keep the window's clock aligned in case the music stops.
-        at = clock;
-        let since = (clock.as_secs_f64() - transport.position.as_secs_f64()).max(0.0);
-        nav.state.storyboard.play_started = Some(now - since);
+        // The music is the master clock, but it advances in device-buffer steps (10–40 ms), so
+        // the picture runs on the window's smooth clock and only *follows* the music: a small
+        // drift is slewed away over a few frames, a large one (a stall, a device change) is
+        // snapped. Reading the audio clock straight made frames repeat and skip (Paul, 2026-11-05).
+        let drift = clock.as_secs_f64() - at.as_secs_f64();
+        let correction = if drift.abs() > SYNC_SNAP_SECS { drift } else { drift * SYNC_SLEW };
+        if correction != 0.0 {
+            nav.state.storyboard.play_started = Some(started - correction);
+            let elapsed = Ticks::from_secs_f64((now - (started - correction)).max(0.0)).unwrap_or(Ticks::ZERO);
+            at = transport.position.checked_add(elapsed).unwrap_or(total);
+        }
     }
     if at >= total {
         nav.run("storyboard.pause", json!({ "at": total.as_secs_f64() }));
@@ -493,8 +504,7 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
                 _ => None,
             };
             // A clip with motion draws through its camera (SB-3D1 step 3); the rest hold still.
-            let playing = nav.session.transport().playing;
-            if !crate::motion_view::show(nav, ui, frame, clip, still, elapsed, playing)
+            if !crate::motion_view::show(nav, ui, frame, clip, still, elapsed)
                 && let Some((texture, size)) = still
             {
                 let target = contain(frame, size);

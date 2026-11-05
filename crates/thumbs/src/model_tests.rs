@@ -270,6 +270,17 @@ fn drag_quality_shrinks_at_once_grows_back_damped_and_decimates_at_the_floor() {
     let before = q;
     q.observe(Duration::ZERO, Duration::ZERO);
     assert_eq!(q, before);
+    // Playback quality: every triangle stays and the frame never drops below its floor, however
+    // hopeless the frames; a longer budget is honoured.
+    let mut p = DragQuality { max_stride: 1, min_scale: 0.5, ..DragQuality::default() };
+    for _ in 0..10 {
+        p.observe(ms(2_000), ms(40));
+    }
+    assert_eq!((p.scale, p.stride), (0.5, 1), "{p:?}");
+    p.observe(ms(39), ms(40));
+    assert_eq!(p.scale, 0.5, "on budget: unchanged");
+    p.observe(ms(10), ms(40));
+    assert!(p.scale > 0.5 && p.stride == 1, "recovers through the scale alone: {p:?}");
 }
 
 #[test]
@@ -279,9 +290,25 @@ fn drag_frames_are_scaled_and_full_frames_are_not() {
     let probe = assetcraft_probe::probe(&RealFs, &path).unwrap();
     let model = load_model(&RealFs, &probe).unwrap();
     let look = RenderOptions::new(200, 120);
-    let small = render_drag(&model, View::default(), 200, 120, DragQuality { scale: 0.5, stride: 1 }, &look).unwrap();
+    let small = render_drag(
+        &model,
+        View::default(),
+        200,
+        120,
+        DragQuality { scale: 0.5, stride: 1, ..DragQuality::default() },
+        &look,
+    )
+    .unwrap();
     assert_eq!((small.width, small.height), (100, 60));
-    let coarse = render_drag(&model, View::default(), 200, 120, DragQuality { scale: 1.0, stride: 3 }, &look).unwrap();
+    let coarse = render_drag(
+        &model,
+        View::default(),
+        200,
+        120,
+        DragQuality { scale: 1.0, stride: 3, ..DragQuality::default() },
+        &look,
+    )
+    .unwrap();
     assert_eq!((coarse.width, coarse.height), (200, 120));
     let covered = |img: &crate::model::Image| img.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count();
     assert!(

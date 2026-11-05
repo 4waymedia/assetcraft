@@ -204,11 +204,18 @@ pub struct DragQuality {
     pub scale: f32,
     /// Every `stride`-th triangle is drawn; > 1 only once `scale` sits at the floor.
     pub stride: usize,
+    /// Largest `stride` allowed: [`MAX_DRAG_STRIDE`] for a drag, where a frame is gone before it
+    /// is looked at; `1` for playback (the storyboard Viewer), where every triangle must stay
+    /// and only the size gives.
+    pub max_stride: usize,
+    /// Smallest `scale` allowed: [`MIN_DRAG_SCALE`] for a drag; playback keeps a higher floor so
+    /// the frame is never a mosaic.
+    pub min_scale: f32,
 }
 
 impl Default for DragQuality {
     fn default() -> Self {
-        Self { scale: 1.0, stride: 1 }
+        Self { scale: 1.0, stride: 1, max_stride: MAX_DRAG_STRIDE, min_scale: MIN_DRAG_SCALE }
     }
 }
 
@@ -222,12 +229,13 @@ impl DragQuality {
         if !ratio.is_finite() || ratio <= 0.0 {
             return;
         }
+        let floor = self.min_scale.clamp(MIN_DRAG_SCALE, 1.0);
         if ratio < 1.0 {
-            if self.scale > MIN_DRAG_SCALE {
+            if self.scale > floor {
                 // Pixels (and time) go with scale², so the side scale moves by the square root.
-                self.scale = (self.scale * ratio.sqrt()).clamp(MIN_DRAG_SCALE, 1.0);
+                self.scale = (self.scale * ratio.sqrt()).clamp(floor, 1.0);
             } else {
-                self.stride = ((self.stride as f32 / ratio).ceil() as usize).clamp(1, MAX_DRAG_STRIDE);
+                self.stride = ((self.stride as f32 / ratio).ceil() as usize).clamp(1, self.max_stride.max(1));
             }
         } else if ratio > 1.3 {
             if self.stride > 1 {
@@ -273,7 +281,8 @@ pub fn render_view(
 }
 
 /// [`render_view`] for a drag frame at `quality`: `width × height` scaled down and every
-/// `quality.stride`-th triangle (or the size-based stride, whichever is coarser).
+/// `quality.stride`-th triangle (or the size-based stride, whichever is coarser), never more
+/// than `quality.max_stride`.
 pub fn render_drag(
     model: &Model,
     view: View,
@@ -287,7 +296,12 @@ pub fn render_drag(
         width: w.clamp(1, PREVIEW_MAX_SIDE),
         height: h.clamp(1, PREVIEW_MAX_SIDE),
         supersample: 1,
-        stride: model.mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(quality.stride).max(1),
+        stride: model
+            .mesh
+            .triangle_count()
+            .div_ceil(PREVIEW_MAX_TRIANGLES)
+            .max(quality.stride)
+            .clamp(1, quality.max_stride.max(1)),
         threads: preview_threads(),
         ..*look
     };
@@ -329,6 +343,12 @@ struct Job {
     view: View,
     size: (u32, u32),
     fast: bool,
+    /// Largest triangle stride a fast frame may use ([`DragQuality::max_stride`]).
+    max_stride: usize,
+    /// Smallest frame scale a fast frame may use ([`DragQuality::min_scale`]).
+    min_scale: f32,
+    /// Time one fast frame may take.
+    budget: Duration,
     look: RenderOptions,
 }
 
@@ -346,6 +366,9 @@ pub struct ModelView {
     state: ModelState,
     requested: u64,
     finished: u64,
+    max_stride: usize,
+    min_scale: f32,
+    budget: Duration,
 }
 
 impl ModelView {
@@ -392,7 +415,11 @@ impl ModelView {
                         Err(TryRecvError::Disconnected) => return,
                     }
                 }
-                let Job { seq, view, size, fast, look } = job;
+                let Job { seq, view, size, fast, max_stride, min_scale, budget, look } = job;
+                quality.max_stride = max_stride;
+                quality.min_scale = min_scale;
+                quality.stride = quality.stride.clamp(1, max_stride.max(1));
+                quality.scale = quality.scale.clamp(min_scale.clamp(MIN_DRAG_SCALE, 1.0), 1.0);
                 let started = Instant::now();
                 let scale = if fast { quality.scale } else { 1.0 };
                 let frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -405,7 +432,7 @@ impl ModelView {
                 .unwrap_or_else(|_| Err(ThumbError::Decode("model renderer panicked".into())))
                 .map(|image| Frame { view, fast, scale, image });
                 if fast {
-                    quality.observe(started.elapsed(), DRAG_BUDGET);
+                    quality.observe(started.elapsed(), budget);
                 }
                 if event_tx.send(Event::Frame(seq, frame)).is_err() {
                     return;
@@ -416,7 +443,31 @@ impl ModelView {
             Ok(_) => ModelState::Loading,
             Err(e) => ModelState::Failed(ThumbError::Decode(format!("could not start the model thread: {e}"))),
         };
-        Self { cancel, jobs, events, state, requested: 0, finished: 0 }
+        Self {
+            cancel,
+            jobs,
+            events,
+            state,
+            requested: 0,
+            finished: 0,
+            max_stride: MAX_DRAG_STRIDE,
+            min_scale: MIN_DRAG_SCALE,
+            budget: DRAG_BUDGET,
+        }
+    }
+
+    /// How fast frames trade quality for time: each may take `budget`, and shrinks no further
+    /// than `min_scale` of the asked size. Drags use [`DRAG_BUDGET`] and [`MIN_DRAG_SCALE`];
+    /// playback a longer budget and a higher floor.
+    pub fn set_budget(&mut self, budget: Duration, min_scale: f32) {
+        self.budget = budget;
+        self.min_scale = if min_scale.is_finite() { min_scale.clamp(MIN_DRAG_SCALE, 1.0) } else { MIN_DRAG_SCALE };
+    }
+
+    /// Cap the triangle stride of fast frames: `1` keeps every triangle and lets only the frame
+    /// size give (playback); the default [`MAX_DRAG_STRIDE`] is for drags.
+    pub fn set_max_stride(&mut self, max_stride: usize) {
+        self.max_stride = max_stride.max(1);
     }
 
     /// Ask for a frame of `width × height` from `view` with the default look (coalesced with
@@ -428,7 +479,16 @@ impl ModelView {
     /// [`ModelView::request`] with a display mode, lighting and background.
     pub fn request_look(&mut self, view: View, width: u32, height: u32, fast: bool, look: &RenderOptions) {
         self.requested += 1;
-        let job = Job { seq: self.requested, view, size: (width, height), fast, look: *look };
+        let job = Job {
+            seq: self.requested,
+            view,
+            size: (width, height),
+            fast,
+            max_stride: self.max_stride,
+            min_scale: self.min_scale,
+            budget: self.budget,
+            look: *look,
+        };
         if self.jobs.send(job).is_err() {
             self.finished = self.requested;
         }

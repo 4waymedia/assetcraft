@@ -58,6 +58,7 @@ Panels `#1e1e1e`, chrome `#1a1a1a`, rules `#2e2e2e`, viewer ground `#191919`, co
 | D-M4  | Set from Viewer                          | Needs orbit (model) and pan (still) interaction in the Storyboard Viewer, which today is a still. Shipped as step 4, after playback works; until then the buttons are absent, not disabled | small steps |
 | D-M5  | Apply to all model / still shots         | A command `storyboard.motion.applyAll {kind}` (EDIT, undoable), step 5                                      | one more command |
 | D-M6  | Turn in degrees, Rise in degrees         | `Camera.yaw` / `pitch` stay radians in the data (the viewer's `View`); the Inspector converts               | one unit in the data |
+| D-M7  | Playback frames (2026-11-04, Paul: playing "creates a blotched video"; paused and scrubbing are right) | **Now:** playback frames may shrink to the 25 ms budget but never skip triangles (`ModelView::set_max_stride(1)`, `DragQuality::max_stride`); a drag in the Organizer keeps its stride. **Step 3b, built 2026-11-04:** FilmCraft's pattern — the motion is deterministic, so render *ahead* of the playhead at full quality into a byte-budgeted frame cache on a worker pool ("on-screen frame first, then prefetch"; the UI never renders), the audio clock driving the playhead as it already does here. Sibling reference: FilmCraft `crates/ui-egui/src/frames.rs:1-8`, `docs/architecture.md:204-222` (compositor), `:249-282` (decode), as Paul reported them 2026-11-04 | a video is looked at, a drag is not |
 
 ## Step SB-3D1 (one at a time)
 
