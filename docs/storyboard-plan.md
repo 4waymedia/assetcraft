@@ -222,6 +222,24 @@ Decisions for Paul:
 
 Order: SF1 → SF2 → SF4 → SF3 → SF5. Save/Open first because Send to and Export both start from a saved document; the shot-list/stills export is pure Rust and small; Send to needs the OTIO writer (plan step 10).
 
+## Storyboard templates (ST; Paul, 2026-11-05: "the next feature enhancements will be storyboard templates for: reviews, tutorials, and 5 min instructions on things")
+
+- **Scope:** a template is a storyboard skeleton — scenes, shot types, title cards, pacing and text
+  intros, with the clips empty — that Start › New fills from a track and the user's assets.
+  **Goal served:** a review, a tutorial or a 5-minute how-to starts from a proven shape instead of a
+  blank Cut. **Immediate area of improvement:** today "Manual" starts from one placeholder card; the
+  Trailer / Blockbuster pacings shape the *rhythm* but not the *content*. Comes after SF1–SF2 (Save /
+  Open, so a template is a saved board with the clips empty) and SF5 (video export).
+- **Shape:** `templates/<id>.storyboard.json` bundled with the app (ATTRIBUTION.md row each) plus the
+  user's own under `<working>/Templates/`; a template is a board whose `template: true` flag keeps clips
+  without assets from counting as empty; Start › New › Template picks one, then a track, and Re-cut fits
+  the template's scenes to the music. Three to begin with: **Review** (hook · what it is · 3 points ·
+  verdict · end card), **Tutorial** (goal · setup · steps 1–n with insert shots · result · recap),
+  **5-minute instructions** (title · materials · numbered steps with a close-up each · check · outro).
+- **Steps (planned):** ST1 the `template` flag + File › Save as Template; ST2 the three bundled
+  templates as boards; ST3 Start › New › Template; ST4 a template's text intros as prompts for the
+  AI Prompt & Insert step. Owner: Claude; Paul writes the three shapes' beats.
+
 ## Decisions (Paul)
 
 | ID | Question                                                                                         | Recommendation / decision                                                                                         | Needed by |

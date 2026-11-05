@@ -111,7 +111,30 @@ pub fn install(ctx: &egui::Context) {
             (TextStyle::Monospace, FontId::monospace(12.0)),
         ]
         .into();
+        style.spacing.scroll = scroll_style();
     });
+}
+
+/// In-app scroll bars, like Trellis's (Paul, 2026-11-05, W2a): a thin bar that floats over the
+/// content and fades when idle, widening a little under the mouse; no gutter, no OS look.
+pub fn scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        floating: true,
+        bar_width: 8.0,
+        floating_width: 4.0,
+        floating_allocated_width: 0.0,
+        handle_min_length: 24.0,
+        bar_inner_margin: 2.0,
+        bar_outer_margin: 2.0,
+        dormant_background_opacity: 0.0,
+        active_background_opacity: 0.25,
+        interact_background_opacity: 0.4,
+        dormant_handle_opacity: 0.35,
+        active_handle_opacity: 0.7,
+        interact_handle_opacity: 1.0,
+        foreground_color: true,
+        ..egui::style::ScrollStyle::floating()
+    }
 }
 
 /// Inter SemiBold at `size`.
