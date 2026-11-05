@@ -20,13 +20,14 @@ use assetcraft_engine::{ModelBackground, ModelDisplay, ModelPrefs};
 use assetcraft_fs::{Entry, EntryKind};
 use assetcraft_probe::Format;
 use assetcraft_thumbs::model::{
-    Background, DisplayMode, Lighting, ModelState, ModelView, RenderOptions, View, is_model,
+    Background, DRAG_BUDGET, DisplayMode, Lighting, MIN_DRAG_SCALE, ModelState, ModelView, RenderOptions, View,
+    is_model,
 };
 use egui::{
     Align2, Color32, ColorImage, FontId, Id, Order, Rect, Response, TextureHandle, TextureOptions, Ui, Vec2, pos2, vec2,
 };
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// Radians of orbit per point dragged.
@@ -39,6 +40,9 @@ const MAX_FRAME_SIDE: f32 = 1024.0;
 const MAX_UPSCALE: f32 = 4.0;
 /// Turntable speed: one turn every 12 s.
 const TURNTABLE_RADIANS_PER_SECOND: f32 = std::f32::consts::TAU / 12.0;
+/// A turntable frame's time budget (25 fps) and smallest size, against the drag's 25 ms / ¼.
+const TURNTABLE_BUDGET: Duration = Duration::from_millis(40);
+const TURNTABLE_MIN_SCALE: f32 = 0.5;
 /// Height of the controls bar over the preview, in points.
 const BAR_HEIGHT: f32 = 24.0;
 /// How long a model must stay selected before it is loaded. Arrowing through a folder of big
@@ -87,10 +91,33 @@ impl ModelPreview {
         self.model.is_some()
     }
 
+    /// What the loaded model is, for the Metadata panel: `Some((triangles, (decoded, images)))`
+    /// once loaded; `None` while loading, failed, or for another file.
+    pub(crate) fn facts(&self, path: &Path) -> Option<(usize, (usize, usize))> {
+        if self.path != path {
+            return None;
+        }
+        match self.model.as_ref()?.state() {
+            ModelState::Ready { triangles, textures } => Some((*triangles, *textures)),
+            _ => None,
+        }
+    }
+
+    /// Whether the model for `path` failed to load.
+    pub(crate) fn failed(&self, path: &Path) -> bool {
+        self.path == path && self.model.as_ref().is_some_and(|m| matches!(m.state(), ModelState::Failed(_)))
+    }
+
     /// The look the last requested frame was asked for (for tests).
     #[cfg(test)]
     pub(crate) fn requested_prefs(&self) -> Option<ModelPrefs> {
         self.requested.map(|r| r.3)
+    }
+
+    /// Whether the last requested frame was a fast (budgeted) one (for tests).
+    #[cfg(test)]
+    pub(crate) fn requested_fast(&self) -> Option<bool> {
+        self.requested.map(|r| r.2)
     }
 }
 
@@ -173,7 +200,7 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
         let mut drag = if response.dragged() { response.drag_delta() } else { Vec2::ZERO };
         let turning = prefs.turntable && !response.dragged();
         if turning {
-            // The turntable is a slow drag the clock makes: budgeted frames, like a real one.
+            // The turntable is a slow drag the clock makes (for the camera; its frames are full).
             drag.x += TURNTABLE_RADIANS_PER_SECOND * dt / ORBIT_PER_POINT;
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -201,6 +228,13 @@ pub(crate) fn draw(nav: &mut Navigator, ui: &Ui, entry: &Entry, rect: Rect, resp
         }
         let ready = matches!(model.state(), ModelState::Ready { .. });
         let size = frame_size(rect, ctx.pixels_per_point());
+        // Both a drag and the turntable take budgeted frames, which draw the model's light copy
+        // (V0.6: solid, never decimated). The turntable gets playback's terms — a longer budget
+        // and a higher size floor — because it is watched, not flicked (Paul, 2026-11-05:
+        // dragging was smoother than the turntable); a full-quality frame follows when it stops.
+        let (budget, floor) =
+            if turning { (TURNTABLE_BUDGET, TURNTABLE_MIN_SCALE) } else { (DRAG_BUDGET, MIN_DRAG_SCALE) };
+        model.set_budget(budget, floor);
         let wanted = (preview.camera, size, response.dragged() || turning, prefs);
         if ready && preview.requested != Some(wanted) {
             model.request_look(wanted.0, size[0], size[1], wanted.2, &look(prefs));
@@ -420,6 +454,86 @@ mod tests {
         }
         assert!(!nav.state.model.as_ref().unwrap().shows_fast_frame(), "a full frame follows the release");
         assert_ne!(nav.state.model.as_ref().unwrap().camera(), View::default(), "the drag orbited");
+    }
+
+    #[test]
+    fn the_turntable_turns_on_light_frames_and_rests_on_a_full_one() {
+        use assetcraft_engine::{Prefs, RecordingLauncher, Session};
+        use assetcraft_fs::RealFs;
+        use serde_json::json;
+        use std::sync::Arc;
+        let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+        let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+        let mut nav = Navigator::with_one_worker(session);
+        assert!(nav.open_folder(&models));
+        nav.run("select.click", json!({ "path": models.join("rune_crate_textured.glb") }));
+        nav.run("view.model", json!({ "turntable": true }));
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut t = 0.0;
+        let mut frames = 0;
+        while std::time::Instant::now() < deadline && frames < 3 {
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), ..egui::RawInput::default() };
+            let mut output = ctx.run_ui(input, |ui| nav.ui(ui));
+            output.textures_delta.clear();
+            t += 0.05;
+            if nav.state.model.as_ref().is_some_and(ModelPreview::has_frame) {
+                frames += 1;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let preview = nav.state.model.as_ref().expect("a preview");
+        assert!(preview.has_frame(), "frames arrive while the turntable turns");
+        assert_eq!(preview.requested_fast(), Some(true), "a turntable frame is a budgeted one (the light copy)");
+        assert_ne!(preview.camera().yaw, View::default().yaw, "and the camera moved on the clock");
+        // Turntable off: a full-quality frame follows.
+        nav.run("view.model", json!({ "turntable": false }));
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while nav.state.model.as_ref().is_some_and(|m| m.requested_fast() != Some(false) || m.shows_fast_frame())
+            && std::time::Instant::now() < deadline
+        {
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), ..egui::RawInput::default() };
+            let mut output = ctx.run_ui(input, |ui| nav.ui(ui));
+            output.textures_delta.clear();
+            t += 0.05;
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let preview = nav.state.model.as_ref().unwrap();
+        assert_eq!(preview.requested_fast(), Some(false), "stopped: a full frame");
+        assert!(!preview.shows_fast_frame());
+    }
+
+    #[test]
+    fn the_metadata_panel_shows_a_models_polygon_count_once_loaded() {
+        use assetcraft_engine::{Prefs, RecordingLauncher, Session};
+        use assetcraft_fs::RealFs;
+        use serde_json::json;
+        use std::sync::Arc;
+        let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+        let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+        let mut nav = Navigator::with_one_worker(session);
+        assert!(nav.open_folder(&models));
+        nav.run("select.click", json!({ "path": models.join("rune_crate_textured.glb") }));
+        let ctx = egui::Context::default();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let row =
+            |nav: &Navigator, key: &str| nav.metadata_rows().iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while row(&nav, "Polygons").is_none_or(|v| v == crate::PENDING) && std::time::Instant::now() < deadline {
+            let input = egui::RawInput { screen_rect: Some(screen), ..egui::RawInput::default() };
+            let mut output = ctx.run_ui(input, |ui| nav.ui(ui));
+            output.textures_delta.clear();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(row(&nav, "Polygons").as_deref(), Some("12 triangles"), "the textured cube");
+        assert_eq!(
+            row(&nav, "Textures").as_deref(),
+            Some("2, 1 drawn"),
+            "base colour drawn; metallic-roughness waits for V1"
+        );
+        assert_eq!(crate::inspector::thousands_for_tests(1_234_567), "1,234,567");
+        assert_eq!(crate::inspector::thousands_for_tests(999), "999");
     }
 
     /// The centre of the preview's image area in the headless layout.

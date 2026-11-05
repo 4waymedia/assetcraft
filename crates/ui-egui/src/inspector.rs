@@ -57,6 +57,8 @@ pub(crate) fn metadata(nav: &mut Navigator, ui: &mut Ui) {
     egui::ScrollArea::vertical().id_salt("metadata-panel").auto_shrink(false).show(ui, |ui| {
         let mut rows: Vec<(&str, String)> = vec![("Name", entry.name.clone()), ("Path", entry.path.display().to_string())];
         let mut notes = Vec::new();
+        // A 3D model's facts come from the preview's loaded mesh (read before `file_info` borrows).
+        let model_facts = nav.state.model.as_ref().map(|m| (m.facts(&entry.path), m.failed(&entry.path)));
         if entry.kind == EntryKind::File {
             match nav.file_info(&entry.path) {
                 FileInfo::Pending => {
@@ -78,6 +80,29 @@ pub(crate) fn metadata(nav: &mut Navigator, ui: &mut Ui) {
                         probe.dimensions.map(|d| format!("{} × {} px", d.width, d.height)).unwrap_or_else(|| "—".into()),
                     ));
                     rows.push(("Size", format_size(probe.size)));
+                    // A 3D model: its polygon count and textures, from the preview's loaded mesh
+                    // (Paul, 2026-11-05: "include the poly count in the metadata").
+                    if assetcraft_thumbs::model::is_model(probe.format) {
+                        match model_facts.and_then(|(facts, _)| facts) {
+                            Some((triangles, (decoded, images))) => {
+                                let mut tris = format!("{} triangles", thousands(triangles));
+                                if triangles > assetcraft_thumbs::model::LIGHT_ABOVE {
+                                    tris.push_str(" · dense: drags a simplified copy");
+                                }
+                                rows.push(("Polygons", tris));
+                                rows.push((
+                                    "Textures",
+                                    // Only images a material draws are decoded (base colour; the
+                                    // metallic-roughness map waits for V1).
+                                    if images == 0 { "none".into() } else { format!("{images}, {decoded} drawn") },
+                                ));
+                            }
+                            None if model_facts.is_some_and(|(_, failed)| failed) => {
+                                rows.push(("Polygons", "— (the model could not be loaded)".into()));
+                            }
+                            None => rows.push(("Polygons", PENDING.into())),
+                        }
+                    }
                     rows.push(("Created", format_time(probe.created)));
                     rows.push(("Modified", format_time(probe.modified)));
                     rows.push(("Status", format!("{:?}", probe.status)));
@@ -108,7 +133,7 @@ pub(crate) fn metadata(nav: &mut Navigator, ui: &mut Ui) {
         egui::Grid::new("metadata-grid").num_columns(2).spacing(vec2(10.0, 4.0)).striped(true).show(ui, |ui| {
             for (key, value) in rows {
                 ui.label(RichText::new(key).weak());
-                let text = if matches!(key, "Dimensions" | "Size" | "Created" | "Modified") {
+                let text = if matches!(key, "Dimensions" | "Size" | "Created" | "Modified" | "Polygons" | "Textures") {
                     RichText::new(value).font(crate::theme::numbers(11.5))
                 } else {
                     RichText::new(value)
@@ -160,4 +185,22 @@ pub(crate) fn overlay(nav: &mut Navigator, ctx: &egui::Context) {
             }
         },
     );
+}
+
+/// `123456` → `123,456`.
+fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[cfg(test)]
+pub(crate) fn thousands_for_tests(n: usize) -> String {
+    thousands(n)
 }

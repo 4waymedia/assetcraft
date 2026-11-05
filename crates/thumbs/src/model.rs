@@ -29,8 +29,8 @@ pub use assetcraft_mesh::{
 use image::ImageReader;
 use std::io::Cursor;
 
-/// Above this many triangles, interactive (`fast`) preview frames draw every n-th triangle so
-/// orbiting stays responsive; the frame after the drag ends draws them all.
+/// Above this many triangles `asset.meshInfo` warns that interactive frames draw the light copy
+/// (V0.6; before it, every n-th triangle).
 pub const PREVIEW_MAX_TRIANGLES: usize = 500_000;
 
 /// Largest preview frame side.
@@ -40,19 +40,41 @@ pub const PREVIEW_MAX_SIDE: u32 = 2048;
 /// and more than enough for a preview panel (opportunity: full size in the full-window view).
 pub const TEXTURE_MAX_SIDE: u32 = 1024;
 
-/// A mesh with its decoded textures.
+/// A mesh with its decoded textures, and a light copy for interactive frames.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     /// The geometry and materials.
     pub mesh: Mesh,
     /// `textures[i]` is the decoded `mesh.images[i]`, or `None` when it would not decode.
     pub textures: Vec<Option<Texture>>,
+    /// A vertex-clustered copy of `mesh` with at most [`LIGHT_TRIANGLES`] triangles, built when
+    /// the mesh has more than [`LIGHT_ABOVE`]; drag and budgeted frames draw it instead of
+    /// skipping triangles (V0.6, finding V3b). `None` for a mesh that is light already.
+    pub light: Option<Mesh>,
 }
 
+/// Meshes above this many triangles get a light copy for interactive frames.
+pub const LIGHT_ABOVE: usize = 120_000;
+/// Most triangles in the light copy.
+pub const LIGHT_TRIANGLES: usize = 60_000;
+
 impl Model {
+    /// A model from a mesh and its textures, with the light copy built when the mesh needs one.
+    pub fn new(mesh: Mesh, textures: Vec<Option<Texture>>) -> Model {
+        let light = (mesh.triangle_count() > LIGHT_ABOVE).then(|| assetcraft_mesh::simplify_to(&mesh, LIGHT_TRIANGLES));
+        Model { mesh, textures, light }
+    }
+
+    /// The mesh interactive (drag, budgeted) frames draw: the light copy, else the mesh.
+    pub fn interactive(&self) -> &Mesh {
+        self.light.as_ref().unwrap_or(&self.mesh)
+    }
+
     /// Bytes held, for memory budgets.
     pub fn cost(&self) -> usize {
-        self.mesh.cost() + self.textures.iter().flatten().map(|t| t.rgba.len()).sum::<usize>()
+        self.mesh.cost()
+            + self.light.as_ref().map_or(0, Mesh::cost)
+            + self.textures.iter().flatten().map(|t| t.rgba.len()).sum::<usize>()
     }
 }
 
@@ -97,7 +119,7 @@ pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 pub fn load_model(services: &dyn Services, probe: &Probe) -> Result<Model, ThumbError> {
     let mesh = load(services, probe)?;
     let textures = decode_textures(&mesh);
-    Ok(Model { mesh, textures })
+    Ok(Model::new(mesh, textures))
 }
 
 /// `true` for the formats [`load`] reads.
@@ -254,9 +276,9 @@ impl DragQuality {
     }
 }
 
-/// Render `model` from `view` at `width × height`. `fast` frames skip supersampling and, above
-/// [`PREVIEW_MAX_TRIANGLES`], draw a decimated subset. `look` sets the display mode, lighting
-/// and background (the size and quality fields are overwritten).
+/// Render `model` from `view` at `width × height`. `fast` frames skip supersampling and draw
+/// the model's light copy ([`Model::interactive`]). `look` sets the display mode, lighting and
+/// background (the size and quality fields are overwritten).
 pub fn render_view(
     model: &Model,
     view: View,
@@ -275,14 +297,14 @@ pub fn render_view(
     };
     if fast {
         opts.supersample = 1;
-        opts.stride = model.mesh.triangle_count().div_ceil(PREVIEW_MAX_TRIANGLES).max(1);
+        return Ok(assetcraft_mesh::render_with(model.interactive(), &model.textures, view, &opts)?);
     }
     Ok(assetcraft_mesh::render_with(&model.mesh, &model.textures, view, &opts)?)
 }
 
-/// [`render_view`] for a drag frame at `quality`: `width × height` scaled down and every
-/// `quality.stride`-th triangle (or the size-based stride, whichever is coarser), never more
-/// than `quality.max_stride`.
+/// [`render_view`] for a drag frame at `quality`: the light copy at `width × height` scaled
+/// down. A mesh with no light copy may still be drawn at every `quality.stride`-th triangle,
+/// never more than `quality.max_stride` (a light mesh rarely gets there).
 pub fn render_drag(
     model: &Model,
     view: View,
@@ -296,16 +318,11 @@ pub fn render_drag(
         width: w.clamp(1, PREVIEW_MAX_SIDE),
         height: h.clamp(1, PREVIEW_MAX_SIDE),
         supersample: 1,
-        stride: model
-            .mesh
-            .triangle_count()
-            .div_ceil(PREVIEW_MAX_TRIANGLES)
-            .max(quality.stride)
-            .clamp(1, quality.max_stride.max(1)),
+        stride: if model.light.is_some() { 1 } else { quality.stride.clamp(1, quality.max_stride.max(1)) },
         threads: preview_threads(),
         ..*look
     };
-    Ok(assetcraft_mesh::render_with(&model.mesh, &model.textures, view, &opts)?)
+    Ok(assetcraft_mesh::render_with(model.interactive(), &model.textures, view, &opts)?)
 }
 
 /// Where a [`ModelView`] is.
@@ -391,7 +408,7 @@ impl ModelView {
                     return Err(ThumbError::Decode("cancelled".into()));
                 }
                 let textures = decode_textures(&mesh);
-                Ok(Model { mesh, textures })
+                Ok(Model::new(mesh, textures))
             }))
             .unwrap_or_else(|_| Err(ThumbError::Decode("model loader panicked".into())));
             let model = match loaded {

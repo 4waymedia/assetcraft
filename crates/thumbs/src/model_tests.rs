@@ -205,7 +205,7 @@ fn textures_decode_only_what_a_material_draws_and_never_fail_the_model() {
     let shrunk = decode_textures(&wide)[0].clone().unwrap();
     assert_eq!(shrunk.width, TEXTURE_MAX_SIDE);
     assert_eq!(shrunk.height, 26, "40 × 1024 / 1600, rounded");
-    let _ = Model { mesh: wide, textures: vec![Some(shrunk), None] };
+    let _ = Model::new(wide, vec![Some(shrunk), None]);
 }
 
 #[test]
@@ -330,4 +330,53 @@ fn drag_frames_are_scaled_and_full_frames_are_not() {
     view.request(View::default(), 160, 90, false);
     let frame = wait(&mut view).expect("a full frame");
     assert!(!frame.fast && frame.scale == 1.0 && frame.image.width == 160);
+}
+
+#[test]
+fn a_dense_model_gets_a_light_copy_that_drag_frames_draw_without_holes() {
+    use crate::model::{DragQuality, LIGHT_ABOVE, LIGHT_TRIANGLES, Model, RenderOptions, render_drag, render_view};
+    use assetcraft_mesh::{Material, Mesh, View};
+    // A dense wavy sheet: 400 × 400 quads = 320 000 triangles, one material.
+    let n = 400u32;
+    let mut mesh = Mesh::default();
+    for i in 0..=n {
+        for j in 0..=n {
+            let (x, z) = (i as f32 / n as f32 - 0.5, j as f32 / n as f32 - 0.5);
+            mesh.positions.push([x, 0.1 * (x * 20.0).sin() * (z * 20.0).cos(), z]);
+        }
+    }
+    for i in 0..n {
+        for j in 0..n {
+            let a = i * (n + 1) + j;
+            mesh.triangles.push([a, a + n + 1, a + 1]);
+            mesh.triangles.push([a + 1, a + n + 1, a + n + 2]);
+            mesh.triangle_color.extend([0, 0]);
+        }
+    }
+    mesh.colors = vec![[0.7, 0.7, 0.7, 1.0]];
+    mesh.materials = vec![Material::default()];
+    assert!(mesh.triangle_count() > LIGHT_ABOVE);
+    let model = Model::new(mesh, Vec::new());
+    let light = model.light.as_ref().expect("a light copy for a dense mesh");
+    assert!(light.triangle_count() <= LIGHT_TRIANGLES && light.triangle_count() > 1_000, "{}", light.triangle_count());
+    assert!(model.cost() > model.mesh.cost(), "the copy is counted");
+    // Drag frames draw the copy: no stride, and about the same pixels covered as the full frame.
+    let look = RenderOptions::new(160, 100);
+    let full = render_view(&model, View::default(), 160, 100, false, &look).unwrap();
+    let coarse = DragQuality { scale: 1.0, stride: 8, ..DragQuality::default() };
+    let drag = render_drag(&model, View::default(), 160, 100, coarse, &look).unwrap();
+    let covered =
+        |img: &assetcraft_mesh::Image| img.rgba.as_chunks::<4>().0.iter().filter(|px| px[3] > 0).count() as f32;
+    let (a, b) = (covered(&full), covered(&drag));
+    // The full frame is supersampled (soft edges count), the drag frame not: within a tenth.
+    assert!((a - b).abs() / a < 0.1, "coverage {a} vs {b}: the light copy has no holes");
+    let fast = render_view(&model, View::default(), 160, 100, true, &look).unwrap();
+    assert!((a - covered(&fast)).abs() / a < 0.1, "fast frames draw it too");
+    // What skipping every 8th triangle of the dense mesh looked like, for contrast.
+    let holes = RenderOptions { stride: 8, supersample: 1, ..RenderOptions::new(160, 100) };
+    let skipped = assetcraft_mesh::render_with(&model.mesh, &model.textures, View::default(), &holes).unwrap();
+    assert!(covered(&skipped) < a * 0.5, "stride 8 covered {} of {a}", covered(&skipped));
+    // A light mesh has no copy.
+    let small = crate::model::load_path(&RealFs, &models().join("rune_crate_textured.glb")).unwrap();
+    assert!(Model::new(small, Vec::new()).light.is_none());
 }

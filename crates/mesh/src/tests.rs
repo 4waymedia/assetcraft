@@ -652,3 +652,111 @@ fn the_srgb_table_matches_the_formula_exactly() {
     }
     assert_eq!(crate::raster::srgb_for_tests(f32::NAN), 0);
 }
+
+// ---- Simplification (V0.6) -----------------------------------------------------------------
+
+/// A bumpy sphere of `n × n` quads (2 n² triangles), with normals, UVs and two material slots.
+fn bumpy_sphere(n: u32) -> Mesh {
+    let mut mesh = Mesh::default();
+    for i in 0..=n {
+        let v = i as f32 / n as f32;
+        let theta = v * std::f32::consts::PI;
+        for j in 0..=n {
+            let u = j as f32 / n as f32;
+            let phi = u * std::f32::consts::TAU;
+            let r = 1.0 + 0.05 * (phi * 7.0).sin() * (theta * 5.0).cos();
+            let (x, y, z) = (r * theta.sin() * phi.cos(), r * theta.cos(), r * theta.sin() * phi.sin());
+            mesh.positions.push([x, y, z]);
+            mesh.normals.push([x / r, y / r, z / r]);
+            mesh.uvs.push([u, v]);
+        }
+    }
+    let w = n + 1;
+    for i in 0..n {
+        for j in 0..n {
+            let a = i * w + j;
+            mesh.triangles.push([a, a + 1, a + w]);
+            mesh.triangles.push([a + 1, a + w + 1, a + w]);
+            let slot = u16::from(j < n / 2);
+            mesh.triangle_color.push(slot);
+            mesh.triangle_color.push(slot);
+        }
+    }
+    mesh.colors = vec![[0.8, 0.2, 0.2, 1.0], [0.2, 0.2, 0.8, 1.0]];
+    mesh.materials = vec![Material::default(); 2];
+    mesh
+}
+
+/// Every index in range, no collapsed triangle, attribute lengths match, slots in range.
+fn well_formed(m: &Mesh) {
+    let n = m.positions.len() as u32;
+    for t in &m.triangles {
+        assert!(t.iter().all(|&i| i < n), "index in range");
+        assert!(t[0] != t[1] && t[1] != t[2] && t[0] != t[2], "no collapsed triangle");
+    }
+    assert_eq!(m.triangle_color.len(), m.triangles.len());
+    assert!(m.triangle_color.iter().all(|&c| (c as usize) < m.colors.len()));
+    assert!(m.normals.is_empty() || m.normals.len() == m.positions.len());
+    assert!(m.uvs.is_empty() || m.uvs.len() == m.positions.len());
+    assert_eq!(m.materials.len(), m.colors.len());
+    assert!(m.positions.iter().all(|p| p.iter().all(|v| v.is_finite())));
+}
+
+#[test]
+fn clustering_keeps_the_shape_closed_and_cuts_the_count() {
+    let dense = bumpy_sphere(300); // 180 000 triangles
+    assert_eq!(dense.triangle_count(), 180_000);
+    let light = simplify(&dense, 64);
+    well_formed(&light);
+    // A 64³ grid has ≈ 6 · 64² surface cells, so a sphere lands near 30 k triangles.
+    assert!(light.triangle_count() < dense.triangle_count() / 4, "{} triangles", light.triangle_count());
+    assert!(light.triangle_count() > 2_000, "but still a sphere, not a blob: {}", light.triangle_count());
+    // The bounds hold to within a cell, the normals are unit, both slots survive.
+    let (lo, hi) = light.bounds().unwrap();
+    let (dlo, dhi) = dense.bounds().unwrap();
+    for a in 0..3 {
+        assert!((lo[a] - dlo[a]).abs() < 0.08 && (hi[a] - dhi[a]).abs() < 0.08, "axis {a}: {lo:?} {hi:?}");
+    }
+    assert!(light.normals.iter().all(|n| ((n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt() - 1.0).abs() < 1e-3));
+    assert!(light.triangle_color.contains(&0) && light.triangle_color.contains(&1));
+    assert!(light.images.is_empty(), "the light copy carries no image bytes");
+    // Deterministic, and a coarser grid gives fewer triangles.
+    assert_eq!(simplify(&dense, 64), light);
+    assert!(simplify(&dense, 32).triangle_count() < light.triangle_count());
+    // Rendering it works and covers about as many pixels as the original.
+    let opts = RenderOptions::new(96, 96);
+    let full = render(&dense, View::default(), &opts).unwrap();
+    let fast = render(&light, View::default(), &opts).unwrap();
+    let covered = |img: &Image| img.rgba.as_chunks::<4>().0.iter().filter(|px| px[3] > 0).count() as f32;
+    let (a, b) = (covered(&full), covered(&fast));
+    assert!((a - b).abs() / a < 0.08, "coverage {a} vs {b}: no holes");
+}
+
+#[test]
+fn simplify_to_hits_the_target_and_passes_small_meshes_through() {
+    let dense = bumpy_sphere(300);
+    let light = simplify_to(&dense, 20_000);
+    well_formed(&light);
+    assert!(light.triangle_count() <= 20_000, "{}", light.triangle_count());
+    assert!(light.triangle_count() > 5_000, "the finest grid that fits, not the coarsest: {}", light.triangle_count());
+    let small = bumpy_sphere(20);
+    let same = simplify_to(&small, 20_000);
+    assert_eq!(
+        (same.triangles, same.positions.len()),
+        (small.triangles.clone(), small.positions.len()),
+        "within target: as is"
+    );
+    // Empty and degenerate input give an empty mesh, never a panic.
+    assert_eq!(simplify(&Mesh::default(), 64), Mesh::default());
+    let flat = Mesh {
+        positions: vec![[0.0; 3]; 3],
+        triangles: vec![[0, 1, 2]],
+        triangle_color: vec![0],
+        colors: vec![[1.0; 4]],
+        materials: vec![Material::default()],
+        ..Mesh::default()
+    };
+    assert_eq!(simplify(&flat, 64).triangle_count(), 0, "three vertices in one cell collapse");
+    let _ = simplify(&dense, 0);
+    let _ = simplify(&dense, u32::MAX);
+}

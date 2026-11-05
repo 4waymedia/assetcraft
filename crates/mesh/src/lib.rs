@@ -25,10 +25,12 @@
 mod gltf;
 mod obj;
 mod raster;
+mod simplify;
 
 pub use gltf::{parse_glb, parse_gltf};
 pub use obj::parse_obj;
 pub use raster::{Background, DisplayMode, Image, Lighting, MAX_SAMPLES, RenderOptions, Texture, render, render_with};
+pub use simplify::{MAX_GRID, MIN_GRID, simplify, simplify_to};
 
 use std::fmt;
 

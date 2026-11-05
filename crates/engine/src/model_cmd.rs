@@ -54,7 +54,7 @@ pub(crate) fn describe(mesh: &Mesh) -> Value {
         warnings.push("no texture coordinates: textures can't be drawn".to_string());
     }
     if mesh.triangle_count() > PREVIEW_MAX_TRIANGLES {
-        warnings.push(format!("over {PREVIEW_MAX_TRIANGLES} triangles: the preview decimates while dragging"));
+        warnings.push(format!("over {PREVIEW_MAX_TRIANGLES} triangles: the preview drags a simplified copy"));
     }
     let images: Vec<Value> = mesh
         .images
