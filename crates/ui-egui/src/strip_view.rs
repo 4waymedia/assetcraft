@@ -444,6 +444,23 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     ui.painter().rect_filled(frame, 0, Color32::BLACK);
     let playing = nav.session.transport().playing;
     let paused_mid = !playing && at > Ticks::ZERO && at < board.total();
+    // Keep the motion cache and any render job moving, the clip about to show first.
+    let on_screen = if playing || paused_mid {
+        board.clip_at(at).cloned()
+    } else if fill {
+        None
+    } else {
+        nav.session
+            .selected_clip()
+            .and_then(|id| board.clip(id))
+            .or_else(|| board.clip_at(at.min(board.total())))
+            .or_else(|| board.clips.first())
+            .cloned()
+    };
+    crate::motion_view::tick(nav, ui, frame, board, at, on_screen.as_ref());
+    if let Some((done, total)) = crate::motion_view::job_progress(nav) {
+        render_progress(ui, frame, done, total);
+    }
     if playing || paused_mid {
         if let Some(clip) = board.clip_at(at).cloned() {
             let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
@@ -482,6 +499,21 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
             nav.run("storyboard.place", json!({ "asset": asset.0, "clip": clip.id.0 }));
         }
     }
+}
+
+/// The render job's bar along the Viewer's top edge: "Rendering 34 / 240 · Return or Esc stops".
+fn render_progress(ui: &Ui, frame: Rect, done: u32, total: u32) {
+    let painter = ui.painter();
+    let bar = Rect::from_min_size(frame.left_top(), vec2(frame.width(), 3.0));
+    painter.rect_filled(bar, 0, Color32::from_gray(0x3a));
+    let part = if total == 0 { 1.0 } else { (done as f32 / total as f32).clamp(0.0, 1.0) };
+    painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * part, 3.0)), 0, ACCENT);
+    let text = format!("Rendering {done} / {total} · Return or Esc stops");
+    let galley = painter.layout_no_wrap(text, FontId::monospace(10.0), Color32::from_gray(0xe0));
+    let band =
+        Rect::from_min_size(frame.right_top() + vec2(-galley.size().x - 20.0, 8.0), galley.size() + vec2(12.0, 4.0));
+    painter.rect_filled(band, 2, Color32::from_black_alpha(150));
+    painter.galley(band.min + vec2(6.0, 2.0), galley, Color32::from_gray(0xe0));
 }
 
 /// A clip as the Cut shows it, `elapsed` seconds in (`f64::INFINITY` = at rest): a Card, or the

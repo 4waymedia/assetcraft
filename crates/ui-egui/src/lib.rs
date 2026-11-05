@@ -340,7 +340,7 @@ impl Navigator {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo, space, delete) = ctx.input_mut(|i| {
+            let (undo, redo, space, delete, enter, escape) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
@@ -350,13 +350,22 @@ impl Navigator {
                         | i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
                         | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Delete)
                         | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Backspace),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
                 )
             });
             if delete && !self.session.selected_clips().is_empty() {
                 self.run("storyboard.delete", json!({}));
             }
-            // Space: on the Start screen, the selected track's cut (timeline); else the Cut.
+            // Return renders the Cut's motion clips ahead of time (Paul, 2026-11-05); Esc stops.
             let starting = self.session.storyboard().is_none() || self.state.storyboard.start.open;
+            if enter && !starting {
+                motion_view::toggle_render_job(self);
+            }
+            if escape && motion_view::job_progress(self).is_some() {
+                motion_view::toggle_render_job(self);
+            }
+            // Space: on the Start screen, the selected track's cut (timeline); else the Cut.
             if space && starting {
                 start_view::toggle_play(self);
             } else if space {

@@ -492,6 +492,7 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
                 used.insert("file.renamePreview");
             }
             MenuAction::ResetLayout
+            | MenuAction::RenderCache
             | MenuAction::Shortcuts
             | MenuAction::About
             | MenuAction::Exit

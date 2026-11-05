@@ -777,6 +777,17 @@ fn presets_fill_amount_and_ease_and_edits_make_custom() {
     assert!((m.amount.yaw - std::f32::consts::TAU).abs() < 1e-6 && m.amount.zoom == 1.0);
     assert_eq!(m.glyph(), Some("↻"));
     assert!(!set_motion(&mut board, model, turn).unwrap(), "same preset again: no change");
+    // The preset's own amount sent back (as a slider does, rounded to its step) keeps the chip.
+    let same = MotionEdit { amount: Some(Camera { yaw: 360f32.to_radians(), ..Camera::NONE }), ..Default::default() };
+    assert!(!set_motion(&mut board, model, same).unwrap(), "within tolerance: no change");
+    assert_eq!(board.clip(model).unwrap().motion.unwrap().preset, MotionPreset::Turntable);
+    let rise = MotionEdit { preset: Some(MotionPreset::Rise), ..Default::default() };
+    assert!(set_motion(&mut board, model, rise).unwrap());
+    let rounded =
+        MotionEdit { amount: Some(Camera { pitch: 20f32.to_radians(), ..Camera::NONE }), ..Default::default() };
+    assert!(!set_motion(&mut board, model, rounded).unwrap(), "20.000002° is still Rise");
+    assert_eq!(board.clip(model).unwrap().motion.unwrap().preset, MotionPreset::Rise);
+    assert!(set_motion(&mut board, model, turn).unwrap());
 
     // Turntable is orbit only; a still pans instead.
     assert_eq!(

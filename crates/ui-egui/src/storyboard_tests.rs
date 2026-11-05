@@ -972,7 +972,7 @@ fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
     assert!((view.yaw - half_turn.yaw).abs() < 0.15, "about half-way through a 360° turn: {view:?}");
     assert!((view.pitch - base.pitch).abs() < 1e-6 && (view.zoom - base.zoom).abs() < 1e-6);
     // Then it renders ahead: more frames land while nothing moves.
-    while nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached() < 3)
+    while nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached(2) < 3)
         && std::time::Instant::now() < deadline
     {
         frame(&ctx, &mut nav, Vec::new(), t);
@@ -980,7 +980,7 @@ fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert!(
-        nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached() >= 3),
+        nav.state.storyboard.motion_player.as_ref().is_some_and(|p| p.cached(2) >= 3),
         "frames ahead of the playhead"
     );
     assert_eq!(crate::motion_view::frame_count(&clip), (clip.duration.as_secs_f64() * 24.0).ceil() as u32);
@@ -994,4 +994,62 @@ fn the_viewer_plays_a_model_clips_motion_through_its_camera() {
     frame(&ctx, &mut nav, Vec::new(), t);
     assert_eq!(nav.session().storyboard().unwrap(), &before);
     assert_eq!(nav.message(), Some("Clip #03: Push in"), "the command's message reaches the status bar");
+}
+
+#[test]
+fn return_renders_every_model_clips_motion_and_escape_stops_it() {
+    use assetcraft_storyboard::ClipId;
+    let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/props/models");
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    // Two model clips apart (clip 6 is a title card), so the job must move between them; one still with motion.
+    nav.run(
+        "storyboard.place",
+        json!({ "asset": models.join("rune_crate_textured.glb").to_string_lossy(), "clip": 2 }),
+    );
+    nav.run("storyboard.place", json!({ "asset": models.join("soul_orb_icosphere.glb").to_string_lossy(), "clip": 7 }));
+    nav.run("storyboard.place", json!({ "asset": "/art/concept.png", "clip": 3 }));
+    nav.run("storyboard.motion", json!({ "clip": 2, "preset": "turntable" }));
+    nav.run("storyboard.motion", json!({ "clip": 7, "preset": "rise" }));
+    nav.run("storyboard.motion", json!({ "clip": 3, "preset": "pushIn" }));
+    nav.run("storyboard.select", json!({ "clip": 1 })); // a title card on screen: nothing to render there
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert!(crate::motion_view::job_progress(&nav).is_none());
+    let key = |key, pressed| Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    // Return starts the job over the two model clips (the still needs no frames).
+    frame(&ctx, &mut nav, vec![key(egui::Key::Enter, true)], t);
+    let board = nav.session().storyboard().unwrap().clone();
+    let count = |id: u32| crate::motion_view::frame_count(board.clip(ClipId(id)).unwrap());
+    let (done, total) = crate::motion_view::job_progress(&nav).expect("a job after Return");
+    assert_eq!((done, total), (0, count(2) + count(7)));
+    assert!(nav.message().unwrap_or("").starts_with("Rendering"), "{:?}", nav.message());
+    // Esc stops it; Return starts it again.
+    frame(&ctx, &mut nav, vec![key(egui::Key::Enter, false), key(egui::Key::Escape, true)], t + 0.05);
+    assert!(crate::motion_view::job_progress(&nav).is_none());
+    assert_eq!(nav.message(), Some("Render stopped"));
+    frame(&ctx, &mut nav, vec![key(egui::Key::Escape, false), key(egui::Key::Enter, true)], t + 0.1);
+    frame(&ctx, &mut nav, vec![key(egui::Key::Enter, false)], t + 0.15);
+    assert!(crate::motion_view::job_progress(&nav).is_some());
+    // It runs to the end on its own, both clips complete, and says so.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    t += 0.2;
+    while crate::motion_view::job_progress(&nav).is_some() && std::time::Instant::now() < deadline {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.016;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(crate::motion_view::job_progress(&nav).is_none(), "the job finished");
+    let player = nav.state.storyboard.motion_player.as_ref().unwrap();
+    assert_eq!((player.cached(2), player.cached(7)), (count(2) as usize, count(7) as usize), "both clips complete");
+    assert_eq!(player.cached(3), 0, "a still has no rendered frames");
+    assert!(nav.message().unwrap_or("").starts_with("Render cache ready"), "{:?}", nav.message());
+    // A change of motion drops that clip's frames; the other clip keeps its own.
+    nav.run("storyboard.motion", json!({ "clip": 2, "preset": "pushIn" }));
+    nav.run("storyboard.select", json!({ "clip": 2 }));
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let player = nav.state.storyboard.motion_player.as_ref().unwrap();
+    assert!(player.cached(2) <= 1, "re-rendering from scratch: {}", player.cached(2));
+    assert_eq!(player.cached(7), count(7) as usize);
 }

@@ -179,6 +179,16 @@ brief: [design/clip-motion-brief.md](design/clip-motion-brief.md).
   shape, as Paul described it. With a cold cache the first seconds step between the frames that have
   landed (clear, not soft); a warm cache (the clip was selected a moment before Play) is smooth. Budgeted
   fast frames (`set_max_stride`, `set_budget`) stay in `thumbs` for the Organizer's drag.
+- **Step 3c built (2026-11-05, Paul: "offer the user to press 'return' to build the render cache of the
+  video timeline for these assets"):** the cache is now timeline-wide — frames per clip (`ClipFrames`, keyed by
+  motion · Viewer size · look · place on the Cut), up to `MAX_MODELS` 4 heroes loaded at once (LRU), one
+  `CACHE_BYTES` 768 MiB budget, the frame farthest from the playhead evicted first — and **Return** starts a
+  `RenderJob` over every 3D clip with motion in Cut order (View › Render Motion Cache; **Esc** or Return
+  again stops it); a bar along the Viewer's top edge shows "Rendering n / total"; the status bar says
+  "Render cache ready: n frames, m MiB" (or "cache full at m MiB"). `motion_view::tick` runs every frame the
+  Viewer is drawn: the clip on screen first, then the job. A clip whose motion changes re-renders alone.
+  Tests: `return_renders_every_model_clips_motion_and_escape_stops_it` (two real models, a still, a title
+  card; Return · Esc · Return; runs to "ready"; a motion change drops only that clip's frames).
 - **Next:** step 4 Set from Viewer (orbit / pan in the Storyboard Viewer, `storyboard.motion.capture`);
   5 Apply to all. Opportunity: preload the next clip's model during playback (a new hero loads when
   its clip starts, so the first frames of a model clip are its still).

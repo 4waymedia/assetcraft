@@ -231,6 +231,17 @@ impl Camera {
         }
     }
 
+    /// Equal to within what a slider or a degrees ↔ radians round trip can tell apart, so an
+    /// amount set back onto a preset's value keeps the preset.
+    pub fn about_equal(self, other: Camera) -> bool {
+        const EPS: f32 = 1e-4;
+        (self.yaw - other.yaw).abs() <= EPS
+            && (self.pitch - other.pitch).abs() <= EPS
+            && (self.zoom - other.zoom).abs() <= EPS
+            && (self.pan[0] - other.pan[0]).abs() <= EPS
+            && (self.pan[1] - other.pan[1]).abs() <= EPS
+    }
+
     fn finite(self) -> bool {
         self.yaw.is_finite()
             && self.pitch.is_finite()
@@ -399,10 +410,12 @@ pub fn set_motion(board: &mut Storyboard, id: ClipId, edit: MotionEdit) -> Resul
         if !amount.valid_amount(kind) {
             return Err(MotionError::OutOfRange("amount"));
         }
-        if amount != m.amount {
+        // The same amount to within rounding (a slider's step, degrees ↔ radians) is no edit:
+        // the preset and its exact amount stay.
+        if !amount.about_equal(m.amount) {
             m.preset = MotionPreset::Custom;
+            m.amount = amount;
         }
-        m.amount = amount;
     }
     if let Some(ease) = edit.ease {
         if ease != m.ease {

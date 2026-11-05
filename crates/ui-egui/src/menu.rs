@@ -79,6 +79,8 @@ pub enum MenuAction {
     TogglePanel(Panel),
     /// Restore the default panel arrangement.
     ResetLayout,
+    /// View → Render Motion Cache (Storyboard mode; Return).
+    RenderCache,
     /// Help → Keyboard Shortcuts…
     Shortcuts,
     /// Help → About AssetCraft.
@@ -214,6 +216,20 @@ pub fn menus(nav: &Navigator) -> Vec<Menu> {
     if let Some(file) = out.first_mut() {
         file.entries.push(MenuEntry::Separator);
         file.entries.push(item("Exit", None, true, MenuAction::Exit));
+    }
+    if nav.session().mode() == Mode::Storyboard
+        && let Some(view) = out.iter_mut().find(|m| m.title == "View")
+    {
+        view.entries.push(MenuEntry::Separator);
+        let has_board = nav.session().storyboard().is_some();
+        view.entries.push(MenuEntry::Item {
+            label: "Render Motion Cache".into(),
+            shortcut: Some("Return"),
+            enabled: has_board,
+            checked: None,
+            tooltip: Some("Render every 3D clip's motion ahead of time, so Play is smooth from the first frame".into()),
+            action: MenuAction::RenderCache,
+        });
     }
     let mut window: Vec<MenuEntry> = Panel::TOGGLEABLE
         .iter()
@@ -530,6 +546,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
             dock::set_visible(nav, panel, !visible);
         }
         MenuAction::ResetLayout => dock::reset(nav),
+        MenuAction::RenderCache => crate::motion_view::toggle_render_job(nav),
         MenuAction::Shortcuts => nav.state.show_shortcuts = true,
         MenuAction::About => nav.state.show_about = true,
         MenuAction::BatchRename => crate::rename_dialog::open(nav),
