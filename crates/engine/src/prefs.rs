@@ -273,6 +273,9 @@ pub struct Prefs {
     pub working_folder: Option<PathBuf>,
     /// 3D preview settings (`view.model`).
     pub model: ModelPrefs,
+    /// Storyboards opened or saved, newest first (File › Open Recent; SF2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_storyboards: Vec<PathBuf>,
 }
 
 /// Largest panel-layout JSON accepted by `view.panels` and restored from disk.
@@ -321,6 +324,14 @@ impl Prefs {
         prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
         prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
         prefs.working_folder = root.get("working_folder").and_then(Value::as_str).map(PathBuf::from);
+        if let Some(Value::Array(items)) = root.get("recent_storyboards") {
+            prefs.recent_storyboards = items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(PathBuf::from)
+                .take(crate::document_cmd::MAX_RECENT)
+                .collect();
+        }
         if let Some(Value::Object(model)) = root.get("model") {
             let m = &mut prefs.model;
             set_field(&mut m.turntable, model.get("turntable"));
@@ -340,6 +351,7 @@ impl Prefs {
         let mut clean = self.clone();
         clean.favorites.retain(|p| p.to_str().is_some());
         clean.recent.retain(|p| p.to_str().is_some());
+        clean.recent_storyboards.retain(|p| p.to_str().is_some());
         clean.last_folder = clean.last_folder.filter(|p| p.to_str().is_some());
         clean.music_folder = clean.music_folder.filter(|p| p.to_str().is_some());
         clean.working_folder = clean.working_folder.filter(|p| p.to_str().is_some());

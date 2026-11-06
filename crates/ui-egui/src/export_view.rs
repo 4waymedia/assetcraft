@@ -181,6 +181,9 @@ fn plan_path(nav: &Navigator, ext: &str) -> String {
         .document()
         .and_then(|d| d.parent().map(std::path::Path::to_path_buf))
         .or_else(|| nav.session.storyboards_folder())
+        // The engine wants an absolute path even for a dry run (a fake home in tests isn't one
+        // on Windows).
+        .filter(|d| d.is_absolute())
         .unwrap_or_else(std::env::temp_dir);
     dir.join(suggested_name(nav, ext)).to_string_lossy().into_owned()
 }
@@ -276,6 +279,23 @@ pub(crate) fn progress(nav: &Navigator, ui: &Ui, frame: Rect) {
     let band = Rect::from_min_size(frame.left_top() + vec2(8.0, 8.0), galley.size() + vec2(12.0, 4.0));
     painter.rect_filled(band, 2, Color32::from_black_alpha(150));
     painter.galley(band.min + vec2(6.0, 2.0), galley, Color32::from_gray(0xe0));
+}
+
+/// The status bar's part while an export runs (every view, both modes — the Viewer's bar is
+/// only seen in the Strip view): a small bar and "Exporting n / m frames · Esc stops".
+pub(crate) fn status(nav: &Navigator, ui: &mut Ui) {
+    let p = nav.session.export_progress();
+    if !p.running() {
+        return;
+    }
+    ui.separator();
+    ui.add(egui::ProgressBar::new(p.fraction()).desired_width(120.0).desired_height(10.0));
+    let text = match p.stage {
+        ExportStage::Rendering => format!("Exporting {} / {} frames · Esc stops", p.frames_done, p.frames_total),
+        ExportStage::Audio => "Exporting · the song".to_owned(),
+        _ => "Exporting · writing the file".to_owned(),
+    };
+    ui.label(text);
 }
 
 fn quality_word(qp: u8) -> &'static str {

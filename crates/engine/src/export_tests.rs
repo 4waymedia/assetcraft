@@ -119,7 +119,7 @@ fn the_plan_is_checked_before_anything_runs() {
     assert_eq!(plan["container"], "mov");
     assert_eq!(plan["frames"], 90, "3 s at 30 fps");
     assert_eq!(plan["audio"], false);
-    assert!(plan["estimatedBytes"].as_u64().unwrap() > 100_000);
+    assert!(plan["estimatedBytes"].as_u64().unwrap() > 50_000, "{plan}");
     assert!(!Path::new(&path).exists());
     assert_eq!(s.export_progress().stage, ExportStage::Idle);
     // Defaults.
@@ -152,6 +152,14 @@ fn a_small_cut_exports_to_a_playable_file_and_reports() {
     let status = run(&mut s, "storyboard.exportStatus", json!({}));
     assert_eq!(status["stage"], "done");
     assert_eq!(status["problems"].as_array().unwrap().len(), 0);
+    // The next estimate for the same settings is what this export measured.
+    let again = run(
+        &mut s,
+        "storyboard.exportVideo",
+        json!({ "path": path.to_string_lossy(), "size": { "width": 320, "height": 176 }, "fps": 24, "quality": 30, "dryRun": true }),
+    );
+    let est = again["estimatedBytes"].as_u64().unwrap();
+    assert!((est as i64 - bytes.len() as i64).abs() <= 2, "learned: {est} vs {}", bytes.len());
     assert_eq!(run(&mut s, "storyboard.state", json!({}))["export"]["stage"], "done");
     // Exists now: refused without overwrite, replaced with it (as .mov).
     assert!(matches!(

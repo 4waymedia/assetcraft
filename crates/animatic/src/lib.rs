@@ -222,8 +222,20 @@ impl Compositor {
         let Some(model) = self.model(path) else { return };
         let view = cam.map_or_else(View::default, orbit_view);
         draw::fill(out, GROUND);
-        match render_view(&model, view, self.width, self.height, false, &self.look) {
-            Ok(image) => draw::over(out, &Rgba { width: image.width, height: image.height, data: image.rgba }, 0, 0),
+        // The viewer's renderer caps a frame at `PREVIEW_MAX_SIDE` (2048) a side: a 4K export
+        // renders at the capped size *in the frame's aspect* and is scaled to fill the frame
+        // (finding SF5-E2, Paul 2026-11-06: "the 3d render is no longer centered and is on the
+        // left side" — the 2048 × 1080 picture had been dropped at the top-left).
+        let (rw, rh) = render_size(self.width, self.height);
+        match render_view(&model, view, rw, rh, false, &self.look) {
+            Ok(image) => {
+                let picture = Rgba { width: image.width, height: image.height, data: image.rgba };
+                if (picture.width, picture.height) == (self.width, self.height) {
+                    draw::over(out, &picture, 0, 0);
+                } else {
+                    draw::contain_window(out, &picture, [0.0, 0.0, 1.0, 1.0]);
+                }
+            }
             Err(e) => {
                 self.failed.insert(path.to_path_buf(), e.to_string());
             }
@@ -376,6 +388,21 @@ fn progress(clip: &Clip, elapsed: f64) -> f32 {
         return 0.0;
     }
     (elapsed / clip.duration.as_secs_f64()).clamp(0.0, 1.0) as f32
+}
+
+/// The size a model frame is rendered at: the frame itself when the renderer takes it, else
+/// the largest size of the same aspect within [`PREVIEW_MAX_SIDE`] (the picture is then scaled
+/// up to the frame).
+pub fn render_size(width: u32, height: u32) -> (u32, u32) {
+    let cap = assetcraft_thumbs::model::PREVIEW_MAX_SIDE;
+    if width <= cap && height <= cap {
+        return (width.max(1), height.max(1));
+    }
+    let scale = f64::from(cap) / f64::from(width.max(height).max(1));
+    let w = ((f64::from(width) * scale).round() as u32).clamp(1, cap);
+    let h = ((f64::from(height) * scale).round() as u32).clamp(1, cap);
+    // Even sides keep chroma subsampling happy downstream.
+    (w & !1, h & !1)
 }
 
 /// A still's window at a camera: `[u0, v0, u1, v1]` of the picture, kept inside it

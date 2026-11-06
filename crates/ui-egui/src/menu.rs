@@ -36,6 +36,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // The video export's progress and Esc live in the Viewer (`export_view`).
     "storyboard.exportStatus",
     "storyboard.exportCancel",
+    // Open Recent is built from the session's list under the Open item.
+    "storyboard.recent",
     "storyboard.select",
     "storyboard.recut",
     "storyboard.text.kind",
@@ -88,6 +90,10 @@ pub enum MenuAction {
     Shortcuts,
     /// Help → About AssetCraft.
     About,
+    /// File → Open Storyboard… (Ctrl+O): the native picker, then `storyboard.open`.
+    Open,
+    /// File → Open Recent ▸ item: `storyboard.open` on that file.
+    OpenRecent(std::path::PathBuf),
     /// File → Save Storyboard (Ctrl+S): the document's own file, or the Save As picker.
     Save,
     /// File → Save Storyboard As…: the native picker, then `storyboard.save`.
@@ -472,6 +478,27 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             item("New Storyboard", None, true, cmd(spec.id, json!({}))),
             item("New Storyboard from Sample", None, true, cmd(spec.id, json!({ "sample": true }))),
         ],
+        "storyboard.open" => {
+            let recent: Vec<MenuEntry> = s
+                .recent_storyboards()
+                .iter()
+                .map(|p| {
+                    item(
+                        assetcraft_engine::document_cmd::document_name(p),
+                        None,
+                        true,
+                        MenuAction::OpenRecent(p.clone()),
+                    )
+                })
+                .collect();
+            let mut out = vec![item(format!("{}…", spec.label), spec.shortcut, true, MenuAction::Open)];
+            out.push(if recent.is_empty() {
+                item("Open Recent", None, false, MenuAction::NotYet)
+            } else {
+                MenuEntry::Sub { label: "Open Recent".into(), entries: recent }
+            });
+            out
+        }
         // Save is enabled whenever a storyboard is open: without a document it is Save As.
         "storyboard.save" => vec![item(spec.label, spec.shortcut, s.storyboard().is_some(), MenuAction::Save)],
         "storyboard.saveAs" => {
@@ -579,6 +606,12 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         MenuAction::About => nav.state.show_about = true,
         MenuAction::BatchRename => crate::rename_dialog::open(nav),
         MenuAction::NotYet => {}
+        MenuAction::Open => {
+            crate::document_view::open(nav);
+        }
+        MenuAction::OpenRecent(path) => {
+            crate::document_view::open_path(nav, &path);
+        }
         MenuAction::Save => {
             crate::document_view::save(nav);
         }

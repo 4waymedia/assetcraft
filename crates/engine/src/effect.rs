@@ -185,6 +185,7 @@ mod tests {
                 "storyboard.cueMaps",
                 "storyboard.exportStatus",
                 "storyboard.preview",
+                "storyboard.recent",
                 "storyboard.state",
                 "storyboard.tracks",
                 "track.analyze",

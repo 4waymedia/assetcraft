@@ -142,3 +142,99 @@ fn paths_are_checked_before_anything_is_written() {
     }
     assert_eq!(s.storyboards_folder(), Some(PathBuf::from("/home/paul/AssetCraft/Storyboards")));
 }
+
+#[test]
+fn open_reads_a_saved_storyboard_back_as_one_undo_step_and_remembers_it() {
+    let dir = temp("open");
+    let mut s = real();
+    run(&mut s, "storyboard.new", json!({ "sample": true }));
+    let still =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments/soul_light_forest.jpg");
+    let still = still.canonicalize().unwrap();
+    run(&mut s, "storyboard.place", json!({ "asset": still.to_string_lossy() }));
+    let saved_board = s.storyboard().unwrap().clone();
+    let path = dir.join("Reaper.storyboard.json");
+    run(&mut s, "storyboard.saveAs", json!({ "path": path.to_string_lossy() }));
+    assert_eq!(s.recent_storyboards(), std::slice::from_ref(&path), "saving remembers the file");
+
+    // A different board is open; Open replaces it, undo brings it back.
+    run(&mut s, "storyboard.new", json!({ "name": "Scratch" }));
+    run(&mut s, "app.mode", json!({ "mode": "organizer" }));
+    let out = run(&mut s, "storyboard.open", json!({ "path": path.to_string_lossy() }));
+    assert_eq!(out["opened"].as_str().map(PathBuf::from), Some(path.clone()));
+    assert_eq!(out["missing"].as_array().map(Vec::len), Some(0));
+    assert_eq!(out["dirty"], false);
+    assert_eq!(s.storyboard(), Some(&saved_board));
+    assert_eq!(s.document(), Some(path.as_path()));
+    assert_eq!(s.mode(), Mode::Storyboard, "Open switches to Storyboard mode");
+    assert!(out["message"].as_str().unwrap().starts_with("Opened "));
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().name, "Scratch", "one undo step");
+    run(&mut s, "storyboard.redo", json!({}));
+    assert_eq!(s.storyboard(), Some(&saved_board));
+
+    // Recent: newest first, no duplicates, capped.
+    let recent = run(&mut s, "storyboard.recent", json!({}));
+    assert_eq!(recent["recent"].as_array().map(Vec::len), Some(1));
+    assert_eq!(recent["recent"][0]["name"], "Reaper");
+    assert_eq!(recent["recent"][0]["exists"], true);
+    for i in 0..12 {
+        let p = dir.join(format!("B{i}.storyboard.json"));
+        run(&mut s, "storyboard.saveAs", json!({ "path": p.to_string_lossy() }));
+    }
+    assert_eq!(s.recent_storyboards().len(), crate::document_cmd::MAX_RECENT);
+    assert!(s.recent_storyboards()[0].ends_with("B11.storyboard.json"));
+    run(&mut s, "storyboard.open", json!({ "path": path.to_string_lossy() }));
+    assert_eq!(s.recent_storyboards()[0], path);
+    assert_eq!(s.recent_storyboards().iter().filter(|p| **p == path).count(), 1);
+    assert_eq!(s.prefs().recent_storyboards, s.recent_storyboards(), "saved in prefs");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn open_refuses_bad_files_and_reports_missing_assets() {
+    let dir = temp("open-bad");
+    let mut s = real();
+    let abs = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    // Refusals change nothing.
+    assert!(matches!(s.execute("storyboard.open", &json!({})), Err(CmdError::BadParams(_))));
+    assert!(matches!(
+        s.execute("storyboard.open", &json!({ "path": "x.storyboard.json" })),
+        Err(CmdError::BadParams(_))
+    ));
+    assert!(matches!(s.execute("storyboard.open", &json!({ "path": abs("notes.json") })), Err(CmdError::BadParams(_))));
+    assert!(matches!(
+        s.execute("storyboard.open", &json!({ "path": abs("gone.storyboard.json") })),
+        Err(CmdError::Unavailable(_))
+    ));
+    std::fs::write(dir.join("junk.storyboard.json"), b"{ not json").unwrap();
+    assert!(matches!(
+        s.execute("storyboard.open", &json!({ "path": abs("junk.storyboard.json") })),
+        Err(CmdError::Unavailable(_))
+    ));
+    let newer = format!(
+        r#"{{"version": {}, "name": "x", "scenes": [], "clips": []}}"#,
+        assetcraft_storyboard::FORMAT_VERSION + 1
+    );
+    std::fs::write(dir.join("newer.storyboard.json"), newer).unwrap();
+    let err = s.execute("storyboard.open", &json!({ "path": abs("newer.storyboard.json") })).unwrap_err();
+    assert!(err.to_string().contains("newer AssetCraft"), "{err}");
+    std::fs::write(dir.join("huge.storyboard.json"), vec![b' '; (16 << 20) + 1]).unwrap();
+    let err = s.execute("storyboard.open", &json!({ "path": abs("huge.storyboard.json") })).unwrap_err();
+    assert!(err.to_string().contains("larger than"), "{err}");
+    assert!(s.storyboard().is_none() && s.recent_storyboards().is_empty(), "nothing opened, nothing remembered");
+
+    // Assets that moved are reported, the board keeps them.
+    run(&mut s, "storyboard.new", json!({ "sample": true }));
+    let gone = dir.join("moved.png");
+    run(&mut s, "storyboard.place", json!({ "asset": gone.to_string_lossy() }));
+    let path = dir.join("Moved.storyboard.json");
+    run(&mut s, "storyboard.saveAs", json!({ "path": path.to_string_lossy() }));
+    let out = run(&mut s, "storyboard.open", json!({ "path": path.to_string_lossy() }));
+    assert_eq!(out["missing"].as_array().unwrap(), &[json!(gone.to_string_lossy())]);
+    assert!(out["message"].as_str().unwrap().ends_with("1 asset is missing"));
+    assert!(s.storyboard().unwrap().clips.iter().any(|c| c.asset_ids.iter().any(|a| a.0 == gone.to_string_lossy())));
+    assert_eq!(crate::document_cmd::document_name(&path), "Moved");
+    assert_eq!(crate::document_cmd::document_name(Path::new("/x/plain.json")), "plain.json");
+    let _ = std::fs::remove_dir_all(&dir);
+}

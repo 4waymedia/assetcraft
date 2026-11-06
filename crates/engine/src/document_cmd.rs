@@ -1,9 +1,18 @@
-//! The storyboard as a file: Save and Save As (SF1; plan step 7, decision D3: AssetCraft's own
-//! files only, written atomically, never overwriting a different file without being told).
+//! The storyboard as a file: Save, Save As, Open and Recent (SF1–SF2; plan step 7, decision
+//! D3: AssetCraft's own files only, written atomically, never overwriting a different file
+//! without being told; everything read from disk is hostile until `Storyboard::from_json_with`
+//! has validated it).
 //!
 //! - `storyboard.save {path?, overwrite?}`: write the open storyboard to its own document (no
 //!   `path`), or to `path` (Save As). A storyboard that has never been saved needs a `path`.
 //! - `storyboard.saveAs {path, overwrite?}`: the same with `path` required.
+//! - `storyboard.open {path}`: read a `.storyboard.json` (at most the document limit), validate
+//!   it, and make it the open storyboard — one undo step, like New (D-SF5), so the board it
+//!   replaces is not lost; a file from a newer AssetCraft is refused; assets that are no longer
+//!   where the file says are reported per clip and the board keeps them (the Viewer shows them
+//!   empty). The file goes to the top of the recent list.
+//! - `storyboard.recent {}`: the last [`MAX_RECENT`] storyboards opened or saved, newest first,
+//!   with whether each still exists.
 //!
 //! Rules (D-SF1): the file is `<name>.storyboard.json` ([`SUFFIX`]); the folder is the user's
 //! choice (the UI offers `<working folder>/Storyboards/`, [`STORYBOARDS_DIR`], created on first
@@ -17,6 +26,7 @@
 //! so undoing back to the saved state is clean again and a no-op edit never marks the document.
 
 use crate::{CmdError, CmdResult, Session};
+use assetcraft_storyboard::{BoardError, FORMAT_VERSION, Limits, Storyboard};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -27,6 +37,8 @@ pub const SUFFIX: &str = ".storyboard.json";
 pub const STORYBOARDS_DIR: &str = "Storyboards";
 /// Longest path accepted.
 const MAX_PATH: usize = 4096;
+/// Storyboards remembered for Open Recent.
+pub const MAX_RECENT: usize = 10;
 
 impl Session {
     /// The open storyboard's file, once it has been saved (or opened).
@@ -46,6 +58,11 @@ impl Session {
     /// Where Save As starts: `<working folder>/Storyboards` (may not exist yet).
     pub fn storyboards_folder(&self) -> Option<PathBuf> {
         self.working_folder().map(|w| w.join(STORYBOARDS_DIR))
+    }
+
+    /// The storyboards opened or saved most recently, newest first (saved in prefs).
+    pub fn recent_storyboards(&self) -> &[PathBuf] {
+        &self.recent_storyboards
     }
 
     /// `<working folder>/Storyboards`, created when missing (AssetCraft's own folder, like
@@ -123,6 +140,7 @@ fn save_to(s: &mut Session, path: PathBuf, overwrite: bool) -> CmdResult {
         .map_err(|e| CmdError::Unavailable(format!("could not save {}: {e}", path.display())))?;
     s.boards.saved = Some(board.clone());
     s.boards.document = Some(path.clone());
+    remember(s, &path);
     let mut out = crate::storyboard::state(s);
     if let Value::Object(map) = &mut out {
         map.insert("path".into(), json!(path.to_string_lossy()));
@@ -130,6 +148,94 @@ fn save_to(s: &mut Session, path: PathBuf, overwrite: bool) -> CmdResult {
         map.insert("message".into(), json!(format!("Saved {}", path.display())));
     }
     Ok(out)
+}
+
+/// Put `path` at the top of the recent list.
+fn remember(s: &mut Session, path: &Path) {
+    s.recent_storyboards.retain(|p| !crate::paths::same_path(p, path));
+    s.recent_storyboards.insert(0, path.to_path_buf());
+    s.recent_storyboards.truncate(MAX_RECENT);
+}
+
+/// `storyboard.open {path}` → the state + `{opened, missing: [path…], message}`.
+pub(crate) fn sb_open(s: &mut Session, p: &Value) -> CmdResult {
+    let path = p.get("path").map(path_param).unwrap_or_else(|| Err(CmdError::BadParams("need `path`".into())))?;
+    let limits = Limits::default();
+    let bytes = s
+        .services
+        .read_head(&path, limits.max_bytes + 1)
+        .map_err(|e| CmdError::Unavailable(format!("could not open {}: {e}", path.display())))?;
+    let board = Storyboard::from_json_with(&bytes, &limits).map_err(|e| {
+        let why = match e {
+            BoardError::NewerVersion(v) => {
+                format!("it was saved by a newer AssetCraft (format {v}, this one reads {FORMAT_VERSION})")
+            }
+            BoardError::TooLarge(_) => format!("it is larger than {} MiB", limits.max_bytes >> 20),
+            other => other.to_string(),
+        };
+        CmdError::Unavailable(format!("could not open {}: {why}", path.display()))
+    })?;
+    // Assets the file names that are not where it says (the board keeps them; the Viewer and
+    // the export show those clips empty).
+    let mut missing: Vec<String> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let names = board.clips.iter().flat_map(|c| c.asset_ids.iter()).chain(board.track.iter().map(|t| &t.id));
+    for id in names {
+        let asset = Path::new(id.0.as_str());
+        if !asset.is_absolute() || !seen.insert(id.0.clone()) {
+            continue;
+        }
+        if s.services.entry(asset).is_err() {
+            missing.push(id.0.clone());
+        }
+    }
+    s.boards.checkpoint();
+    s.boards.selected = board.clips.first().map(|c| c.id);
+    s.boards.generated = None;
+    s.boards.board = Some(board);
+    s.boards.mode = crate::Mode::Storyboard;
+    s.boards.view = crate::storyboard::BoardView::Strip;
+    s.boards.transport = crate::storyboard::Transport::default();
+    mark_saved(s, Some(path.clone()));
+    remember(s, &path);
+    s.audio_stop();
+    let message = match missing.len() {
+        0 => format!("Opened {}", path.display()),
+        1 => format!("Opened {} · 1 asset is missing", path.display()),
+        n => format!("Opened {} · {n} assets are missing", path.display()),
+    };
+    let mut out = crate::storyboard::state(s);
+    if let Value::Object(map) = &mut out {
+        map.insert("opened".into(), json!(path.to_string_lossy()));
+        map.insert("missing".into(), json!(missing));
+        map.insert("message".into(), json!(message));
+    }
+    Ok(out)
+}
+
+/// `storyboard.recent {}` → `{recent: [{path, name, exists}]}`.
+pub(crate) fn sb_recent(s: &mut Session, _p: &Value) -> CmdResult {
+    let recent: Vec<Value> = s
+        .recent_storyboards
+        .iter()
+        .map(|p| {
+            json!({
+                "path": p.to_string_lossy(),
+                "name": document_name(p),
+                "exists": s.services.entry(p).is_ok(),
+            })
+        })
+        .collect();
+    Ok(json!({ "recent": recent }))
+}
+
+/// A document's display name: the file name without [`SUFFIX`].
+pub fn document_name(path: &Path) -> String {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match name.len().checked_sub(SUFFIX.len()) {
+        Some(cut) if name[cut..].eq_ignore_ascii_case(SUFFIX) => name[..cut].to_owned(),
+        _ => name,
+    }
 }
 
 /// Write `bytes` to `path` whole or not at all: a temp file in the same folder, flushed to disk,

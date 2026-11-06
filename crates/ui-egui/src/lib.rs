@@ -376,6 +376,9 @@ impl Navigator {
         if let Some(id) = focused {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
+            document_view::open(self);
+        }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
             let (undo, redo, save, space, delete, enter, escape) = ctx.input_mut(|i| {
                 (
@@ -465,6 +468,7 @@ impl Navigator {
                     format!("Truncated: showing the first {} entries", assetcraft_engine::MAX_ITEMS),
                 );
             }
+            export_view::status(self, ui);
             let skipped = self.session.skipped();
             if skipped > 0 {
                 ui.separator();

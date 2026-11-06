@@ -491,6 +491,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::BatchRename => {
                 used.insert("file.renamePreview");
             }
+            MenuAction::Open | MenuAction::OpenRecent(_) => {
+                used.insert("storyboard.open");
+            }
             MenuAction::Save => {
                 used.insert("storyboard.save");
             }
@@ -937,5 +940,50 @@ fn export_video_opens_the_settings_window_runs_the_job_and_shows_its_progress() 
     assert!(path.exists());
     assert!(nav.state.export_seen.is_none(), "the end was noticed");
     assert!(nav.session().enabled("storyboard.exportCancel").is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn open_storyboard_reads_a_saved_file_and_open_recent_lists_it() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-sf2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx = Context::default();
+    // The real file system: Save writes a real file that Open reads back through `Services`.
+    let (mut nav, _) = navigator(assetcraft_fs::RealFs, Prefs::default());
+    frame(&ctx, &mut nav);
+    // Open is always offered; Open Recent is greyed while there is nothing recent.
+    assert!(matches!(find_item(&nav, "File", "Open Storyboard…"), MenuEntry::Item { enabled: true, .. }));
+    assert!(matches!(find_item(&nav, "File", "Open Recent"), MenuEntry::Item { enabled: false, .. }));
+
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let name = nav.session().storyboard().unwrap().name.clone();
+    let path = dir.join("Saved.storyboard.json");
+    nav.state.test_save_path = Some(path.clone());
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Save Storyboard")));
+    nav.run("storyboard.new", json!({ "name": "Other" }));
+    frame(&ctx, &mut nav);
+
+    // Ctrl+O through the stubbed picker opens the file.
+    press(&ctx, &mut nav, Key::O, Modifiers::COMMAND);
+    assert_eq!(nav.session().storyboard().map(|b| b.name.as_str()), Some(name.as_str()), "{:?}", nav.message());
+    assert_eq!(nav.session().document(), Some(path.as_path()));
+    assert!(nav.message().is_some_and(|m| m.starts_with("Opened ")), "{:?}", nav.message());
+
+    // From the Organizer, the menu item opens it and lands in Storyboard mode.
+    nav.run("storyboard.new", json!({ "name": "Other" }));
+    nav.run("app.mode", json!({ "mode": "organizer" }));
+    frame(&ctx, &mut nav);
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Open Storyboard…")));
+    assert_eq!(nav.session().storyboard().map(|b| b.name.as_str()), Some(name.as_str()));
+    assert_eq!(nav.session().mode(), assetcraft_engine::Mode::Storyboard);
+
+    // Open Recent ▸ Saved: the submenu item opens it again (after another New).
+    nav.run("storyboard.new", json!({ "name": "Third" }));
+    frame(&ctx, &mut nav);
+    let recent = find_item(&nav, "File", "Saved");
+    assert!(matches!(&recent, MenuEntry::Item { action: MenuAction::OpenRecent(p), .. } if *p == path), "{recent:?}");
+    assert!(nav.activate(&ctx, &recent));
+    assert_eq!(nav.session().storyboard().map(|b| b.name.as_str()), Some(name.as_str()));
     let _ = std::fs::remove_dir_all(&dir);
 }

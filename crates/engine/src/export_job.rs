@@ -35,8 +35,10 @@ pub const FRAME_RATES: [u32; 5] = [24, 25, 30, 50, 60];
 pub const QUALITY_RANGE: (u8, u8) = (16, 36);
 /// Longest Cut exported, in seconds (the encoder's frame cap at 60 fps is higher).
 pub const MAX_SECONDS: f64 = 4.0 * 60.0 * 60.0;
-/// Rough bytes per second of 1080p24 at QP 24 (the spike), for the estimate.
-const ESTIMATE_BYTES_PER_SEC_1080P24: f64 = 1.1e6;
+/// Rough bytes per second of 1080p24 at QP 24 before any export has run. The spike's grainy
+/// plate gave 1.1 MB/s; Paul's first real Cut (2026-11-06: stills, cards, slow moves) came out
+/// 8× smaller than that, so this starts low and [`Exporter::rate`] learns from each export.
+const ESTIMATE_BYTES_PER_SEC_1080P24: f64 = 150_000.0;
 /// Audio is encoded at this rate at most (AAC-LC's common ceiling).
 const MAX_AUDIO_RATE: u32 = 48_000;
 
@@ -123,6 +125,9 @@ pub(crate) struct Exporter {
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Video bytes per second of 1080p24-equivalent at QP 24, measured on the last export that
+    /// finished, so the next estimate reflects this user's pictures.
+    rate: Arc<Mutex<Option<f64>>>,
 }
 
 fn lock(p: &Mutex<ExportProgress>) -> std::sync::MutexGuard<'_, ExportProgress> {
@@ -136,6 +141,11 @@ impl Exporter {
 
     fn running(&self) -> bool {
         lock(&self.progress).running()
+    }
+
+    /// The learned rate, if an export has finished.
+    fn rate(&self) -> Option<f64> {
+        *self.rate.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -153,6 +163,8 @@ impl Session {
 /// What one export does, checked before it starts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportPlan {
+    /// Bytes per second of 1080p24 at QP 24 the estimate uses (learned, or the default).
+    pub rate: f64,
     /// The file.
     pub path: PathBuf,
     /// `.mp4` or `.mov`, from the extension.
@@ -168,13 +180,18 @@ pub struct ExportPlan {
 }
 
 impl ExportPlan {
-    /// A rough file size, from the spike's numbers scaled by pixels, rate and QP.
-    pub fn estimated_bytes(&self) -> u64 {
+    /// How the settings scale the 1080p24 / QP 24 rate: pixels, the square root of the frame
+    /// rate (frames repeat more at higher rates), a QP step of 6 halving the size.
+    fn scale(&self) -> f64 {
         let px = f64::from(self.settings.width) * f64::from(self.settings.height) / (1920.0 * 1080.0);
         let rate = f64::from(self.settings.fps) / 24.0;
         let qp = 2f64.powf((24.0 - f64::from(self.settings.qp)) / 6.0);
-        (ESTIMATE_BYTES_PER_SEC_1080P24 * px * rate.sqrt() * qp * self.seconds
-            + if self.audio { 20_000.0 * self.seconds } else { 0.0 }) as u64
+        px * rate.sqrt() * qp
+    }
+
+    /// A rough file size: the learned (or default) rate scaled by the settings, plus the song.
+    pub fn estimated_bytes(&self) -> u64 {
+        (self.rate * self.scale() * self.seconds + if self.audio { 20_000.0 * self.seconds } else { 0.0 }) as u64
     }
 
     fn json(&self) -> Value {
@@ -262,7 +279,8 @@ pub(crate) fn plan(s: &Session, p: &Value) -> Result<ExportPlan, CmdError> {
     }
     let frames = (seconds * f64::from(fps)).ceil() as usize;
     let audio = board.track.as_ref().is_some_and(|t| Path::new(&t.id.0).is_absolute());
-    Ok(ExportPlan { path, container, settings, frames, seconds, audio })
+    let rate = s.exporter.rate().unwrap_or(ESTIMATE_BYTES_PER_SEC_1080P24);
+    Ok(ExportPlan { rate, path, container, settings, frames, seconds, audio })
 }
 
 fn flag(p: &Value, name: &str) -> bool {
@@ -306,6 +324,7 @@ pub(crate) fn sb_export_video(s: &mut Session, p: &Value) -> CmdResult {
         decode: s.decode_options(),
         progress: Arc::clone(&s.exporter.progress),
         cancel: Arc::clone(&s.exporter.cancel),
+        rate: Arc::clone(&s.exporter.rate),
     };
     s.exporter.cancel.store(false, Ordering::SeqCst);
     *lock(&s.exporter.progress) = ExportProgress {
@@ -380,6 +399,7 @@ struct Job {
     decode: assetcraft_thumbs::DecodeOptions,
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
+    rate: Arc<Mutex<Option<f64>>>,
 }
 
 enum Stop {
@@ -395,6 +415,13 @@ impl Job {
         pr.elapsed_secs = started.elapsed().as_secs_f64();
         match outcome {
             Ok((bytes, problems)) => {
+                // Learn this user's rate for the next estimate (video bytes only).
+                let audio_bytes = if self.plan.audio { 20_000.0 * self.plan.seconds } else { 0.0 };
+                let scale = self.plan.scale() * self.plan.seconds;
+                if scale > 0.0 && bytes as f64 > audio_bytes {
+                    *self.rate.lock().unwrap_or_else(PoisonError::into_inner) =
+                        Some((bytes as f64 - audio_bytes) / scale);
+                }
                 pr.stage = ExportStage::Done;
                 pr.bytes = Some(bytes);
                 pr.frames_done = pr.frames_total;

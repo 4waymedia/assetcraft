@@ -213,6 +213,8 @@ pub struct Session {
     analyser: analyse_job::Analyser,
     /// The video export job (`storyboard.exportVideo`).
     exporter: export_job::Exporter,
+    /// Storyboards opened or saved, newest first (`storyboard.recent`; saved in prefs).
+    recent_storyboards: Vec<PathBuf>,
 }
 
 impl Session {
@@ -262,6 +264,7 @@ impl Session {
             analysis_dir: None,
             analyser: analyse_job::Analyser::default(),
             exporter: export_job::Exporter::default(),
+            recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -537,6 +540,7 @@ impl Session {
             preview_volume: Some((self.preview_volume * 100.0).round().clamp(0.0, 100.0) as u8),
             model: self.model,
             working_folder: self.working_folder.clone().filter(|p| p.to_str().is_some()),
+            recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
         }
     }
 

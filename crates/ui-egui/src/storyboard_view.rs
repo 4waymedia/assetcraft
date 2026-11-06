@@ -520,6 +520,7 @@ pub(crate) fn status(nav: &Navigator, ui: &mut Ui) {
             ui.label("No storyboard");
         }
     }
+    crate::export_view::status(nav, ui);
 }
 
 fn track_name(board: &Storyboard) -> String {

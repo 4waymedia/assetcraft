@@ -4,7 +4,9 @@
 //! this file only picks a path and asks.
 //!
 //! New Storyboard does not ask: replacing the open board is one undo step (`storyboard.new`
-//! checkpoints), so nothing is lost until the window closes (D-SF5).
+//! checkpoints), so nothing is lost until the window closes (D-SF5). Open (SF2) is the same:
+//! File › Open Storyboard… (Ctrl+O) picks a `.storyboard.json` and runs `storyboard.open`;
+//! File › Open Recent ▸ lists the session's recent storyboards.
 
 use crate::Navigator;
 #[cfg(all(not(test), not(target_arch = "wasm32")))]
@@ -69,6 +71,41 @@ fn pick_save_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
 #[cfg(all(not(test), target_arch = "wasm32"))]
 fn pick_save_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
     nav.notify("Saving to a file is not available on the web yet".to_owned());
+    None
+}
+
+/// File › Open Storyboard…: the native Open picker, then `storyboard.open`.
+pub(crate) fn open(nav: &mut Navigator) -> bool {
+    let Some(path) = pick_open_path(nav) else { return false };
+    open_path(nav, &path)
+}
+
+/// Open `path` (a recent item, the picker, or the command line).
+pub(crate) fn open_path(nav: &mut Navigator, path: &std::path::Path) -> bool {
+    nav.run("storyboard.open", json!({ "path": path.to_string_lossy() })).is_some()
+}
+
+#[cfg(test)]
+fn pick_open_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    nav.state.test_save_path.clone()
+}
+
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
+fn pick_open_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    let mut dialog = rfd::FileDialog::new().set_title("Open storyboard").add_filter("Storyboard", &["json"]);
+    let start = match nav.session.document().and_then(|d| d.parent().map(std::path::Path::to_path_buf)) {
+        Some(own) => Some(own),
+        None => nav.session.prepare_storyboards_folder(),
+    };
+    if let Some(dir) = start {
+        dialog = dialog.set_directory(dir);
+    }
+    dialog.pick_file()
+}
+
+#[cfg(all(not(test), target_arch = "wasm32"))]
+fn pick_open_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    nav.notify("Opening a file is not available on the web yet".to_owned());
     None
 }
 

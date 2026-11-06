@@ -235,6 +235,24 @@ static COMMANDS: &[CommandSpec] = &[
         crate::generate_cmd::sb_generate
     ),
     cmd!(
+        APP,
+        "storyboard.open",
+        "Open Storyboard",
+        "File",
+        Some("Ctrl+O"),
+        "{path} → state + {opened, missing: [asset…], message} (a `.storyboard.json` read with the document limits and validated; one undo step like New; a newer format is refused; assets no longer at their path are listed and kept)",
+        crate::document_cmd::sb_open
+    ),
+    cmd!(
+        READ,
+        "storyboard.recent",
+        "Open Recent",
+        "File",
+        None,
+        "{} → {recent: [{path, name, exists}]} (the last 10 storyboards opened or saved, newest first)",
+        crate::document_cmd::sb_recent
+    ),
+    cmd!(
         SAVE,
         "storyboard.save",
         "Save Storyboard",

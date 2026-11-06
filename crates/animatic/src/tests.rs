@@ -187,6 +187,39 @@ fn a_cut_is_drawn_by_time_and_bad_assets_are_reported_not_fatal() {
 }
 
 #[test]
+fn a_model_fills_a_frame_wider_than_the_renderer_cap() {
+    // 4K: the renderer caps at 2048 a side; the picture must still be centred and full-width.
+    assert_eq!(render_size(3840, 2160), (2048, 1152));
+    assert_eq!(render_size(1920, 1080), (1920, 1080));
+    assert_eq!(render_size(2160, 3840), (1152, 2048));
+    let mut c = compositor(3840, 2160);
+    let mut model = clip(9, ShotType::Ms, 2);
+    model.asset_ids.push(asset("props/models/soul_orb_icosphere.glb"));
+    let f = c.clip_frame(&model, f64::INFINITY);
+    // Pixels that aren't the ground, by column: the right half must have some, and the
+    // picture's horizontal centre of mass sits near the middle.
+    let mut sum_x = 0.0f64;
+    let mut n = 0.0f64;
+    let mut right = 0usize;
+    for y in (0..2160).step_by(8) {
+        for x in (0..3840).step_by(8) {
+            if f.get(x, y)[..3] != GROUND {
+                sum_x += f64::from(x);
+                n += 1.0;
+                if x >= 1920 {
+                    right += 1;
+                }
+            }
+        }
+    }
+    assert!(n > 100.0, "the model is drawn");
+    assert!(right > 0, "something on the right half");
+    let centre = sum_x / n;
+    assert!((centre - 1920.0).abs() < 300.0, "centre of mass at x = {centre:.0}");
+    assert!(c.problems().is_empty(), "{:?}", c.problems());
+}
+
+#[test]
 fn window_and_orbit_view_match_the_viewers() {
     assert_eq!(window(Camera::NONE), [0.0, 0.0, 1.0, 1.0]);
     let zoomed = window(Camera { zoom: 2.0, pan: [0.5, 0.0], ..Camera::NONE });
