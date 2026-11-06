@@ -11,6 +11,7 @@
 mod chrome;
 mod content;
 mod dock;
+mod document_view;
 mod folders;
 mod inspector;
 mod keys;
@@ -85,6 +86,11 @@ struct UiState {
     chrome_icon: Option<egui::TextureHandle>,
     show_about: bool,
     exit_requested: bool,
+    /// "Save changes?" before the window closes (SF1), while it is up.
+    unsaved: Option<document_view::Pending>,
+    /// What the Save picker "returns" in tests (no native dialog there).
+    #[cfg(test)]
+    test_save_path: Option<PathBuf>,
     menu_rects: Vec<(String, egui::Rect)>,
     /// Files whose header facts were drawn this frame (queued probes for others are dropped).
     probe_wanted: std::collections::HashSet<PathBuf>,
@@ -337,6 +343,8 @@ impl Navigator {
         }
         menu::windows(self, &ctx);
         rename_dialog::window(self, &ctx);
+        document_view::intercept_close(self, &ctx);
+        document_view::window(self, &ctx);
         if self.state.custom_chrome {
             chrome::resize_edges(&ctx);
         }
@@ -362,10 +370,11 @@ impl Navigator {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo, space, delete, enter, escape) = ctx.input_mut(|i| {
+            let (undo, redo, save, space, delete, enter, escape) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
+                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::S),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
                     // Delete or Backspace, with Shift too (it is held after a Shift+click range).
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
@@ -399,6 +408,9 @@ impl Navigator {
             }
             if redo && self.session.can_redo_storyboard() {
                 self.run("storyboard.redo", json!({}));
+            }
+            if save {
+                document_view::save(self);
             }
             return;
         }

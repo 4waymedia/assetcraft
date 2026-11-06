@@ -177,7 +177,11 @@ Stage 6 recipes all build on this. No new user-facing features, and still no wri
 `idempotent` flags and a derived `confirm`. Programs started for the user (`file.open`,
 `file.openIn`, `file.reveal`, `file.run`) are `write-app-state` + `confirm` with a note, until the
 suite adds an `external-process` class. AssetCraft also marks `file.run` `remoteAllowed: false`:
-it is refused on every remote door (`serve`, MCP, `--control`), whatever the grants.
+it is refused on every remote door (`serve`, MCP, `--control`), whatever the grants. The commands
+that write a user file are `storyboard.musicImport` (new files only) and, since SF1 (2026-11-06),
+`storyboard.save` / `storyboard.saveAs` (the storyboard's own document, written atomically; a
+different existing file only with `overwrite: true`): `write-user-file` + `write-app-state`, so
+remote callers confirm them (`Effects::COPY`, `Effects::SAVE`).
 
 **Features**
 - **Command effects:** each `CommandSpec` declares classes (`read`, `write-app-state`,

@@ -9,6 +9,7 @@ mod analyse_job;
 mod audio_out;
 mod commands;
 mod decode;
+pub mod document_cmd;
 pub mod effect;
 mod enabled;
 pub mod generate_cmd;
@@ -665,6 +666,8 @@ fn same_location(a: &Location, b: &Location) -> bool {
 mod analyse_job_tests;
 #[cfg(test)]
 mod audio_tests;
+#[cfg(test)]
+mod document_tests;
 #[cfg(test)]
 mod enabled_tests;
 #[cfg(test)]

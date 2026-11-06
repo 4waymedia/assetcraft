@@ -1,7 +1,7 @@
 //! Storyboard mode in the session: the open storyboard, the selected clip, and undo.
 //!
-//! Stage 4 step 2 (`docs/storyboard-plan.md`). One storyboard is open at a time and lives in
-//! memory; saving comes with step 7 (decision D3: AssetCraft's own files only). Every edit
+//! Stage 4 step 2 (`docs/storyboard-plan.md`). One storyboard is open at a time; saving it is
+//! `crate::document_cmd` (SF1, decision D3: AssetCraft's own files only). Every edit
 //! pushes the previous board onto a bounded undo stack, so `storyboard.undo` restores it whole.
 //! The rules themselves (Quick fill, Re-cut, limits) live in `assetcraft-storyboard`.
 
@@ -93,6 +93,10 @@ pub struct Boards {
     pub(crate) redo: Vec<Snapshot>,
     /// What the open storyboard was generated from (`storyboard.generate`).
     pub(crate) generated: Option<crate::generate_cmd::GeneratedFrom>,
+    /// The file the open storyboard was saved to or opened from (SF1).
+    pub(crate) document: Option<std::path::PathBuf>,
+    /// The board as that file holds it (or as created), for the dirty flag.
+    pub(crate) saved: Option<Storyboard>,
 }
 
 impl Boards {
@@ -202,6 +206,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // A new storyboard opens in the Strip view: Viewer, Content panel and timeline (Paul, 2026-10-16).
     s.boards.view = crate::storyboard::BoardView::Strip;
     s.boards.transport = Transport::default();
+    crate::document_cmd::mark_saved(s, None);
     s.audio_stop();
     Ok(state(s))
 }
@@ -542,6 +547,8 @@ pub(crate) fn state(s: &Session) -> Value {
         "selection": s.selected_clips().iter().map(|c| c.0).collect::<Vec<_>>(),
         "canUndo": !b.undo.is_empty(),
         "canRedo": !b.redo.is_empty(),
+        "document": s.document().map(|p| p.to_string_lossy()),
+        "dirty": s.storyboard_dirty(),
     })
 }
 

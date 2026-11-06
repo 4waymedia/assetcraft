@@ -85,6 +85,10 @@ pub enum MenuAction {
     Shortcuts,
     /// Help → About AssetCraft.
     About,
+    /// File → Save Storyboard (Ctrl+S): the document's own file, or the Save As picker.
+    Save,
+    /// File → Save Storyboard As…: the native picker, then `storyboard.save`.
+    SaveAs,
     /// File → Exit.
     Exit,
     /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
@@ -463,6 +467,11 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             item("New Storyboard", None, true, cmd(spec.id, json!({}))),
             item("New Storyboard from Sample", None, true, cmd(spec.id, json!({ "sample": true }))),
         ],
+        // Save is enabled whenever a storyboard is open: without a document it is Save As.
+        "storyboard.save" => vec![item(spec.label, spec.shortcut, s.storyboard().is_some(), MenuAction::Save)],
+        "storyboard.saveAs" => {
+            vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveAs)]
+        }
         "storyboard.delete" => {
             let storyboard = s.mode() == assetcraft_engine::Mode::Storyboard;
             simple(storyboard && !s.selected_clips().is_empty())
@@ -551,10 +560,13 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         MenuAction::About => nav.state.show_about = true,
         MenuAction::BatchRename => crate::rename_dialog::open(nav),
         MenuAction::NotYet => {}
-        MenuAction::Exit => {
-            nav.state.exit_requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        MenuAction::Save => {
+            crate::document_view::save(nav);
         }
+        MenuAction::SaveAs => {
+            crate::document_view::save_as(nav);
+        }
+        MenuAction::Exit => crate::document_view::request_exit(nav, ctx),
     }
 }
 

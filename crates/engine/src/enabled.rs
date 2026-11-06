@@ -44,7 +44,15 @@ impl Session {
             | "storyboard.text.style"
             | "storyboard.motion"
             | "storyboard.pause"
-            | "storyboard.seek" => self.board().map(|_| ()),
+            | "storyboard.seek"
+            | "storyboard.saveAs" => self.board().map(|_| ()),
+            "storyboard.save" => {
+                self.board()?;
+                if self.boards.document.is_none() {
+                    return Err("this storyboard has not been saved yet: give a `path` (Save As)".into());
+                }
+                Ok(())
+            }
             "storyboard.delete" => {
                 self.board()?;
                 if self.selected_clips().is_empty() {

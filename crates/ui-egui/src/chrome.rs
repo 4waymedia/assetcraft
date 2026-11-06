@@ -26,10 +26,12 @@ const LEADING: f32 = 8.0;
 /// The app icon, 32 px, drawn at 16.
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/32x32/apps/ai.storyteller.assetcraft.png");
 
-/// What the bar says after "AssetCraft": the storyboard's name, or the open folder.
+/// What the bar says after "AssetCraft": the storyboard's name (with ` •` while it has unsaved
+/// changes, SF1), or the open folder.
 fn context(nav: &Navigator) -> String {
     if nav.session.mode() == assetcraft_engine::Mode::Storyboard {
-        nav.session.storyboard().map(|b| b.name.clone()).filter(|n| !n.is_empty()).unwrap_or_default()
+        let name = nav.session.storyboard().map(|b| b.name.clone()).filter(|n| !n.is_empty()).unwrap_or_default();
+        if !name.is_empty() && nav.session.storyboard_dirty() { format!("{name} •") } else { name }
     } else {
         nav.session.location().label()
     }

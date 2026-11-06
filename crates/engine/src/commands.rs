@@ -235,6 +235,24 @@ static COMMANDS: &[CommandSpec] = &[
         crate::generate_cmd::sb_generate
     ),
     cmd!(
+        SAVE,
+        "storyboard.save",
+        "Save Storyboard",
+        "File",
+        Some("Ctrl+S"),
+        "{path?, overwrite?: bool} → {path, bytes, message} + state (no path: the document's own file; a never-saved storyboard needs one; `<name>.storyboard.json`, written to a temp file then renamed; a different existing file is refused without `overwrite`)",
+        crate::document_cmd::sb_save
+    ),
+    cmd!(
+        SAVE,
+        "storyboard.saveAs",
+        "Save Storyboard As",
+        "File",
+        None,
+        "{path, overwrite?: bool} → {path, bytes, message} + state (Save with the path required; the UI's picker starts in <working folder>/Storyboards)",
+        crate::document_cmd::sb_save_as
+    ),
+    cmd!(
         READ,
         "storyboard.cueMaps",
         "Cue Maps Here",

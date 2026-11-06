@@ -67,6 +67,77 @@ Video thumbnails (MP4, MOV, MKV/WebM, AVI) come from FilmCraft's `filmcraft-cli`
 separate program. Put it on `PATH` or set `ASSETCRAFT_FILMCRAFT_CLI` to its full path, then
 restart AssetCraft. Without it, videos show a type icon.
 
+## Video: decode, encode and export
+
+AssetCraft contains no video codec of its own. Decoding (poster frames, hover scrub) is
+FilmCraft's job through `filmcraft-cli` (above). Encoding — the storyboard's **Export Video…**
+(plan step SF5, `docs/storyboard-plan.md` § Files) — follows the same clean-room rules as
+everything else: no GPL/LGPL/AGPL code, nothing we can't take as source, and the choice is
+stated here so a build never surprises anyone.
+
+**Route 1 (decided, D-SF3): FilmCraft renders.** Export Video… writes the Cut as OTIO and opens
+it in FilmCraft, which does the encoding. One place in the suite encodes, no licence question
+in AssetCraft.
+
+**Route 2 (planned, D-SF6): a native export when FilmCraft isn't installed.** What we can write
+clean-room, and what plays where without installing anything (stock players: Windows Media
+Player / Movies & TV, macOS QuickTime Player, GNOME Videos on Linux; every browser plays H.264
+MP4 and AV1 WebM, Safari AV1 only on M3+):
+
+| Route | File                               | Encoder / muxer (licence)                                                   | Windows | macOS QuickTime           | Linux | 90 s 1080p24 animatic | Status      |
+|-------|------------------------------------|-----------------------------------------------------------------------------|---------|---------------------------|-------|-----------------------|-------------|
+| C′    | `.mov` / `.mp4` · H.264 · PCM      | `openh264` (Cisco OpenH264, BSD-2, C++ compiled in); muxer pure Rust        | yes     | yes                       | yes   | ≈ 45–70 MB + 16 MB    | recommended |
+| B     | `.mkv` / `.webm` · AV1 · FLAC/Opus | `rav1e` (BSD-2, Rust), `flacenc` (Apache-2) or libopus (BSD-3, C)           | Win 11  | macOS 14+ on M3+ only     | yes   | ≈ 25–45 MB            | option      |
+| A     | `.avi` · Motion-JPEG · PCM         | none new (`image` encodes JPEG; RIFF/AVI and WAV written here)              | yes     | yes                       | yes   | ≈ 400–500 MB          | fallback    |
+| C     | `.mp4` · H.264 · AAC via `ffmpeg`  | none linked: an `ffmpeg` found on `PATH` is run as a separate program       | yes     | yes                       | yes   | ≈ 45–70 MB            | optional    |
+| —     | H.264 bundled from `x264`          | GPL                                                                         |         |                           |       |                       | out         |
+| —     | VP8 / VP9 / HEVC                   | no clean-room encoder                                                       |         |                           |       |                       | out         |
+
+H.264 is the most *compatible* codec, AV1 the best *compressor* (≈ 30–50 % smaller at the same
+quality, slower to encode); Motion-JPEG stores every frame whole and is an order of magnitude
+larger. The one gap in an H.264 export is the audio track — there is no clean-room AAC encoder
+(`fdk-aac` is under Fraunhofer's own licence) — so the sound rides as PCM or Opus:
+
+| MP4/MOV · H.264 + …                         | Windows      | macOS QuickTime | Linux | Size for 90 s stereo        |
+|---------------------------------------------|--------------|-----------------|-------|-----------------------------|
+| PCM in `.mov` (what Canon/Sony cameras write) | yes          | yes             | yes   | +16 MB (16-bit 44.1 k)      |
+| PCM in `.mp4` (`ipcm`, ISO 23003-5)          | newer builds | macOS 14+       | yes   | +16 MB                      |
+| Opus (libopus, BSD-3, C)                     | yes          | no              | yes   | +1 MB                       |
+| AAC                                          | yes          | yes             | yes   | +1.5 MB — no clean encoder  |
+
+So the universal clean-room file is **`.mov` · H.264 · PCM**; `.mp4` with `ipcm` is the second
+flavour once QuickTime's floor is confirmed. Shipping an H.264 *encoder* in a public build is
+patent-pool territory (Via LA; most base patents have expired) — a check for the project owner,
+not something the code decides. Decode stays with FilmCraft either way.
+
+## 3D assets
+
+The viewer and the storyboard read 3D files in pure Rust (`crates/mesh`, no GPU, no threads;
+every count and size in the file is checked before anything is allocated — a bad file is an
+error, never a crash).
+
+| Format               | Read                                                                                     | Not read (reported, never guessed)                                     |
+|----------------------|------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
+| `.glb`               | meshes, node transforms, materials (base colour + textures), normals, `TEXCOORD_0`       | sparse accessors, Draco / meshopt compression, samplers, other UV sets |
+| `.gltf` + `.bin`     | as GLB; external buffers and images resolved beside the file                             | same                                                                   |
+| `.obj`               | positions, faces, per-face material slot                                                 | `vn` / `vt`, `.mtl`                                                    |
+| `.fbx` `.stl` `.usd` `.blend` | type icon only                                                                   | — (ModelCraft territory; `docs/modelcraft-plan.md`)                    |
+
+Limits (defaults, `assetcraft_mesh::Limits`): 2 M vertices, 2 M triangles, 128 MiB of buffers,
+16 MiB of glTF JSON, 96 MiB of encoded images. The Organizer's viewer draws up to 500 k
+triangles at full quality; above 120 k triangles a vertex-clustered *light copy* (≤ 60 k
+triangles, `crates/mesh/src/simplify.rs`) is built once and drives drags, the turntable and
+storyboard playback, so interaction never skips triangles. The Metadata panel shows
+**Polygons** and **Textures** once the model has loaded; `assetcraft-cli info <file>` and
+`asset.meshInfo` give the same facts headless (vertices, triangles, materials, images, bounds,
+warnings).
+
+What is drawn: smooth or flat shading under a three-point rig, bilinear base-colour textures,
+wireframe, normals and UV-checker modes, a choice of background. Not yet: the
+metallic-roughness map with an environment term, vertex colours, alpha (3D viewer V1, wgpu).
+In the storyboard a model clip carries a camera motion (turntable, push in, rise…) as data on
+the clip, rendered at full quality ahead of the playhead (Return builds the whole cache).
+
 ## What it will do
 
 | Verb      | Highlights                                                                                     |

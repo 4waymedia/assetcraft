@@ -99,6 +99,10 @@ impl Effects {
     /// never an overwrite, originals untouched; a repeat skips what's there. Not destructive, but it
     /// writes into a user-visible folder, so the derived rule asks remote callers to confirm.
     pub const COPY: Effects = Effects { classes: COPY_IN, ..Effects::READ };
+    /// Saves the open storyboard to its own file (`storyboard.save`, `storyboard.saveAs`): one
+    /// user file, written whole or not at all; a *different* existing file is never replaced
+    /// without `overwrite: true`. Saving again changes nothing, so it is idempotent.
+    pub const SAVE: Effects = Effects { classes: COPY_IN, ..Effects::READ };
 
     /// Read only: MCP `readOnlyHint`.
     pub fn read_only(&self) -> bool {
@@ -155,7 +159,15 @@ mod tests {
         assert_eq!(ids(|e| e.destructive), BTreeSet::from(["file.run"]));
         assert_eq!(
             ids(Effects::confirm),
-            BTreeSet::from(["file.open", "file.openIn", "file.reveal", "file.run", "storyboard.musicImport"])
+            BTreeSet::from([
+                "file.open",
+                "file.openIn",
+                "file.reveal",
+                "file.run",
+                "storyboard.musicImport",
+                "storyboard.save",
+                "storyboard.saveAs"
+            ])
         );
         assert_eq!(
             ids(Effects::read_only),
@@ -175,10 +187,11 @@ mod tests {
                 "track.summary"
             ])
         );
-        // Stage 2: the only user-file writer is the Copy import into the working folder (W1).
+        // User-file writers: the Copy import into the working folder (W1) and the storyboard's
+        // own document (SF1). Nothing else writes a user file yet.
         assert_eq!(
             ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
-            BTreeSet::from(["storyboard.musicImport"])
+            BTreeSet::from(["storyboard.musicImport", "storyboard.save", "storyboard.saveAs"])
         );
         assert!(ids(|e| e.classes.contains(&EffectClass::ExternalNetwork)).is_empty(), "no network before Stage 5");
     }

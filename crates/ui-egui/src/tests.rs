@@ -491,6 +491,12 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::BatchRename => {
                 used.insert("file.renamePreview");
             }
+            MenuAction::Save => {
+                used.insert("storyboard.save");
+            }
+            MenuAction::SaveAs => {
+                used.insert("storyboard.saveAs");
+            }
             MenuAction::ResetLayout
             | MenuAction::RenderCache
             | MenuAction::Shortcuts
@@ -830,4 +836,57 @@ fn the_apps_own_title_bar_moves_maximizes_and_closes_the_window_through_viewport
     let mut out = ctx.run_ui(input, |ui| plain.ui(ui));
     out.textures_delta.clear();
     assert!(plain.state.chrome_icon.is_none());
+}
+
+#[test]
+fn save_saves_the_storyboard_marks_the_title_and_asks_before_exit_with_unsaved_changes() {
+    use crate::document_view::Pending;
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-sf1-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx = Context::default();
+    let (nav, _) = navigator(fake(), Prefs::default());
+    let mut nav = nav.with_custom_chrome();
+    frame(&ctx, &mut nav);
+    // No storyboard: Save and Save As are greyed.
+    assert!(!nav.activate(&ctx, &find_item(&nav, "File", "Save Storyboard")));
+    assert!(!nav.activate(&ctx, &find_item(&nav, "File", "Save Storyboard As…")));
+
+    nav.run("storyboard.new", json!({ "sample": true }));
+    frame(&ctx, &mut nav);
+    let name = nav.session().storyboard().unwrap().name.clone();
+    assert_eq!(crate::chrome::caption_for_tests(&nav), format!("AssetCraft · {name}"), "a new storyboard is clean");
+    nav.run("storyboard.place", json!({ "asset": "/home/paul/Pictures/a.png" }));
+    frame(&ctx, &mut nav);
+    assert_eq!(crate::chrome::caption_for_tests(&nav), format!("AssetCraft · {name} •"), "edited: the dot");
+
+    // Save with no document goes through the picker (stubbed here), then writes the file.
+    let path = dir.join("Cut.storyboard.json");
+    nav.state.test_save_path = Some(path.clone());
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Save Storyboard")));
+    assert_eq!(nav.session().document(), Some(path.as_path()));
+    assert!(assetcraft_storyboard::Storyboard::from_json(&std::fs::read(&path).unwrap()).is_ok());
+    frame(&ctx, &mut nav);
+    assert_eq!(crate::chrome::caption_for_tests(&nav), format!("AssetCraft · {name}"), "saved: no dot");
+    assert!(nav.message().is_some_and(|m| m.starts_with("Saved ")), "{:?}", nav.message());
+
+    // Ctrl+S saves to the same file without the picker.
+    nav.state.test_save_path = None;
+    nav.run("storyboard.place", json!({ "asset": "/home/paul/Pictures/b.png" }));
+    assert!(nav.session().storyboard_dirty());
+    press(&ctx, &mut nav, Key::S, Modifiers::COMMAND);
+    assert!(!nav.session().storyboard_dirty(), "Ctrl+S saved");
+    assert_eq!(nav.session().document(), Some(path.as_path()));
+
+    // Exit with unsaved changes asks instead of closing; saving answers the question.
+    nav.run("storyboard.place", json!({ "asset": "/home/paul/Pictures/c.png" }));
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Exit")));
+    assert!(!nav.exit_requested(), "held for the prompt");
+    assert_eq!(nav.state.unsaved, Some(Pending::Exit));
+    frame(&ctx, &mut nav);
+    assert!(nav.state.unsaved.is_some(), "the prompt stays up while the board is dirty");
+    press(&ctx, &mut nav, Key::S, Modifiers::COMMAND);
+    frame(&ctx, &mut nav);
+    assert!(nav.state.unsaved.is_none() && nav.exit_requested(), "saved, so the close goes ahead");
+    let _ = std::fs::remove_dir_all(&dir);
 }
