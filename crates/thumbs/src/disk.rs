@@ -271,6 +271,23 @@ pub fn encode(thumb: &Thumb) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Decode any 8-bit RGBA PNG (an app asset, say) to `(width, height, rgba)`, bounded like the
+/// cache's own files; `None` for anything else.
+pub fn decode_rgba(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let limits = png::Limits { bytes: 2 * MAX_CACHE_FILE as usize };
+    let mut reader = png::Decoder::new_with_limits(Cursor::new(bytes), limits).read_info().ok()?;
+    let info = reader.info();
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    let (width, height) = (info.width, info.height);
+    let mut rgba = vec![0; reader.output_buffer_size()?];
+    let frame = reader.next_frame(&mut rgba).ok()?;
+    rgba.truncate(frame.buffer_size());
+    let expected = (width as usize).checked_mul(height as usize)?.checked_mul(4)?;
+    (width > 0 && height > 0 && rgba.len() == expected).then_some((width, height, rgba))
+}
+
 /// Decode a cache file (see [`encode`]); `None` for anything this cache didn't write.
 pub fn decode(bytes: &[u8]) -> Option<Thumb> {
     let limits = png::Limits { bytes: 2 * MAX_CACHE_FILE as usize };

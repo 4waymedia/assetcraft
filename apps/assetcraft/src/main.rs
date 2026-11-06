@@ -89,20 +89,24 @@ fn main() -> ExitCode {
     }
     // Watch your Cut plays the track on the default output device (opened on the first ▶).
     session.set_player(Arc::new(assetcraft_playback::DevicePlayer::new()));
-    let mut navigator = Navigator::new(session);
+    let mut navigator = Navigator::new(session).with_custom_chrome();
     if let Some(folder) = std::env::args_os().nth(1).map(PathBuf::from) {
         navigator.open_folder(&folder);
     }
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("AssetCraft")
-            .with_app_id(APP_ID)
-            .with_icon(app_icon())
-            .with_inner_size([1360.0, 860.0])
-            .with_min_inner_size([720.0, 420.0]),
-        ..eframe::NativeOptions::default()
-    };
+    // The window draws its own title bar (W2b, `assetcraft_ui_egui::chrome`): no OS decorations
+    // on Windows and Linux; on macOS the native traffic lights stay and only the title is hidden.
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("AssetCraft")
+        .with_app_id(APP_ID)
+        .with_icon(app_icon())
+        .with_inner_size([1360.0, 860.0])
+        .with_min_inner_size([720.0, 420.0]);
+    #[cfg(target_os = "macos")]
+    let viewport = viewport.with_titlebar_shown(false).with_title_shown(false).with_fullsize_content_view(true);
+    #[cfg(not(target_os = "macos"))]
+    let viewport = viewport.with_decorations(false);
+    let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
     let mut app = App { navigator, store };
     let create = move |cc: &eframe::CreationContext<'_>| -> Result<Box<dyn eframe::App>, _> {
         // Folder events arrive on the watcher's thread; wake the UI so they show without input.

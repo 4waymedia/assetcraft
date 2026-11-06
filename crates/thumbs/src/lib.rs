@@ -25,7 +25,7 @@ mod queue;
 pub use assetcraft_cache::SourceId;
 pub use cache::ThumbCache;
 pub use decoders::{Decoder, supports};
-pub use disk::{DEFAULT_DISK_BUDGET, DiskCache};
+pub use disk::{DEFAULT_DISK_BUDGET, DiskCache, decode_rgba};
 pub use pool::{MAX_FAILED, ThumbPool, ThumbResult, default_workers};
 pub use probe_pool::{DEFAULT_PROBE_WORKERS, ProbePool, ProbeResult};
 

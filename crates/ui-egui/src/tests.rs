@@ -772,3 +772,62 @@ fn tools_batch_rename_opens_a_preview_that_changes_nothing() {
     // Nothing was renamed.
     assert!(nav.session().items().iter().any(|e| e.name == "a.png"));
 }
+
+#[test]
+fn the_apps_own_title_bar_moves_maximizes_and_closes_the_window_through_viewport_commands() {
+    use egui::{ViewportCommand, ViewportId};
+    let ctx = Context::default();
+    let (nav, _) = navigator(fake(), Prefs::default());
+    let mut nav = nav.with_custom_chrome();
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+    let run = |nav: &mut Navigator, events: Vec<Event>, t: f64| -> Vec<ViewportCommand> {
+        let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), events, ..egui::RawInput::default() };
+        let mut out = ctx.run_ui(input, |ui| nav.ui(ui));
+        out.textures_delta.clear();
+        out.viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()
+    };
+    run(&mut nav, Vec::new(), 0.0);
+    // The menus live in the bar now, on its one row.
+    let file = nav.state.menu_rects.iter().find(|(t, _)| t == "File").map(|(_, r)| *r).expect("a File menu");
+    assert!(file.top() < crate::chrome::HEIGHT && file.bottom() <= crate::chrome::HEIGHT + 1.0, "{file:?}");
+    assert_eq!(crate::chrome::caption_for_tests(&nav), format!("AssetCraft · {}", nav.session().location().label()));
+    // A double-click on the empty part of the bar maximizes.
+    let at = egui::pos2(700.0, 15.0);
+    let click = |pressed| Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut cmds = Vec::new();
+    for (t, ev) in [(0.1, click(true)), (0.15, click(false)), (0.2, click(true)), (0.25, click(false))] {
+        cmds.extend(run(&mut nav, vec![Event::PointerMoved(at), ev], t));
+    }
+    assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::Maximized(true))), "{cmds:?}");
+    // The close button, at the right end of the bar (not on macOS, whose traffic lights are native).
+    if !cfg!(target_os = "macos") {
+        let x = screen.right() - 23.0;
+        let at = egui::pos2(x, 15.0);
+        let press = Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        };
+        let release = Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        };
+        let mut cmds = run(&mut nav, vec![Event::PointerMoved(at), press], 1.0);
+        cmds.extend(run(&mut nav, vec![release], 1.05));
+        assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::Close)), "{cmds:?}");
+    }
+    // Without the opt-in nothing of this is drawn: the menus sit in their own panel.
+    let (mut plain, _) = navigator(fake(), Prefs::default());
+    let input = egui::RawInput { screen_rect: Some(screen), ..egui::RawInput::default() };
+    let mut out = ctx.run_ui(input, |ui| plain.ui(ui));
+    out.textures_delta.clear();
+    assert!(plain.state.chrome_icon.is_none());
+}

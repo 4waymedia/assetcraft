@@ -8,6 +8,7 @@
 //! the path-field text, the folder tree's expansion and child cache, textures, scroll offsets
 //! and the docking arrangement (which is also saved through the engine's `view.panels`).
 
+mod chrome;
 mod content;
 mod dock;
 mod folders;
@@ -78,6 +79,10 @@ struct UiState {
     drawn: Vec<(PathBuf, Badge)>,
     fonts_installed: bool,
     show_shortcuts: bool,
+    /// Draw the window's own title bar and resize edges (W2b); set by the app when it turned the
+    /// OS decorations off.
+    custom_chrome: bool,
+    chrome_icon: Option<egui::TextureHandle>,
     show_about: bool,
     exit_requested: bool,
     menu_rects: Vec<(String, egui::Rect)>,
@@ -116,6 +121,13 @@ impl Navigator {
     pub fn with_one_worker(session: Session) -> Self {
         let pool = ThumbPool::new(session.services(), 1, ThumbCache::default());
         Self::with_pool(session, pool)
+    }
+
+    /// Draw the window's own title bar, menus inline, and resize edges: for an app that turned
+    /// the OS decorations off (W2b). Not drawn on the web, where the browser is the frame.
+    pub fn with_custom_chrome(mut self) -> Self {
+        self.state.custom_chrome = !cfg!(target_arch = "wasm32");
+        self
     }
 
     /// The engine session (read-only; change it with [`Navigator::run`]).
@@ -294,7 +306,14 @@ impl Navigator {
         self.track_focus();
 
         let storyboard = self.session.mode() == assetcraft_engine::Mode::Storyboard;
-        egui::Panel::top("assetcraft-menubar").show(ui, |ui| menu::bar(self, ui));
+        if self.state.custom_chrome {
+            egui::Panel::top("assetcraft-chrome")
+                .exact_size(chrome::HEIGHT)
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| chrome::title_bar(self, ui));
+        } else {
+            egui::Panel::top("assetcraft-menubar").show(ui, |ui| menu::bar(self, ui));
+        }
         egui::Panel::top("assetcraft-modebar").show(ui, |ui| storyboard_view::mode_bar(self, ui));
         if storyboard {
             egui::Panel::bottom("assetcraft-status").show(ui, |ui| {
@@ -318,6 +337,9 @@ impl Navigator {
         }
         menu::windows(self, &ctx);
         rename_dialog::window(self, &ctx);
+        if self.state.custom_chrome {
+            chrome::resize_edges(&ctx);
+        }
         self.thumbs.end_frame(&ctx);
         let wanted = &self.state.probe_wanted;
         self.session.retain_file_info(|p| wanted.contains(p));
