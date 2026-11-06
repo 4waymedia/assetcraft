@@ -124,18 +124,18 @@ fn paths_are_checked_before_anything_is_written() {
         Arc::new(RecordingLauncher::default()),
         Prefs::default(),
     );
-    assert!(matches!(
-        s.execute("storyboard.saveAs", &json!({ "path": "/x.storyboard.json" })),
-        Err(CmdError::Unavailable(_))
-    ));
+    // Absolute on every OS (a Unix-style `/x` has no drive on Windows and would fail as relative).
+    let abs = |name: &str| std::env::temp_dir().join(name).to_string_lossy().into_owned();
+    let no_board = s.execute("storyboard.saveAs", &json!({ "path": abs("x.storyboard.json") }));
+    assert!(matches!(no_board, Err(CmdError::Unavailable(_))), "{no_board:?}");
     run(&mut s, "storyboard.new", json!({ "name": "Mine: a/b?" }));
     assert_eq!(s.suggested_document_name(), "Mine- a-b.storyboard.json");
     for bad in [
         json!({}),
         json!({ "path": "" }),
         json!({ "path": "relative.storyboard.json" }),
-        json!({ "path": "/tmp/notes.json" }),
-        json!({ "path": "/tmp/.storyboard.json" }),
+        json!({ "path": abs("notes.json") }),
+        json!({ "path": abs(".storyboard.json") }),
         json!({ "path": 7 }),
     ] {
         assert!(matches!(s.execute("storyboard.saveAs", &bad), Err(CmdError::BadParams(_))), "{bad}");
