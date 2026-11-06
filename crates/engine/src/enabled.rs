@@ -43,6 +43,7 @@ impl Session {
             | "storyboard.text.kind"
             | "storyboard.text.style"
             | "storyboard.motion"
+            | "storyboard.resize"
             | "storyboard.pause"
             | "storyboard.seek"
             | "storyboard.saveAs"

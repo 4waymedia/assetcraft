@@ -60,6 +60,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.text.style",
     // The Inspector's MOTION section drives it (SB-3D1).
     "storyboard.motion",
+    // The Inspector's Duration field and the Strip's card edge drive it (SR1).
+    "storyboard.resize",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

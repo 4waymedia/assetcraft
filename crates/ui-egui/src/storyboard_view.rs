@@ -404,12 +404,7 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
         }
         ui.add_space(6.0);
         field(ui, "Description", if clip.description.is_empty() { "—" } else { &clip.description });
-        let beats = board.track.as_ref().map(|t| t.bpm.ticks_to_beats(clip.duration));
-        let dur = match beats {
-            Some(b) => format!("{:.1}s · {b} beats", clip.duration.as_secs_f64()),
-            None => format!("{:.1}s", clip.duration.as_secs_f64()),
-        };
-        field(ui, "Duration", &dur);
+        crate::strip_view::duration_field(nav, ui, &board, &clip);
         field(ui, "Transitions", &format!("{:?} in · {:?} out", clip.transition_in, clip.transition_out));
         if clip.sync_to_downbeat {
             ui.label(RichText::new("◆ Start locked to downbeat").color(AI_TEXT));

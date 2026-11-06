@@ -1091,3 +1091,89 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
+    use crate::strip_view::{PX_PER_SEC, ResizeDrag, commit_resize, snap_length};
+    use assetcraft_storyboard::ClipId;
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let first = board.clips[0].duration.as_secs_f64();
+    let total = board.total();
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    // Clip #01's right edge: the strip starts 8 px into the panel (inset 8.4 px), cards are
+    // 1 px narrower each side, and the handle is the last 8 px of the card.
+    let strip_y = 860.0 - 24.0 - 150.0 / 2.0 - 12.0;
+    let left = 8.4 + 8.0;
+    let edge = left + first as f32 * PX_PER_SEC - 1.0;
+    let from = Pos2::new(edge - 3.0, strip_y);
+    let to = Pos2::new(left + 5.0 * PX_PER_SEC, strip_y);
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        let p = from + (to - from) * (k as f32 / 8.0);
+        steps.push(vec![Event::PointerMoved(p)]);
+    }
+    let n = steps.len();
+    for (i, events) in steps.into_iter().enumerate() {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+        if i == n - 1 {
+            let drag = nav.state.storyboard.resize_drag.expect("the card follows the pointer");
+            assert_eq!(drag.clip, 1);
+            assert_eq!(nav.session().storyboard().unwrap(), &board, "nothing runs until the drag ends");
+        }
+    }
+    for events in [vec![press(to, false)], Vec::new()] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    assert!(nav.state.storyboard.resize_drag.is_none());
+    let clip = nav.session().storyboard().unwrap().clip(ClipId(1)).unwrap().clone();
+    let want = snap_length(&board, 5.0, false);
+    assert!(
+        (clip.duration.as_secs_f64() - want).abs() < 0.01,
+        "snapped to beats: {} vs {want}",
+        clip.duration.as_secs_f64()
+    );
+    assert!(want > first, "longer than before");
+    let board_now = nav.session().storyboard().unwrap();
+    assert!(board_now.total() > total, "the Cut's total follows");
+    assert_eq!(board_now.clips[1..], board.clips[1..], "only clip #01 changed");
+    nav.run("storyboard.undo", json!({}));
+    assert_eq!(nav.session().storyboard().unwrap(), &board, "one undo step restores the length");
+    nav.run("storyboard.undo", json!({}));
+    assert_ne!(nav.session().storyboard(), Some(&board), "the next step is New Storyboard's: the resize was one");
+    nav.run("storyboard.redo", json!({}));
+    assert_eq!(nav.session().storyboard().unwrap(), &board);
+
+    // The snap: beats on a track, tenths without one, never under the minimum.
+    let beat = board.track.as_ref().unwrap().bpm.beat().as_secs_f64();
+    assert!((snap_length(&board, 2.0 * beat + 0.01, false) - 2.0 * beat).abs() < 1e-9);
+    assert!((snap_length(&board, 2.04, true) - 2.0).abs() < 1e-9, "Shift: tenths");
+    assert_eq!(snap_length(&board, 0.0, false), beat.max(assetcraft_engine::MIN_CLIP_SECS));
+    let mut no_track = board.clone();
+    no_track.track = None;
+    assert!((snap_length(&no_track, 2.04, false) - 2.0).abs() < 1e-9);
+    assert_eq!(snap_length(&no_track, 0.0, false), assetcraft_engine::MIN_CLIP_SECS);
+    // A drag that ends where it started runs nothing (the redo step would be lost otherwise).
+    commit_resize(&mut nav, ResizeDrag { clip: 1, secs: first });
+    assert_eq!(nav.run("storyboard.state", json!({})).unwrap()["canRedo"], json!(true));
+    // The Inspector draws the Duration field for the selected clip without changing anything.
+    nav.run("storyboard.select", json!({ "clip": 2 }));
+    for _ in 0..2 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    assert_eq!(nav.session().storyboard().unwrap(), &board);
+    assert!(nav.state.storyboard.resize_drag.is_none());
+}

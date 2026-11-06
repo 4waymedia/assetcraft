@@ -18,6 +18,10 @@
 //!   under it, and reaching the end runs `storyboard.pause {at: total}`.
 //! - **Re-cut:** clip widths animate over 0.4 s to their new lengths, and the result shows as a
 //!   toast over the timeline for 3.8 s.
+//! - **Resize (SR1):** dragging a card's right edge sets that clip's length through
+//!   `storyboard.resize` when the drag ends (one undo step); with a track the edge snaps to
+//!   whole beats, Shift drags free in tenths of a second. The Inspector's Duration field runs
+//!   the same command. The card follows the pointer while dragging ([`ResizeDrag`]).
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
 //! listing: the UI never reads the disk), with the Organizer's thumbnail keys.
@@ -56,7 +60,30 @@ const SYNC_SNAP_SECS: f64 = 0.08;
 const SYNC_SLEW: f64 = 0.15;
 /// Re-cut width animation and toast time (design 4a).
 const RECUT_ANIM_SECS: f32 = 0.4;
+/// The resize handle on a card's right edge (SR1): its grab width.
+const HANDLE_W: f32 = 8.0;
 const TOAST_SECS: f64 = 3.8;
+
+/// A clip length being dragged (SR1): the clip and the length under the pointer, in seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ResizeDrag {
+    pub(crate) clip: u32,
+    pub(crate) secs: f64,
+}
+
+/// The length a drag of `secs` lands on: whole beats of the track when there is one (unless
+/// `free`), else tenths of a second; never under the engine's minimum.
+pub(crate) fn snap_length(board: &Storyboard, secs: f64, free: bool) -> f64 {
+    let min = assetcraft_engine::MIN_CLIP_SECS;
+    match board.track.as_ref().filter(|_| !free) {
+        Some(t) => {
+            let beat = t.bpm.beat().as_secs_f64();
+            let beats = (secs / beat).round().max(1.0);
+            (beats * beat).max(min)
+        }
+        None => ((secs * 10.0).round() / 10.0).max(min),
+    }
+}
 
 /// What an asset drag carries: the file path, as the Organizer lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +105,9 @@ pub(crate) struct SbUi {
     pub(crate) scrub_resume: bool,
     /// An Inspector amount slider mid-drag (SB-3D1), committed as one edit when it ends.
     pub(crate) motion_drag: Option<crate::motion_view::MotionDrag>,
+    /// A clip's length mid-drag (SR1: a card's edge or the Inspector's Duration), committed as
+    /// one `storyboard.resize` when the drag ends.
+    pub(crate) resize_drag: Option<ResizeDrag>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
     pub(crate) motion_player: Option<crate::motion_view::MotionPlayer>,
 }
@@ -651,16 +681,25 @@ fn fill_controls(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard) {
 }
 
 /// Clip spans along the timeline from `left`, in Cut order: `(id, x, width)`. Widths animate
-/// toward their new lengths after a Re-cut (`ctx = None` gives the final layout).
-pub(crate) fn clip_spans(board: &Storyboard, left: f32, ctx: Option<&egui::Context>) -> Vec<(ClipId, f32, f32)> {
+/// toward their new lengths after a Re-cut (`ctx = None` gives the final layout); a clip being
+/// resized (`drag`) follows the pointer at once.
+pub(crate) fn clip_spans(
+    board: &Storyboard,
+    left: f32,
+    ctx: Option<&egui::Context>,
+    drag: Option<ResizeDrag>,
+) -> Vec<(ClipId, f32, f32)> {
     let mut x = left;
     board
         .clips
         .iter()
         .map(|c| {
-            let target = (c.duration.as_secs_f64() as f32 * PX_PER_SEC).max(2.0);
+            let dragged = drag.filter(|d| d.clip == c.id.0).map(|d| d.secs);
+            let secs = dragged.unwrap_or_else(|| c.duration.as_secs_f64());
+            let target = (secs as f32 * PX_PER_SEC).max(2.0);
+            let anim = if dragged.is_some() { 0.0 } else { RECUT_ANIM_SECS };
             let w = match ctx {
-                Some(ctx) => ctx.animate_value_with_time(egui::Id::new(("sb-clip-w", c.id.0)), target, RECUT_ANIM_SECS),
+                Some(ctx) => ctx.animate_value_with_time(egui::Id::new(("sb-clip-w", c.id.0)), target, anim),
                 None => target,
             };
             let span = (c.id, x, w);
@@ -681,6 +720,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let mut scrub: Option<(f64, crate::timebar::Scrub)> = None;
     let mut drop: Option<(ClipId, String)> = None;
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
+    let mut resize: Option<ResizeDrag> = nav.state.storyboard.resize_drag;
+    let mut resized: Option<ResizeDrag> = None;
     let ctx = ui.ctx().clone();
     // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
@@ -710,7 +751,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             let strip_top = area.top() + RULER_H + MARKER_H;
             let marker_y = area.top() + RULER_H + 2.0;
             let mut prev_scene = None;
-            let spans = clip_spans(board, left, Some(&ctx));
+            let spans = clip_spans(board, left, Some(&ctx), resize);
             for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
                 if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
                     let title = board.scene_title(clip.scene_id).unwrap_or_default();
@@ -746,6 +787,32 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 ) {
                     switch = Some((clip.clone(), to));
                 }
+                // The right edge resizes the clip (SR1): registered after the card so it wins the
+                // pointer there; the card follows the pointer, the command runs when the drag ends.
+                let handle = Rect::from_min_max(pos2(rect.right() - HANDLE_W, rect.top() + 4.0), rect.max);
+                let grip = ui.interact(handle, strip_clip_id(id).with("resize"), Sense::drag());
+                let grip =
+                    grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(if board.track.is_some() {
+                        "Drag to set the clip's length (snaps to beats; Shift for tenths of a second)"
+                    } else {
+                        "Drag to set the clip's length"
+                    });
+                if grip.drag_started() {
+                    resize = Some(ResizeDrag { clip: id.0, secs: clip.duration.as_secs_f64() });
+                }
+                if grip.dragged()
+                    && let Some(pointer) = grip.interact_pointer_pos()
+                {
+                    let want = f64::from((pointer.x - x) / PX_PER_SEC);
+                    resize = Some(ResizeDrag { clip: id.0, secs: snap_length(board, want, shift) });
+                }
+                if grip.drag_stopped() {
+                    resized = resize.take().filter(|d| d.clip == id.0);
+                }
+                if grip.hovered() || grip.dragged() || resize.is_some_and(|d| d.clip == id.0) {
+                    let edge = Rect::from_min_max(pos2(rect.right() - 3.0, rect.top() + 4.0), rect.max);
+                    ui.painter().rect_filled(edge, 0, SELECT);
+                }
             }
             let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
             crate::timebar::paint_playhead(&painter, x, area.top(), area.bottom(), SELECT);
@@ -758,8 +825,12 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
             }
         });
+    nav.state.storyboard.resize_drag = resize;
     if let Some((secs, how)) = scrub {
         scrub_to(nav, secs, how, playing);
+    }
+    if let Some(d) = resized {
+        commit_resize(nav, d);
     }
     if let Some((clip, to)) = switch {
         crate::text_view::switch_kind(nav, &clip, to);
@@ -768,6 +839,58 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     } else if let Some(id) = select {
         nav.run("storyboard.select", json!({ "clip": id.0, "extend": shift }));
     }
+}
+
+/// End a length drag (SR1): one `storyboard.resize` when the length moved, nothing otherwise.
+pub(crate) fn commit_resize(nav: &mut Navigator, d: ResizeDrag) {
+    nav.state.storyboard.resize_drag = None;
+    let same = nav
+        .session
+        .storyboard()
+        .and_then(|b| b.clip(ClipId(d.clip)))
+        .is_some_and(|c| (c.duration.as_secs_f64() - d.secs).abs() < 0.005);
+    if !same {
+        nav.run("storyboard.resize", json!({ "clip": d.clip, "seconds": d.secs }));
+    }
+}
+
+/// The Inspector's Duration row (SR1): a drag value in seconds (and the beats it makes on the
+/// track), committed as one `storyboard.resize` when the drag ends or a typed value lands.
+pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, clip: &Clip) {
+    ui.label(RichText::new("Duration").size(10.0).color(ui.visuals().weak_text_color()));
+    let id = clip.id.0;
+    let dragging = nav.state.storyboard.resize_drag.filter(|d| d.clip == id);
+    let before = dragging.map(|d| d.secs).unwrap_or_else(|| clip.duration.as_secs_f64());
+    let mut value = before;
+    let max = assetcraft_storyboard::Limits::default().max_duration.as_secs_f64();
+    let r = ui
+        .horizontal(|ui| {
+            let r = ui.add(
+                egui::DragValue::new(&mut value)
+                    .range(assetcraft_engine::MIN_CLIP_SECS..=max)
+                    .speed(0.1)
+                    .fixed_decimals(1)
+                    .suffix(" s"),
+            );
+            let r = r.on_hover_text("Drag or type the clip's length (Ctrl+Z undoes)");
+            if let Some(t) = &board.track {
+                let beats = t.bpm.ticks_to_beats(Ticks::from_secs_f64(value).unwrap_or(Ticks::ZERO));
+                ui.weak(format!("· {beats} beat{}", if beats == 1 { "" } else { "s" }));
+            }
+            r
+        })
+        .inner;
+    // The widget rounds to a tenth on its first frame and reports that as a change; only a move
+    // of at least half a step is the user's (as the MOTION sliders).
+    let moved = r.changed() && (value - before).abs() >= 0.05;
+    if moved {
+        nav.state.storyboard.resize_drag = Some(ResizeDrag { clip: id, secs: value });
+    }
+    if r.drag_stopped() || (moved && !r.dragged()) {
+        let secs = if moved { value } else { before };
+        commit_resize(nav, ResizeDrag { clip: id, secs });
+    }
+    ui.add_space(4.0);
 }
 
 /// Move the Cut's playhead to `secs`. A click while playing plays on from there; a drag scrubs

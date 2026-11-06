@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback and S1 (Start storyboard) done, step 3 first slice done; A2 or step 6 next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5 and SR1 (resize) done; SR2 presenter slot next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -281,6 +281,43 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   that the user stretches (`storyboard.resize`), the chorus loop under the sections at a gain,
   per-section music — spec first (`docs/design/template-formats.md`). Tests: storyboard 3,
   engine 5, ui-egui 2. Owner: Claude; Paul owns the beats.
+
+## Sections (SR; Paul, 2026-11-06: "agreed on starting with the resize")
+
+- **Scope:** the templates' next phase — a section is as long as what goes in it. Covers the
+  clip resize, the presenter slot (the user's own talking video over the demo), the chorus loop
+  under the sections, and the Start screen's Sections list. **Goal served:** a tutorial, a
+  how-to or a review from a scaffold whose sections stretch to the recordings dropped in them,
+  with the music following. **Immediate area of improvement:** every clip's length comes from
+  the template or Re-cut; nothing lets the user set one clip's length by hand.
+- **Design (Paul, 2026-11-06, discussed; spec to follow in `docs/design/template-formats.md`):**
+  formats × styles (**Vlog** · **Voice over** · **Slides**); **Length: Unknown** = a scaffold of
+  n sections at 30 s each with a title card per section, each stretched to its recording; a
+  section's **presenter** is one extra slot (`Scene.presenter { asset, corner, size }`, four
+  corner chips, S / M / L, **Swap** puts the presenter full-frame and the demo in the corner) —
+  the Viewer shows its poster frame in the corner with its audio, FilmCraft renders the inset
+  from the OTIO; the **ducking rule** lowers the music only while the presenter (or narration)
+  has audio — a silent clip keeps the music at full — and every section has plain **Music** and
+  **Voice** sliders prefilled by the rule; the **chorus loop** joins every cue-map chorus span in
+  order with a one-beat crossfade and loops the sequence (a 15-minute track with four choruses
+  loops rarely), "Loop: all choruses / first only", no chorus → the highest-energy section;
+  per-section music is skipped; Vlog video is rendered by FilmCraft (SF1b, OTIO), Slides and
+  Voice over natively.
+- **Steps:** **SR1 built 2026-11-06 — resize:** `storyboard.resize {clip, seconds? | beats?}`
+  (`crates/engine/src/resize_cmd.rs`): one clip's length, the clips after it move, the Cut's
+  total follows, the track is left alone (the music ends, or plays on, where it did); limits
+  `MIN_CLIP_SECS` 0.5 s, 6 h per clip and per Cut, `beats` needs a track; the same length is
+  `changed: false` with no undo step; one undo step otherwise. UI: the Inspector's **Duration**
+  is a drag value in seconds with the beats it makes (`strip_view::duration_field`), and every
+  Strip card's right edge is a drag handle (`HANDLE_W` 8 px, resize cursor) — the card follows
+  the pointer (`SbUi.resize_drag`, `clip_spans` without the Re-cut animation for that clip) and
+  the command runs once when the drag ends; with a track the edge snaps to whole beats, Shift
+  drags free in tenths (`snap_length`). Tests: engine 3, ui-egui 1. **SR2 — the presenter
+  slot** (next): `Scene.presenter`, the Inspector slot and corner / size chips, Swap, the Viewer
+  inset, "the section takes its recording's length" (`storyboard.resize` from the probe's
+  duration on drop). **SR3 — chorus loop** (`TrackEdit` from the cue map's chorus spans; the
+  ducking rule with Music / Voice per section). **SR4 — Start screen Sections list** (titles up
+  front, Length: user set / Unknown). Owner: Claude; Paul owns the formats.
 
 ## Decisions (Paul)
 

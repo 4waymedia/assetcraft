@@ -23,6 +23,7 @@ pub mod paths;
 pub mod places;
 pub mod prefs;
 pub mod rename;
+mod resize_cmd;
 pub mod select;
 pub mod sort;
 pub mod storyboard;
@@ -48,6 +49,7 @@ pub use launch::{
 pub use open_in::{AppLocator, FakeLocator, OpenInTarget, SIBLING_APPS, SiblingApp, SystemLocator, find_app};
 pub use paths::{clean_user_path, same_path};
 pub use prefs::{FormatPrefs, ModelBackground, ModelDisplay, ModelPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
+pub use resize_cmd::MIN_CLIP_SECS;
 pub use select::{ClickMode, Selection};
 pub use sort::SortKey;
 pub use storyboard::{BoardView, MAX_AUTOFILL_ASSETS, MAX_UNDO, Mode, Transport};
@@ -708,6 +710,8 @@ mod open_in_tests;
 mod places_tests;
 #[cfg(test)]
 mod rename_tests;
+#[cfg(test)]
+mod resize_tests;
 #[cfg(test)]
 mod storyboard_tests;
 #[cfg(test)]

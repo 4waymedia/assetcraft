@@ -498,6 +498,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.resize",
+        "Clip Length",
+        "Storyboard",
+        None,
+        "{clip: number, seconds?: number | beats?: number} (one clip's length; the clips after it move and the Cut's total follows; the track is left alone; one undo step)",
+        crate::resize_cmd::sb_resize
+    ),
+    cmd!(
+        EDIT,
         "storyboard.recut",
         "Re-cut to Track",
         "Storyboard",
