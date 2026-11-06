@@ -222,7 +222,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool, template?: id | path} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, cueMap?, seconds?, fitMode?} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — with `cueMap` the song becomes its track and the clips are re-cut to fit); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(

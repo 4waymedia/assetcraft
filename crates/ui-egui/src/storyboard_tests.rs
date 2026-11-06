@@ -1053,3 +1053,41 @@ fn return_renders_every_model_clips_motion_and_escape_stops_it() {
     assert!(player.cached(2) <= 1, "re-rendering from scratch: {}", player.cached(2));
     assert_eq!(player.cached(7), count(7) as usize);
 }
+
+#[test]
+fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
+    let dir = cue_folder();
+    let cue_path = dir.join("song.cuemap.json");
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    // Tutorial with five steps, no song: the skeleton as long as it says.
+    nav.state.storyboard.start.choose_template(1, Some(5), None, None);
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned().expect("created");
+    assert_eq!(board.name, "Tutorial");
+    assert!(board.track.is_none());
+    assert_eq!(
+        board.scenes.iter().filter(|s| s.song_section.as_deref().is_some_and(|n| n.starts_with("Step "))).count(),
+        5
+    );
+    assert!(!nav.state.storyboard.start.open);
+    // + New: Review with two points on the whole song → re-cut to 64 s with the song as the track.
+    nav.state.storyboard.start.open = true;
+    nav.state.storyboard.start.choose_template(0, Some(2), Some(&cue_path.to_string_lossy()), None);
+    frame(&ctx, &mut nav, Vec::new(), 0.2);
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned().expect("created");
+    assert_eq!(board.name, "Song · Review");
+    let track = board.track.as_ref().expect("the song");
+    assert_eq!(track.name, "Song");
+    assert_eq!(board.total(), track.duration);
+    assert_eq!(
+        board.scenes.iter().filter(|s| s.song_section.as_deref().is_some_and(|n| n.starts_with("Point "))).count(),
+        2
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

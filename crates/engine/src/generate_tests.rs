@@ -1,6 +1,7 @@
 use super::*;
 use assetcraft_fs::FakeFs;
 use assetcraft_storyboard::Pacing;
+use assetcraft_storyboard::Ticks;
 use serde_json::json;
 
 const SR: u64 = 48_000;
@@ -116,4 +117,39 @@ fn refuses_bad_params_and_bad_files_without_an_undo_step() {
     // Longer than the track: the whole track.
     run(&mut s, "storyboard.generate", json!({"cueMap": "/music/song.cuemap.json", "seconds": 90}));
     assert_eq!(s.storyboard().unwrap().total().timecode(), "1:04.0");
+}
+
+#[test]
+fn a_template_with_a_cue_map_takes_the_song_as_its_track_and_is_recut_to_fit() {
+    let mut s = session();
+    // The whole song (64 s at 120 BPM): the Review template's 46 s of clips stretch to fill it.
+    let out = run(&mut s, "storyboard.new", json!({ "template": "review", "cueMap": "/music/song.cuemap.json" }));
+    let board = s.storyboard().unwrap();
+    let track = board.track.as_ref().expect("the song is the track");
+    assert_eq!(track.name, "Song");
+    assert_eq!(track.id.0, song_mp3());
+    assert_eq!(track.bpm.get(), 120.0);
+    assert_eq!(track.duration, Ticks::from_secs(64).unwrap());
+    assert_eq!(track.song_sections.len(), 3);
+    assert_eq!(board.total(), track.duration, "re-cut to the song's length");
+    assert_eq!(board.name, "Song · Review");
+    assert!(!board.template && board.assets_assigned() == 0);
+    assert_eq!(out["fitted"]["fits"], true);
+    assert!(
+        board.clips.iter().filter(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl).count() >= 2,
+        "cards kept"
+    );
+    // Fit to 30 s: the fade edit comes along and the clips shrink to 30 s.
+    run(
+        &mut s,
+        "storyboard.new",
+        json!({ "template": "tutorial", "cueMap": "/music/song.cuemap.json", "seconds": 30, "name": "Lamp" }),
+    );
+    let board = s.storyboard().unwrap();
+    assert_eq!(board.name, "Lamp");
+    assert_eq!(board.total(), Ticks::from_secs(30).unwrap());
+    assert!(board.track.as_ref().and_then(|t| t.edit.as_ref()).is_some(), "the 30 s fade edit");
+    // A bad cue map is refused before anything changes.
+    assert!(s.execute("storyboard.new", &json!({ "template": "review", "cueMap": "/music/bad.cuemap.json" })).is_err());
+    assert_eq!(s.storyboard().unwrap().name, "Lamp");
 }

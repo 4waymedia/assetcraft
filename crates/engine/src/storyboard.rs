@@ -191,7 +191,17 @@ pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
     let mut board = match p.get("template") {
-        Some(Value::String(which)) => crate::template_cmd::board_from_template(s, which)?,
+        Some(Value::String(which)) => {
+            let steps = match p.get("steps") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    v.as_u64()
+                        .and_then(|n| usize::try_from(n).ok())
+                        .ok_or_else(|| CmdError::BadParams("`steps` must be a whole number".into()))?,
+                ),
+            };
+            crate::template_cmd::board_from_template(s, which, steps)?
+        }
         Some(Value::Null) | None if from_sample => sample(),
         Some(Value::Null) | None => manual_start(),
         Some(_) => return Err(CmdError::BadParams("`template` must be a bundled id or a file path".into())),
@@ -203,6 +213,28 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
         }
         board.name = name.to_owned();
     }
+    // A template with a track (Start › New › Template, ST3b): the song's tempo, length and
+    // sections become the board's track and Re-cut fits the template's clips to it in whole
+    // beats, title cards kept.
+    let mut fitted = None;
+    if p.get("template").is_some() && p.get("cueMap").is_some() {
+        let path = crate::generate_cmd::cue_map_param(p)?;
+        let seconds = crate::generate_cmd::seconds_param(p)?;
+        let mode = crate::generate_cmd::fit_mode_param(p)?;
+        let cue = crate::generate_cmd::read_cue(s, &path)?;
+        let track_path = crate::generate_cmd::track_path(s, &path, &cue);
+        let track = assetcraft_storyboard::track_from_cue(&cue, &track_path.to_string_lossy(), seconds, mode)
+            .map_err(|e| CmdError::Unavailable(e.to_string()))?;
+        let report = recut(&board, track.bpm, track.duration, RecutOptions { keep_title_cards: true });
+        for (clip, d) in board.clips.iter_mut().zip(&report.durations) {
+            clip.duration = *d;
+        }
+        if board.name == "Untitled storyboard" || p.get("name").is_none() {
+            board.name = format!("{} · {}", cue.track.title, board.name);
+        }
+        board.track = Some(track);
+        fitted = Some(report);
+    }
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board).or_else(|| board.clips.first().map(|c| c.id));
     s.boards.generated = None;
@@ -213,7 +245,14 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     s.boards.transport = Transport::default();
     crate::document_cmd::mark_saved(s, None);
     s.audio_stop();
-    Ok(state(s))
+    let mut out = state(s);
+    if let (Some(report), Value::Object(map)) = (fitted, &mut out) {
+        map.insert(
+            "fitted".into(),
+            json!({ "resized": report.resized, "totalBeats": report.total_beats, "fits": report.fits() }),
+        );
+    }
+    Ok(out)
 }
 
 /// The Manual start (design 3e): one scene with a placeholder title card and no track.

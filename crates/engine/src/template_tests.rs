@@ -36,6 +36,26 @@ fn new_from_a_bundled_template_gives_its_skeleton_with_no_assets() {
     assert_eq!(s.mode(), Mode::Storyboard);
     run(&mut s, "storyboard.new", json!({ "template": "review", "name": "Lamp review" }));
     assert_eq!(s.storyboard().unwrap().name, "Lamp review");
+    // The repeating section's count: five steps, then one.
+    assert_eq!(list["templates"][1]["steps"], 3);
+    assert_eq!(list["templates"][1]["stepsName"], "steps");
+    run(&mut s, "storyboard.new", json!({ "template": "tutorial", "steps": 5 }));
+    let five = s.storyboard().unwrap();
+    assert_eq!(
+        five.scenes.iter().filter(|sc| sc.song_section.as_deref().is_some_and(|n| n.starts_with("Step "))).count(),
+        5
+    );
+    assert!(five.clips.iter().any(|c| c.overlay.as_deref() == Some("Step 5")));
+    run(&mut s, "storyboard.new", json!({ "template": "instructions", "steps": 1 }));
+    assert_eq!(s.storyboard().unwrap().scenes.len(), 3, "title · one step · check");
+    assert!(matches!(
+        s.execute("storyboard.new", &json!({ "template": "review", "steps": 0 })),
+        Err(CmdError::BadParams(_))
+    ));
+    assert!(matches!(
+        s.execute("storyboard.new", &json!({ "template": "review", "steps": 13 })),
+        Err(CmdError::BadParams(_))
+    ));
     for bad in
         [json!({ "template": "nope" }), json!({ "template": "relative.storyboard.json" }), json!({ "template": 7 })]
     {

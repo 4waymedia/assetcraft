@@ -14,7 +14,7 @@
 use crate::Navigator;
 use crate::storyboard_view::{ACCENT, INSPECTOR_W, SELECT, rgb, section};
 use assetcraft_engine::PreviewMode;
-use assetcraft_storyboard::{Pacing, SceneTransition, Shape, ShotType, Titles};
+use assetcraft_storyboard::{BUNDLED, Pacing, STEPS_RANGE, SceneTransition, Shape, ShotType, Titles};
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, vec2};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -36,6 +36,9 @@ const PACE_PRESET: usize = 2;
 pub(crate) enum Style {
     /// Generated from a track at this pacing.
     Pacing(Pacing),
+    /// A bundled template (`assetcraft_storyboard::BUNDLED` index): its skeleton, with the
+    /// song as the track when one is picked (ST3b).
+    Template(usize),
     /// The 24-clip handoff sample.
     Sample,
     /// One title card, no track.
@@ -75,6 +78,8 @@ pub(crate) struct StartUi {
     pub(crate) ask_analyse: bool,
     /// The analyser's `(done + failed, batches)` last drawn, to refresh the list and notify once.
     pub(crate) seen_analyse: (usize, u64),
+    /// How many of the chosen template's repeating section (points, steps); `None` = its default.
+    pub(crate) steps: Option<usize>,
 }
 
 impl Default for StartUi {
@@ -97,6 +102,7 @@ impl Default for StartUi {
             filter: crate::start_tracks::TrackFilter::default(),
             ask_analyse: false,
             seen_analyse: (0, 0),
+            steps: None,
         }
     }
 }
@@ -138,6 +144,21 @@ impl StartUi {
         self.length = seconds;
     }
 
+    /// Choose a bundled template, its count and a track (tests).
+    #[cfg(test)]
+    pub(crate) fn choose_template(
+        &mut self,
+        index: usize,
+        steps: Option<usize>,
+        cue_map: Option<&str>,
+        seconds: Option<u32>,
+    ) {
+        self.style = Style::Template(index);
+        self.steps = steps;
+        self.track = cue_map.map(str::to_owned);
+        self.length = seconds;
+    }
+
     /// The generator's `density` for the cut pace step.
     fn density(&self) -> f32 {
         PACE_DENSITY.get(self.pace).copied().unwrap_or(1.0)
@@ -164,6 +185,7 @@ impl StartUi {
 fn blurb(style: Style) -> &'static str {
     match style {
         Style::Pacing(p) => p.description(),
+        Style::Template(i) => BUNDLED.get(i).map_or("", |t| t.description),
         Style::Sample => "The 24-clip Hollow Saint teaser from the design",
         Style::Blank => "One title card, no track; build it by hand",
     }
@@ -172,6 +194,7 @@ fn blurb(style: Style) -> &'static str {
 fn style_name(style: Style) -> &'static str {
     match style {
         Style::Pacing(p) => p.name(),
+        Style::Template(i) => BUNDLED.get(i).map_or("Template", |t| t.name),
         Style::Sample => "Sample",
         Style::Blank => "Blank",
     }
@@ -290,7 +313,7 @@ pub(crate) fn pick_track(nav: &mut Navigator, cue: String) {
     }
     start.scrub = None;
     start.track = Some(cue);
-    if !matches!(start.style, Style::Pacing(_)) {
+    if !matches!(start.style, Style::Pacing(_) | Style::Template(_)) {
         start.apply_preset(Pacing::Trailer);
     }
 }
@@ -385,6 +408,8 @@ fn styles(nav: &mut Navigator, ui: &mut Ui) {
         }
     });
     preset_cards(nav, ui, track.as_ref().and_then(|t| t["bpm"].as_f64()));
+    ui.add_space(4.0);
+    template_cards(nav, ui);
     let style = nav.state.storyboard.start.style;
     ui.label(RichText::new(blurb(style)).small().color(ui.visuals().weak_text_color()));
     ui.add_space(6.0);
@@ -392,6 +417,10 @@ fn styles(nav: &mut Navigator, ui: &mut Ui) {
         shape_controls(nav, ui, pacing, track.as_ref());
         ui.add_space(6.0);
         legend(ui);
+        ui.add_space(8.0);
+    }
+    if let Style::Template(i) = style {
+        steps_control(nav, ui, i, track.is_some());
         ui.add_space(8.0);
     }
 }
@@ -432,6 +461,72 @@ fn preset_cards(nav: &mut Navigator, ui: &mut Ui, bpm: Option<f64>) {
             }
         }
     });
+}
+
+/// The template cards under the style cards (ST3b): Review · Tutorial · 5-minute instructions.
+/// A template is a skeleton of scenes and shots; with a track picked, the song becomes its
+/// track and the clips are re-cut to fit.
+fn template_cards(nav: &mut Navigator, ui: &mut Ui) {
+    let gap = 8.0;
+    let n = BUNDLED.len() as f32;
+    let w = ((ui.available_width() - gap * (n - 1.0)) / n).max(80.0);
+    ui.label(RichText::new("TEMPLATES").small().color(ui.visuals().weak_text_color()));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (i, t) in BUNDLED.iter().enumerate() {
+            let chosen = nav.state.storyboard.start.style == Style::Template(i);
+            let (rect, response) = ui.allocate_exact_size(vec2(w, PRESET_H), Sense::click());
+            card_frame(ui, rect, chosen);
+            let p = ui.painter();
+            let ink = if chosen { Color32::WHITE } else { Color32::from_gray(0xdd) };
+            p.text(rect.min + vec2(10.0, 8.0), Align2::LEFT_TOP, t.name, FontId::proportional(13.0), ink);
+            let steps = nav.state.storyboard.start.steps.filter(|_| chosen).unwrap_or(t.steps);
+            p.text(
+                rect.min + vec2(10.0, 26.0),
+                Align2::LEFT_TOP,
+                format!("{steps} {}", t.steps_name),
+                FontId::monospace(10.0),
+                Color32::from_gray(0xaa),
+            );
+            p.text(
+                rect.min + vec2(10.0, 40.0),
+                Align2::LEFT_TOP,
+                "Skeleton · song optional",
+                FontId::proportional(10.0),
+                Color32::from_gray(0x77),
+            );
+            if response.on_hover_text(t.description).clicked() && !chosen {
+                let start = &mut nav.state.storyboard.start;
+                start.style = Style::Template(i);
+                start.steps = None;
+                // A template starts on the whole song; the length chips narrow it.
+                start.length = None;
+            }
+        }
+    });
+}
+
+/// How many points or steps the chosen template gets (Paul, 2026-11-06: "an easy way to set
+/// the 5 or 3").
+fn steps_control(nav: &mut Navigator, ui: &mut Ui, index: usize, has_track: bool) {
+    let Some(t) = BUNDLED.get(index) else { return };
+    let mut steps = nav.state.storyboard.start.steps.unwrap_or(t.steps);
+    ui.horizontal(|ui| {
+        ui.label(format!("Number of {}", t.steps_name));
+        if ui.add_enabled(steps > STEPS_RANGE.0, egui::Button::new("−").small()).clicked() {
+            steps -= 1;
+        }
+        ui.add(egui::DragValue::new(&mut steps).range(STEPS_RANGE.0..=STEPS_RANGE.1).speed(0.1));
+        if ui.add_enabled(steps < STEPS_RANGE.1, egui::Button::new("+").small()).clicked() {
+            steps += 1;
+        }
+        ui.weak(if has_track {
+            "the song's length is shared out over them"
+        } else {
+            "about as long as the template says; add a song to fit it"
+        });
+    });
+    nav.state.storyboard.start.steps = Some(steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1));
 }
 
 /// Cut pace, Transitions, Title cards and Shape (the mock-up's controls card). Changes are
@@ -581,8 +676,38 @@ fn cards(nav: &mut Navigator, ui: &mut Ui) {
     let Style::Pacing(pacing) = style else {
         let (title, meta) = match style {
             Style::Sample => ("Hollow Saint teaser", "24 clips · 5 scenes · stand-in 92 BPM track"),
+            Style::Template(i) => (
+                BUNDLED.get(i).map_or("Template", |t| t.name),
+                if nav.state.storyboard.start.track.is_some() {
+                    "the template's shots, re-cut to the song"
+                } else {
+                    "the template's shots and cards, no track yet"
+                },
+            ),
             _ => ("Blank storyboard", "1 title card · add a track later"),
         };
+        if let (Style::Template(_), Some(track)) = (style, selected_track(nav)) {
+            // The song's fit lengths, as chips (no preview: a template's clips are its own).
+            let track_secs = track["seconds"].as_f64().unwrap_or(0.0);
+            let lengths: Vec<Option<u32>> = track["lengths"]
+                .as_array()
+                .map(|a| a.iter().map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok())).collect())
+                .unwrap_or_else(|| vec![None]);
+            if !lengths.contains(&nav.state.storyboard.start.length) {
+                nav.state.storyboard.start.length = None;
+            }
+            ui.horizontal(|ui| {
+                section_label(ui, "LENGTH");
+                ui.add_space(6.0);
+                for secs in &lengths {
+                    let chosen = nav.state.storyboard.start.length == *secs;
+                    if ui.selectable_label(chosen, length_label(*secs, track_secs)).clicked() && !chosen {
+                        nav.state.storyboard.start.length = *secs;
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
         let (rect, _) = ui.allocate_exact_size(CARD, Sense::hover());
         card_frame(ui, rect, true);
         ui.painter().text(
@@ -695,6 +820,14 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
             Style::Pacing(_) => selected_track(nav).is_some(),
             _ => true,
         };
+        if let Style::Template(_) = style {
+            ui.weak(if selected_track(nav).is_some() {
+                "With the picked song as the track"
+            } else {
+                "No song picked: pick one on the left to fit the cut to it, or add a track later"
+            });
+            ui.add_space(6.0);
+        }
         let create = egui::Button::new(RichText::new("Create storyboard").color(Color32::WHITE).strong()).fill(ACCENT);
         if ui.add_enabled(ready, create.min_size(vec2(200.0, 32.0))).clicked() {
             create_board(nav);
@@ -729,6 +862,23 @@ pub(crate) fn create_board(nav: &mut Navigator) {
                 nav.run("storyboard.autofill", json!({}));
             }
             made
+        }
+        Style::Template(i) => {
+            let Some(t) = BUNDLED.get(i) else { return };
+            let mut params = json!({ "template": t.id });
+            if let Some(steps) = nav.state.storyboard.start.steps {
+                params["steps"] = json!(steps);
+            }
+            if let Some(cue) = track {
+                params["cueMap"] = json!(cue);
+                if let Some(secs) = length {
+                    params["seconds"] = json!(secs);
+                }
+            }
+            if !name.is_empty() {
+                params["name"] = json!(name);
+            }
+            nav.run("storyboard.new", params).is_some()
         }
         Style::Sample => nav.run("storyboard.new", json!({ "sample": true })).is_some(),
         Style::Blank => {

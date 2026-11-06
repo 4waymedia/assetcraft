@@ -922,6 +922,10 @@ fn the_bundled_templates_are_valid_boards_with_no_assets_and_the_promised_length
         assert_eq!(back, t);
     }
     assert!(bundled_template("nope").is_none());
+    // The count of the repeating section is the user's: two points, eight steps, clamped.
+    assert_eq!(bundled_template_with("review", 2).unwrap().scenes.len(), 2 + 2 + 1);
+    assert_eq!(bundled_template_with("tutorial", 8).unwrap().scenes.len(), 2 + 8 + 1);
+    assert_eq!(bundled_template_with("instructions", 99).unwrap().scenes.len(), 1 + STEPS_RANGE.1 + 1);
     // An older board without the field loads with it off.
     let json = sample().to_json().unwrap();
     assert!(!json.contains("template"));

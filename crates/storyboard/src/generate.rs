@@ -338,6 +338,33 @@ pub fn track_edit(cue: &CueMap, fit: Option<&Fit>) -> Option<TrackEdit> {
     edit_of(cue, fit, &cue.timeline(fit))
 }
 
+/// The track a cue map makes at `seconds` (or whole), the way [`generate`] attaches it: the
+/// song's tempo, length, beat grid, sections as song sections, and the Fit to length edit. For
+/// a board that already has its clips — a template (`Storyboard::from_template`) — which
+/// `recut` then fits to this track.
+pub fn track_from_cue(
+    cue: &CueMap,
+    track_path: &str,
+    seconds: Option<u32>,
+    mode: Option<FitMode>,
+) -> Result<Track, GenerateError> {
+    let fit = fit_for(cue, seconds, mode)?;
+    let tl = cue.timeline(fit);
+    Ok(Track {
+        id: AssetId(track_path.to_owned()),
+        name: cue.track.title.clone(),
+        bpm: Bpm::new(cue.bpm).unwrap_or(Bpm::DEFAULT),
+        duration: cue.ticks(tl.length),
+        beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
+        song_sections: tl
+            .sections
+            .iter()
+            .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
+            .collect(),
+        edit: edit_of(cue, fit, &tl),
+    })
+}
+
 fn edit_of(cue: &CueMap, fit: Option<&Fit>, tl: &Timeline) -> Option<TrackEdit> {
     fit.map(|f| TrackEdit {
         sample_rate: cue.sample_rate,

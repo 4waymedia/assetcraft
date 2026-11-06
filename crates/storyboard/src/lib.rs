@@ -40,6 +40,7 @@ pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
 pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, fit_for, generate, track_edit,
+    track_from_cue,
 };
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
@@ -52,7 +53,9 @@ pub use motion::{
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
-pub use template::{BUNDLED, TemplateInfo, bundled as bundled_template};
+pub use template::{
+    BUNDLED, STEPS_RANGE, TemplateInfo, bundled as bundled_template, bundled_with as bundled_template_with,
+};
 pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,
     set_text_style,

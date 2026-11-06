@@ -8,14 +8,16 @@
 //!   as a template (`Storyboard::as_template`: assets and track removed, `template: true`)
 //!   written atomically to `<working>/Templates/<name>.storyboard.json`; an existing file only
 //!   with `overwrite`. The open board itself is unchanged.
-//! - `storyboard.new {template: <id | path>, name?}`: a fresh board from a template
-//!   (`Storyboard::from_template`), named after it unless `name` is given; a path is read and
-//!   validated like `storyboard.open`.
+//! - `storyboard.new {template: <id | path>, steps?, name?, cueMap?, seconds?}`: a fresh board
+//!   from a template (`Storyboard::from_template`), named after it unless `name` is given; a
+//!   bundled template takes `steps` (its points or steps, 1–12); a path is read and validated
+//!   like `storyboard.open`; with `cueMap` the song becomes the track and the clips are re-cut
+//!   to fit (`storyboard.rs::sb_new`).
 
 use crate::document_cmd::{SUFFIX, document_name, write_atomic};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
-use assetcraft_storyboard::{BUNDLED, Limits, Storyboard, bundled_template};
+use assetcraft_storyboard::{BUNDLED, Limits, STEPS_RANGE, Storyboard, bundled_template_with};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -50,7 +52,12 @@ impl Session {
 pub(crate) fn sb_templates(s: &mut Session, _p: &Value) -> CmdResult {
     let mut templates: Vec<Value> = BUNDLED
         .iter()
-        .map(|t| json!({ "id": t.id, "name": t.name, "description": t.description, "source": "bundled" }))
+        .map(|t| {
+            json!({
+                "id": t.id, "name": t.name, "description": t.description, "source": "bundled",
+                "stepsName": t.steps_name, "steps": t.steps, "stepsRange": [STEPS_RANGE.0, STEPS_RANGE.1],
+            })
+        })
         .collect();
     for (name, path) in s.user_templates() {
         templates.push(
@@ -60,10 +67,16 @@ pub(crate) fn sb_templates(s: &mut Session, _p: &Value) -> CmdResult {
     Ok(json!({ "templates": templates, "folder": s.templates_folder().map(|p| p.to_string_lossy().into_owned()) }))
 }
 
-/// A board from a bundled id or a template file.
-pub(crate) fn board_from_template(s: &Session, which: &str) -> Result<Storyboard, CmdError> {
+/// A board from a bundled id (with `steps` repeating sections, else its default) or a template
+/// file.
+pub(crate) fn board_from_template(s: &Session, which: &str, steps: Option<usize>) -> Result<Storyboard, CmdError> {
     let which = which.trim();
-    if let Some(bundled) = bundled_template(which) {
+    if let Some(info) = BUNDLED.iter().find(|t| t.id == which) {
+        let n = steps.unwrap_or(info.steps);
+        if !(STEPS_RANGE.0..=STEPS_RANGE.1).contains(&n) {
+            return Err(CmdError::BadParams(format!("`steps` must be {}..={}", STEPS_RANGE.0, STEPS_RANGE.1)));
+        }
+        let bundled = bundled_template_with(which, n).ok_or_else(|| CmdError::BadParams("unknown template".into()))?;
         return Ok(Storyboard::from_template(&bundled, bundled.name.as_str()));
     }
     let path = Path::new(which);

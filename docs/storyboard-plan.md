@@ -253,10 +253,18 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   a push-in / pan on the hero shots, fade in / out at the ends; beats are first drafts — Paul
   edits them in `template.rs` or saves his own. **ST3 built 2026-11-06 (File menu)** — File › New
   from Template ▸ (the three with their descriptions, then the user's), File › Save as Template…
-  (a name window; Enter saves; Replace offered when the name exists). The Start-screen tile
-  (Start › New › Template, then a track and Re-cut to fit) is **ST3b, planned**. ST4 (a
-  template's intros as prompts for AI Prompt & Insert) stays planned. Tests: storyboard 2,
-  engine 2, ui-egui 1. Owner: Claude; Paul owns the beats.
+  (a name window; Enter saves; Replace offered when the name exists). **ST3b built 2026-11-06**
+  (Paul: "add 'Tutorial' to the Storyboard #2 Pick a Preset" and "control for the number of
+  Title clips … 5 sections, or 3 steps"): the Start screen's step 2 shows a **TEMPLATES** row
+  of cards under the style cards (Review · Tutorial · 5-minute instructions, each with its count);
+  picking one shows **Number of points / steps** (− · value · +, 1–12, `STEPS_RANGE`) — every
+  bundled template has one repeating section whose count the user sets (`bundled_with(id, n)`;
+  the menu's items use the defaults 3 · 3 · 6); with a song picked the LENGTH chips choose whole
+  song or a fit, and Create runs `storyboard.new {template, steps, cueMap, seconds}`: the song
+  becomes the track (`track_from_cue`: tempo, length, beat grid, sections, the fit's edit) and
+  Re-cut fits the template's clips to it in whole beats, title cards kept; without a song the
+  template keeps its own seconds. ST4 (a template's intros as prompts for AI Prompt & Insert)
+  stays planned. Tests: storyboard 2, engine 3, ui-egui 2. Owner: Claude; Paul owns the beats.
 
 ## Decisions (Paul)
 
