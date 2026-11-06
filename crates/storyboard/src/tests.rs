@@ -18,6 +18,7 @@ fn sample() -> Storyboard {
         board.scenes.push(Scene {
             id: SceneId(s + 1),
             song_section: Some(["Intro", "Verse", "Pre-chorus", "Chorus", "Outro"][s as usize].into()),
+            inset: None,
         });
         let mut t = Clip::new(ClipId(id), SceneId(s + 1), ShotType::Ttl, b.beats_to_ticks(4));
         t.description = format!("Title {}", s + 1);
@@ -979,7 +980,7 @@ fn the_credits_clip_is_appended_last_with_its_placeholders_filled() {
     board.validate(&Limits::default()).unwrap_or_else(|e| panic!("{e}"));
     // No song: the music line is dropped; no credit text: "Music: <name>".
     let mut plain = Storyboard::new("Plain");
-    plain.scenes.push(Scene { id: SceneId(1), song_section: None });
+    plain.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None });
     plain.append_credits(&credits);
     assert_eq!(plain.clips.last().unwrap().description, "Plain\nMade with AssetCraft");
     let mut named = sample();
@@ -988,5 +989,39 @@ fn the_credits_clip_is_appended_last_with_its_placeholders_filled() {
         named.clips.last().unwrap().description.contains("Music: Hollow"),
         "{}",
         named.clips.last().unwrap().description
+    );
+}
+
+#[test]
+fn a_section_inset_spans_its_shots_not_its_title_card_and_older_boards_load() {
+    let mut board = sample();
+    let scene = board.scenes[0].id;
+    let shots: Vec<ClipId> = board.inset_span(scene).map(|c| c.id).collect();
+    assert!(!shots.is_empty());
+    assert!(board.clips.iter().filter(|c| c.scene_id == scene).count() > shots.len(), "the title card is left out");
+    assert!(board.inset_span(scene).all(|c| c.shot_type != ShotType::Ttl));
+    assert_eq!(board.inset_scenes().count(), board.scenes.len(), "every sample scene has shots");
+    // A title-only scene can't carry one.
+    board.scenes.push(Scene::new(SceneId(99), None));
+    let mut card = Clip::new(ClipId(999), SceneId(99), ShotType::Ttl, Ticks::from_secs(2).unwrap());
+    card.description = "Only a card".into();
+    board.clips.push(card);
+    assert_eq!(board.inset_scenes().count(), board.scenes.len() - 1);
+    // The file: `inset` is left out when none, read back when set, and a file without the key
+    // (every board saved before SR2) loads with no inset.
+    let text = board.to_json().unwrap();
+    assert!(!text.contains("\"inset\""));
+    board.scenes[0].inset =
+        Some(Inset { asset: Some(AssetId("/clips/host.mp4".into())), ..Inset::slot(InsetKind::Video) });
+    let text = board.to_json().unwrap();
+    assert!(text.contains("\"inset\""));
+    let back = Storyboard::from_json(text.as_bytes()).unwrap();
+    assert_eq!(back, board);
+    let slot = Inset::slot(InsetKind::Graphic);
+    assert!(slot.is_empty());
+    assert_eq!((slot.corner, slot.size), (Corner::BottomRight, InsetSize::Medium));
+    assert_eq!(Corner::ALL.map(Corner::code), ["TL", "TR", "BL", "BR"]);
+    assert!(
+        InsetSize::Small.share() < InsetSize::Medium.share() && InsetSize::Medium.share() < InsetSize::Large.share()
     );
 }

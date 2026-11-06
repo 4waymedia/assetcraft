@@ -78,7 +78,7 @@ pub fn sample() -> Storyboard {
     let mut next = 1u32;
     for (s, (section, title, shots)) in SCENES.iter().enumerate() {
         let scene_id = SceneId(s as u32 + 1);
-        board.scenes.push(Scene { id: scene_id, song_section: Some((*section).into()) });
+        board.scenes.push(Scene { id: scene_id, song_section: Some((*section).into()), inset: None });
         let mut card = Clip::new(ClipId(next), scene_id, ShotType::Ttl, bpm.beats_to_ticks(4));
         card.description = (*title).into();
         card.transition_in = if s == 0 { Transition::FadeIn } else { Transition::Cut };

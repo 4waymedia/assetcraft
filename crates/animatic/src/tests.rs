@@ -163,7 +163,7 @@ fn an_overlay_sits_in_its_corner_and_an_empty_clip_says_so() {
 fn a_cut_is_drawn_by_time_and_bad_assets_are_reported_not_fatal() {
     let mut c = compositor(160, 90);
     let mut board = Storyboard::new("cut");
-    board.scenes.push(Scene { id: SceneId(1), song_section: None });
+    board.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None });
     let mut a = clip(1, ShotType::Ttl, 1);
     a.description = "A".into();
     let mut b = clip(2, ShotType::Est, 2);

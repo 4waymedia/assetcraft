@@ -28,7 +28,7 @@ fn session_with_cut(secs: u64) -> Session {
     let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
     run(&mut s, "storyboard.new", json!({ "name": "Export me" }));
     let board = s.boards.board.as_mut().unwrap();
-    board.scenes.push(assetcraft_storyboard::Scene { id: SceneId(1), song_section: None });
+    board.scenes.push(assetcraft_storyboard::Scene { id: SceneId(1), song_section: None, inset: None });
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(secs).unwrap());
     card.description = "Reapers".into();
     let mut still = Clip::new(ClipId(2), SceneId(1), ShotType::Est, Ticks::from_secs(secs).unwrap());

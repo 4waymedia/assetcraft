@@ -14,6 +14,7 @@ pub mod effect;
 mod enabled;
 pub mod export_job;
 pub mod generate_cmd;
+mod inset_cmd;
 pub mod launch;
 mod library_cmd;
 mod model_cmd;
@@ -700,6 +701,8 @@ mod enabled_tests;
 mod export_tests;
 #[cfg(test)]
 mod generate_tests;
+#[cfg(test)]
+mod inset_tests;
 #[cfg(test)]
 mod library_tests;
 #[cfg(test)]

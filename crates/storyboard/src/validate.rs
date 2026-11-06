@@ -137,6 +137,9 @@ impl Storyboard {
             if let Some(n) = &s.song_section {
                 text("song section", n, l)?;
             }
+            if let Some(a) = s.inset.as_ref().and_then(|i| i.asset.as_ref()) {
+                text("inset asset", &a.0, l)?;
+            }
         }
 
         let mut clip_ids = HashSet::new();

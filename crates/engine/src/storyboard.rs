@@ -261,7 +261,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
 /// The Manual start (design 3e): one scene with a placeholder title card and no track.
 fn manual_start() -> Storyboard {
     let mut board = Storyboard::new("Untitled storyboard");
-    board.scenes.push(Scene { id: SceneId(1), song_section: None });
+    board.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None });
     let len = Ticks::from_secs(2).unwrap_or(Ticks::ZERO);
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, len);
     card.description = "Untitled scene".into();

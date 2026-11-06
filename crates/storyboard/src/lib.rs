@@ -25,6 +25,7 @@ pub mod analyse;
 pub mod cuemap;
 pub mod fill;
 pub mod generate;
+pub mod inset;
 pub mod model;
 pub mod motion;
 pub mod recut;
@@ -42,6 +43,7 @@ pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, fit_for, generate, track_edit,
     track_from_cue,
 };
+pub use inset::{Corner, Inset, InsetKind, InsetSize};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
     Transition,

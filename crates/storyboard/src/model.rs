@@ -236,6 +236,17 @@ pub struct Scene {
     /// Song section this scene is aligned to (`Intro`, `Verse`, …), if any.
     #[serde(default)]
     pub song_section: Option<String>,
+    /// The section's inset lane (SR2): a second picture in a corner over the section's clips,
+    /// or an empty slot. Left out of the file when there is none, so older boards load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inset: Option<crate::inset::Inset>,
+}
+
+impl Scene {
+    /// A scene with no inset.
+    pub fn new(id: SceneId, song_section: Option<String>) -> Scene {
+        Scene { id, song_section, inset: None }
+    }
 }
 
 /// A named span of the track (Intro, Verse, Pre-chorus, Chorus, Outro).

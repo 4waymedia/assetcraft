@@ -507,7 +507,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
     board.scenes = scenes
         .iter()
         .enumerate()
-        .map(|(i, s)| Scene { id: SceneId(i as u32 + 1), song_section: Some(s.label.clone()) })
+        .map(|(i, s)| Scene { id: SceneId(i as u32 + 1), song_section: Some(s.label.clone()), inset: None })
         .collect();
     let mut report = GenerateReport {
         scenes: scenes.len(),

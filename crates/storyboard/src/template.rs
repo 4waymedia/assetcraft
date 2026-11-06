@@ -107,7 +107,7 @@ fn build(name: &str, format: &str, theme: TextTheme, scenes: &[(String, Vec<Beat
     let mut next = 1u32;
     for (s, (section, beats)) in scenes.iter().enumerate() {
         let scene_id = SceneId(s as u32 + 1);
-        board.scenes.push(Scene { id: scene_id, song_section: Some(section.clone()) });
+        board.scenes.push(Scene { id: scene_id, song_section: Some(section.clone()), inset: None });
         for b in beats.iter() {
             let mut clip =
                 Clip::new(ClipId(next), scene_id, b.shot, Ticks::from_secs_f64(b.secs).unwrap_or(Ticks::ZERO));
@@ -250,7 +250,7 @@ pub fn credits() -> Storyboard {
     let mut board = Storyboard::new(CREDITS_NAME);
     board.format = Some("Credits".into());
     board.template = true;
-    board.scenes.push(Scene { id: SceneId(1), song_section: Some(CREDITS_NAME.into()) });
+    board.scenes.push(Scene { id: SceneId(1), song_section: Some(CREDITS_NAME.into()), inset: None });
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(6).unwrap_or(Ticks::ZERO));
     card.description = "{title}\n{music}\nMade with AssetCraft".into();
     card.text_style =
@@ -288,7 +288,7 @@ impl Storyboard {
         for (i, scene) in credits.scenes.iter().enumerate() {
             let id = SceneId(next_scene + i as u32);
             scene_map.push((scene.id, id));
-            self.scenes.push(Scene { id, song_section: scene.song_section.clone() });
+            self.scenes.push(Scene { id, song_section: scene.song_section.clone(), inset: scene.inset.clone() });
         }
         if let Some(last) = self.clips.last_mut()
             && last.transition_out == Transition::FadeOut
@@ -324,6 +324,11 @@ impl Storyboard {
         for clip in &mut t.clips {
             clip.asset_ids.clear();
         }
+        for scene in &mut t.scenes {
+            if let Some(inset) = &mut scene.inset {
+                inset.asset = None;
+            }
+        }
         t
     }
 
@@ -339,6 +344,9 @@ impl Storyboard {
 
     /// The assets a template may still name (none, after `as_template`).
     pub fn asset_refs(&self) -> impl Iterator<Item = &AssetId> {
-        self.clips.iter().flat_map(|c| c.asset_ids.iter())
+        self.clips
+            .iter()
+            .flat_map(|c| c.asset_ids.iter())
+            .chain(self.scenes.iter().filter_map(|s| s.inset.as_ref().and_then(|i| i.asset.as_ref())))
     }
 }

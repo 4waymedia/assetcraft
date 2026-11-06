@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5 and SR1 (resize) done; SR2 presenter slot next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize) and SR2a (inset model + commands) done; SR2b the Strip's INSET row next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -312,10 +312,37 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   Strip card's right edge is a drag handle (`HANDLE_W` 8 px, resize cursor) — the card follows
   the pointer (`SbUi.resize_drag`, `clip_spans` without the Re-cut animation for that clip) and
   the command runs once when the drag ends; with a track the edge snaps to whole beats, Shift
-  drags free in tenths (`snap_length`). Tests: engine 3, ui-egui 1. **SR2 — the presenter
-  slot** (next): `Scene.presenter`, the Inspector slot and corner / size chips, Swap, the Viewer
-  inset, "the section takes its recording's length" (`storyboard.resize` from the probe's
-  duration on drop). **SR3 — chorus loop** (`TrackEdit` from the cue map's chorus spans; the
+  drags free in tenths (`snap_length`). Tests: engine 3, ui-egui 1. **Paul's mock-ups (2026-11-06,
+  two images: the Start screen's settings for the new storyboard types; the timeline with an
+  INSET row): "the storyboard should still display as normal, with the inset covering the spread
+  between each title… That is where the user can insert b-roll, interview, or other video."**
+  → the presenter slot generalises to a **section inset lane**: any video or graphic, one per
+  section, spanning the section's shots after its title card. **SR2a built 2026-11-06 — the
+  model and commands:** `crates/storyboard/src/inset.rs` — `Scene.inset: Option<Inset>` (left
+  out of the file when none, so every older board loads), `Inset { kind: Video | Graphic, asset:
+  Option<AssetId> (None = an empty slot to fill later), corner: TL | TR | BL | BR, size: S 22 % ·
+  M 30 % · L 40 % of the frame's width, mix_audio, swap }`, `Storyboard::inset_span(scene)` (the
+  shots it covers), `inset_scenes()` (title-only scenes and the credits can't carry one);
+  `as_template` keeps the slot and drops the file; `asset_refs` includes the inset's file.
+  Engine `crates/engine/src/inset_cmd.rs`: `storyboard.inset {scene, asset? | null, kind?,
+  corner?, size?, mixAudio?, swap?, seconds?}` (omitted fields keep their value; `seconds`
+  stretches the section's shots pro rata to the recording, title cards kept, every shot ≥ 0.5 s;
+  one undo step for file + stretch together; unchanged → `changed: false`, no step) and
+  `storyboard.insetClear {scene, remove?}` (empty the slot, or drop the lane). Tests: storyboard
+  1, engine 3. **SR2b (next) — the Strip's INSET row** under the STORYBOARD row (one bar per
+  section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
+  an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
+  SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner
+  chips, S / M / L, Swap, Mix audio) and the Viewer / compositor corner draw (video: poster
+  frame; graphic: full quality in the export). **SR2d** — the Start screen's INSET panel (`None ·
+  Graphic · Video`, Add to `every step · steps + review · first step only`, corner, size, "Leave
+  empty slots to fill later", "Mix the inset video's audio in") → `storyboard.new {inset}`;
+  then, as their own steps, the AUDIO TRACK panel (`song · voiceover · song + voiceover · none`,
+  cut on the beat, title cards on song sections, fade out under the credits), TITLE CARDS
+  (opening · between steps · review · credits; 2 / 4 / 6 s), NUMBERING (Step 1 · Step one · name
+  them later), SHOT PATTERN (varied · wide to close · close-ups; a close-up in every step; "What
+  you need" first) and the STRUCTURE strip (click a part to jump to its options). Later: an inset
+  trimmed to a clip range (the mock-up's part-section graphic). **SR3 — chorus loop** (`TrackEdit` from the cue map's chorus spans; the
   ducking rule with Music / Voice per section). **SR4 — Start screen Sections list** (titles up
   front, Length: user set / Unknown). Owner: Claude; Paul owns the formats.
 

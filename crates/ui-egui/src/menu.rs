@@ -62,6 +62,9 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.motion",
     // The Inspector's Duration field and the Strip's card edge drive it (SR1).
     "storyboard.resize",
+    // The Strip's INSET row and the Inspector's INSET section drive these (SR2).
+    "storyboard.inset",
+    "storyboard.insetClear",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

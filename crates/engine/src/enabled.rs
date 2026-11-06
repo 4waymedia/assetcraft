@@ -44,6 +44,8 @@ impl Session {
             | "storyboard.text.style"
             | "storyboard.motion"
             | "storyboard.resize"
+            | "storyboard.inset"
+            | "storyboard.insetClear"
             | "storyboard.pause"
             | "storyboard.seek"
             | "storyboard.saveAs"

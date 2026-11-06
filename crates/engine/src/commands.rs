@@ -507,6 +507,24 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.inset",
+        "Section Inset",
+        "Storyboard",
+        None,
+        "{scene: number, asset?: path | null, kind?: video | graphic, corner?: topLeft | topRight | bottomLeft | bottomRight, size?: small | medium | large, mixAudio?: bool, swap?: bool, seconds?: number} (a section's inset lane over its shots; omitted fields keep their value; `seconds` stretches the section's shots to the recording; one undo step)",
+        crate::inset_cmd::sb_inset
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.insetClear",
+        "Clear Section Inset",
+        "Storyboard",
+        None,
+        "{scene: number, remove?: bool} (empty the slot, or drop the lane with `remove`; one undo step)",
+        crate::inset_cmd::sb_inset_clear
+    ),
+    cmd!(
+        EDIT,
         "storyboard.recut",
         "Re-cut to Track",
         "Storyboard",
