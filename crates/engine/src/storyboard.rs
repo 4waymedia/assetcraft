@@ -190,7 +190,12 @@ pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
 
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
-    let mut board = if from_sample { sample() } else { manual_start() };
+    let mut board = match p.get("template") {
+        Some(Value::String(which)) => crate::template_cmd::board_from_template(s, which)?,
+        Some(Value::Null) | None if from_sample => sample(),
+        Some(Value::Null) | None => manual_start(),
+        Some(_) => return Err(CmdError::BadParams("`template` must be a bundled id or a file path".into())),
+    };
     if let Some(name) = p.get("name").and_then(Value::as_str) {
         let name = name.trim();
         if name.is_empty() || name.len() > Limits::default().max_string {

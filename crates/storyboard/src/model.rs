@@ -349,6 +349,11 @@ pub struct Storyboard {
     /// Text overlays.
     #[serde(default)]
     pub text_clips: Vec<TextClip>,
+    /// A template: a skeleton of scenes, shot types, cards and pacing with the clips empty
+    /// (ST1). Start › New from Template and `Storyboard::from_template` make a board from it;
+    /// `as_template` makes one. Left out of the file when `false`, so every older board loads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub template: bool,
 }
 
 impl Storyboard {
@@ -364,6 +369,7 @@ impl Storyboard {
             scenes: Vec::new(),
             clips: Vec::new(),
             text_clips: Vec::new(),
+            template: false,
         }
     }
 

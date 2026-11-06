@@ -26,6 +26,7 @@ pub mod rename;
 pub mod select;
 pub mod sort;
 pub mod storyboard;
+pub mod template_cmd;
 mod text_cmd;
 mod track_cmd;
 mod watching;
@@ -695,6 +696,8 @@ mod places_tests;
 mod rename_tests;
 #[cfg(test)]
 mod storyboard_tests;
+#[cfg(test)]
+mod template_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

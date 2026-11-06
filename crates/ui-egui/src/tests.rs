@@ -503,6 +503,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::ExportVideo => {
                 used.insert("storyboard.exportVideo");
             }
+            MenuAction::SaveTemplate => {
+                used.insert("storyboard.saveTemplate");
+            }
             MenuAction::ResetLayout
             | MenuAction::RenderCache
             | MenuAction::Shortcuts
@@ -985,5 +988,46 @@ fn open_storyboard_reads_a_saved_file_and_open_recent_lists_it() {
     assert!(matches!(&recent, MenuEntry::Item { action: MenuAction::OpenRecent(p), .. } if *p == path), "{recent:?}");
     assert!(nav.activate(&ctx, &recent));
     assert_eq!(nav.session().storyboard().map(|b| b.name.as_str()), Some(name.as_str()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn new_from_template_and_save_as_template_round_trip_through_the_file_menu() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-st-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx = Context::default();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let (mut nav, _) = navigator(assetcraft_fs::RealFs, prefs);
+    frame(&ctx, &mut nav);
+    // The bundled three sit under File › New from Template ▸ with their descriptions.
+    let tutorial = find_item(&nav, "File", "Tutorial");
+    assert!(matches!(&tutorial, MenuEntry::Item { tooltip: Some(t), .. } if t.contains("steps")), "{tutorial:?}");
+    assert!(nav.activate(&ctx, &tutorial));
+    assert_eq!(nav.session().storyboard().map(|b| b.name.as_str()), Some("Tutorial"));
+    assert_eq!(nav.session().mode(), assetcraft_engine::Mode::Storyboard);
+    assert!(matches!(find_item(&nav, "File", "Save as Template…"), MenuEntry::Item { enabled: true, .. }));
+
+    // Save as Template… opens the name window; saving lists it under the bundled three.
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Save as Template…")));
+    let dialog = nav.state.save_template.clone().expect("the name window");
+    assert_eq!(dialog.name, "Tutorial");
+    nav.state.save_template.as_mut().unwrap().name = "My tutorial".into();
+    assert!(crate::template_view::save(&mut nav, false));
+    assert!(nav.state.save_template.is_none());
+    assert!(nav.message().is_some_and(|m| m.starts_with("Saved template")), "{:?}", nav.message());
+    assert!(dir.join("Templates").join("My tutorial.storyboard.json").exists());
+    frame(&ctx, &mut nav);
+    let mine = find_item(&nav, "File", "My tutorial");
+    assert!(
+        matches!(&mine, MenuEntry::Item { action: MenuAction::Command(id, _), .. } if *id == "storyboard.new"),
+        "{mine:?}"
+    );
+    // Saving again with the same name is refused and the window offers Replace.
+    crate::template_view::open(&mut nav);
+    nav.state.save_template.as_mut().unwrap().name = "My tutorial".into();
+    assert!(!crate::template_view::save(&mut nav, false));
+    assert!(nav.state.save_template.as_ref().is_some_and(|d| d.name == "My tutorial"));
+    assert!(crate::template_view::save(&mut nav, true));
     let _ = std::fs::remove_dir_all(&dir);
 }

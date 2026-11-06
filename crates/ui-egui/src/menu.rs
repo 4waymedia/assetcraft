@@ -100,6 +100,8 @@ pub enum MenuAction {
     SaveAs,
     /// File → Export Video…: the settings window, the picker, then `storyboard.exportVideo`.
     ExportVideo,
+    /// File → Save as Template…: the name window, then `storyboard.saveTemplate`.
+    SaveTemplate,
     /// File → Exit.
     Exit,
     /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
@@ -477,7 +479,13 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         "storyboard.new" => vec![
             item("New Storyboard", None, true, cmd(spec.id, json!({}))),
             item("New Storyboard from Sample", None, true, cmd(spec.id, json!({ "sample": true }))),
+            MenuEntry::Sub { label: "New from Template".into(), entries: crate::template_view::entries(s) },
         ],
+        // Listed under New from Template (above); the item itself would only repeat it.
+        "storyboard.templates" => vec![],
+        "storyboard.saveTemplate" => {
+            vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveTemplate)]
+        }
         "storyboard.open" => {
             let recent: Vec<MenuEntry> = s
                 .recent_storyboards()
@@ -619,6 +627,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
             crate::document_view::save_as(nav);
         }
         MenuAction::ExportVideo => crate::export_view::open(nav),
+        MenuAction::SaveTemplate => crate::template_view::open(nav),
         MenuAction::Exit => crate::document_view::request_exit(nav, ctx),
     }
 }

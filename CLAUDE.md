@@ -21,6 +21,8 @@ and executes. It's a sibling of the storytold Crafting Apps.
   git push
   ```
   Read-only git (`status`, `diff`, `log`, `show`) is fine.
+- Commit messages end with `Co-Authored-By: Claude <noreply@anthropic.com>` and **never carry a
+  session link** (Paul, 2026-11-06: no `Claude-Session:` line — it is a searchable reference).
 - **When a tool can't do something** (e.g. writing into `.cargo/`, building on Windows), don't stop:
   hand Paul the exact PowerShell commands to run, then carry on.
 - **Every command block starts with `Set-Location <full path>`** so Paul knows where to run it.

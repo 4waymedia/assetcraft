@@ -27,6 +27,7 @@ mod start_tracks;
 mod start_view;
 mod storyboard_view;
 mod strip_view;
+mod template_view;
 mod text_view;
 pub mod theme;
 mod thumbnails;
@@ -91,6 +92,8 @@ struct UiState {
     unsaved: Option<document_view::Pending>,
     /// The Export Video window (SF5-5), while it is open.
     export: Option<export_view::ExportDialog>,
+    /// The Save as Template window (ST3), while it is open.
+    save_template: Option<template_view::SaveTemplateDialog>,
     /// The export stage last seen, to notice when a job ends.
     export_seen: Option<assetcraft_engine::ExportStage>,
     /// What the Save picker "returns" in tests (no native dialog there).
@@ -352,6 +355,7 @@ impl Navigator {
         document_view::window(self, &ctx);
         export_view::window(self, &ctx);
         export_view::tick(self, &ctx);
+        template_view::window(self, &ctx);
         if self.state.custom_chrome {
             chrome::resize_edges(&ctx);
         }

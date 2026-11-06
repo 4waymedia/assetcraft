@@ -903,3 +903,45 @@ fn motion_refuses_out_of_range_and_round_trips() {
     assert!(!swap_motion(&mut board, model).unwrap());
     assert_eq!(board.clip(model).unwrap().motion, None);
 }
+
+#[test]
+fn the_bundled_templates_are_valid_boards_with_no_assets_and_the_promised_length() {
+    for (info, secs) in BUNDLED.iter().zip([40.0, 60.0, 300.0]) {
+        let t = bundled_template(info.id).unwrap_or_else(|| panic!("{}", info.id));
+        assert!(t.template && t.track.is_none() && t.asset_refs().next().is_none(), "{}", info.id);
+        assert_eq!(t.name, info.name);
+        let total = t.total().as_secs_f64();
+        assert!((total - secs).abs() < secs * 0.2, "{}: {total:.0} s, promised about {secs:.0}", info.id);
+        assert!(t.clips.iter().any(|c| c.shot_type == ShotType::Ttl), "{}: has a card", info.id);
+        assert!(t.clips.iter().all(|c| !c.description.is_empty()));
+        assert!(t.scenes.len() >= 4);
+        // Round-trips through the validating parser with the flag kept.
+        let json = t.to_json().unwrap_or_else(|e| panic!("{e}"));
+        assert!(json.contains("\"template\": true") || json.contains("\"template\":true"));
+        let back = Storyboard::from_json(json.as_bytes()).unwrap_or_else(|e| panic!("{}: {e}", info.id));
+        assert_eq!(back, t);
+    }
+    assert!(bundled_template("nope").is_none());
+    // An older board without the field loads with it off.
+    let json = sample().to_json().unwrap();
+    assert!(!json.contains("template"));
+    assert!(!Storyboard::from_json(json.as_bytes()).unwrap().template);
+}
+
+#[test]
+fn as_template_strips_assets_and_from_template_makes_a_fresh_board() {
+    let mut board = sample();
+    board.clips[1].asset_ids.push(AssetId("/art/a.png".into()));
+    board.clips[2].motion = Some(Motion::preset(MotionPreset::PushIn, MotionKind::PanZoom, Camera::NONE));
+    let t = board.as_template("My shape");
+    assert!(t.template && t.track.is_none() && t.asset_refs().next().is_none());
+    assert_eq!(t.name, "My shape");
+    assert_eq!(t.clips.len(), board.clips.len());
+    assert_eq!(t.clips[2].motion, board.clips[2].motion, "motion is part of the shape");
+    assert_eq!(t.clips[1].description, board.clips[1].description);
+    let fresh = Storyboard::from_template(&t, "Episode 2");
+    assert!(!fresh.template);
+    assert_eq!(fresh.name, "Episode 2");
+    assert_eq!(fresh.clips, t.clips);
+    assert_eq!(fresh.scenes, t.scenes);
+}

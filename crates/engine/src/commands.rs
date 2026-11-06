@@ -222,7 +222,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool} (Manual start, or the 24-clip handoff sample); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(
@@ -242,6 +242,24 @@ static COMMANDS: &[CommandSpec] = &[
         Some("Ctrl+O"),
         "{path} → state + {opened, missing: [asset…], message} (a `.storyboard.json` read with the document limits and validated; one undo step like New; a newer format is refused; assets no longer at their path are listed and kept)",
         crate::document_cmd::sb_open
+    ),
+    cmd!(
+        READ,
+        "storyboard.templates",
+        "New from Template",
+        "File",
+        None,
+        "{} → {templates: [{id, name, description?, source: bundled|user, path?}], folder} (the bundled Review, Tutorial, 5-minute instructions, then the user's <working>/Templates/*.storyboard.json)",
+        crate::template_cmd::sb_templates
+    ),
+    cmd!(
+        SAVE,
+        "storyboard.saveTemplate",
+        "Save as Template",
+        "File",
+        None,
+        "{name, overwrite?} → {path, message} + state (the open board with assets and track removed, `template: true`, written to <working>/Templates/<name>.storyboard.json; an existing template only with `overwrite`)",
+        crate::template_cmd::sb_save_template
     ),
     cmd!(
         READ,

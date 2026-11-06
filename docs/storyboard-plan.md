@@ -239,9 +239,24 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   the template's scenes to the music. Three to begin with: **Review** (hook · what it is · 3 points ·
   verdict · end card), **Tutorial** (goal · setup · steps 1–n with insert shots · result · recap),
   **5-minute instructions** (title · materials · numbered steps with a close-up each · check · outro).
-- **Steps (planned):** ST1 the `template` flag + File › Save as Template; ST2 the three bundled
-  templates as boards; ST3 Start › New › Template; ST4 a template's text intros as prompts for the
-  AI Prompt & Insert step. Owner: Claude; Paul writes the three shapes' beats.
+- **Steps:** **ST1 built 2026-11-06** — `Storyboard.template` (left out of the file when false),
+  `as_template(name)` (assets and track removed) / `from_template(&t, name)`; engine
+  `storyboard.saveTemplate {name, overwrite?}` → `<working>/Templates/<name>.storyboard.json`
+  (atomic; an existing name only with `overwrite`; the open board untouched), `storyboard.templates
+  {}` (bundled, then the user's files by name), `storyboard.new {template: id | path, name?}`;
+  **D-ST1:** the bundled templates are Rust constructors (`crates/storyboard/src/template.rs`),
+  not JSON files — they move with the format and need no asset rows; a plain board file works as
+  a template too (its shape, assets left behind). **ST2 built 2026-11-06** — Review (hook · what
+  it is · three points · verdict · end card, ≈ 46 s, Bold), Tutorial (goal · setup · steps 1–3
+  with an insert each · result · recap, ≈ 64 s, Minimal), 5-minute instructions (title · what you
+  need · six steps with a close-up each · check · outro, ≈ 4.6 min, Paper); overlays on the beats,
+  a push-in / pan on the hero shots, fade in / out at the ends; beats are first drafts — Paul
+  edits them in `template.rs` or saves his own. **ST3 built 2026-11-06 (File menu)** — File › New
+  from Template ▸ (the three with their descriptions, then the user's), File › Save as Template…
+  (a name window; Enter saves; Replace offered when the name exists). The Start-screen tile
+  (Start › New › Template, then a track and Re-cut to fit) is **ST3b, planned**. ST4 (a
+  template's intros as prompts for AI Prompt & Insert) stays planned. Tests: storyboard 2,
+  engine 2, ui-egui 1. Owner: Claude; Paul owns the beats.
 
 ## Decisions (Paul)
 

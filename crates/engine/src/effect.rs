@@ -170,6 +170,7 @@ mod tests {
                 "storyboard.musicImport",
                 "storyboard.save",
                 "storyboard.saveAs",
+                "storyboard.saveTemplate",
                 "storyboard.exportVideo"
             ])
         );
@@ -186,6 +187,7 @@ mod tests {
                 "storyboard.exportStatus",
                 "storyboard.preview",
                 "storyboard.recent",
+                "storyboard.templates",
                 "storyboard.state",
                 "storyboard.tracks",
                 "track.analyze",
@@ -201,6 +203,7 @@ mod tests {
                 "storyboard.musicImport",
                 "storyboard.save",
                 "storyboard.saveAs",
+                "storyboard.saveTemplate",
                 "storyboard.exportVideo"
             ])
         );

@@ -30,6 +30,7 @@ pub mod motion;
 pub mod recut;
 pub mod sample;
 pub mod shape;
+pub mod template;
 pub mod text;
 pub mod time;
 pub mod validate;
@@ -51,6 +52,7 @@ pub use motion::{
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
+pub use template::{BUNDLED, TemplateInfo, bundled as bundled_template};
 pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,
     set_text_style,

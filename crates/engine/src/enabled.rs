@@ -45,7 +45,8 @@ impl Session {
             | "storyboard.motion"
             | "storyboard.pause"
             | "storyboard.seek"
-            | "storyboard.saveAs" => self.board().map(|_| ()),
+            | "storyboard.saveAs"
+            | "storyboard.saveTemplate" => self.board().map(|_| ()),
             "storyboard.exportVideo" => {
                 let board = self.board()?;
                 if board.clips.is_empty() {
