@@ -25,6 +25,7 @@ assetcraft-audio = { path = "crates/audio" }
 assetcraft-playback = { path = "crates/playback" }
 assetcraft-analysis = { path = "crates/analysis" }
 assetcraft-cache = { path = "crates/cache" }
+assetcraft-video = { path = "crates/video" }
 # external
 # SoundCraft's audio file I/O (MIT OR Apache-2.0; symphonia inside, MPL-2.0 by decision AD1).
 # Pinned to SoundCraft 0.7.0, the commit docs/track-analysis.md was written against.
@@ -58,6 +59,13 @@ eframe = { version = "0.36", default-features = false }
 photocraft-psd = { git = "https://github.com/storytold/photocraft", rev = "c699e3cda69f4852b43c0b191ab0091aaeff9d6a" }
 # Camera raw embedded previews and orientation: LightCraft 0.8.0 (no JPEG XL: default features off).
 lightcraft-raw = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032", default-features = false }
+# Video export (SF5, decision D-SF6, 2026-11-06): pure-Rust H.264 and AAC-LC encoders from
+# Remade With Rust (BSD-2-Clause / Apache-2.0; no C in the tree). `asm` off: the portable build,
+# `#![forbid(unsafe_code)]` cores. Pinned exactly; bump on purpose and re-run the video tests.
+rusty_h264-encoder = { version = "=0.17.0", default-features = false, features = ["std"] }
+rusty_h264-common = { version = "=0.17.0", default-features = false, features = ["std"] }
+rusty_h264-decoder = { version = "=0.17.0", default-features = false, features = ["std"] }
+rusty_aac = { version = "=2.0.1", default-features = false }
 lightcraft-meta = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }
 # HEIF/HEIC: LightCraft 0.8.0 over heic-rs (pure Rust). Optional (`heic` feature of thumbs, off by default).
 lightcraft-heif = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }

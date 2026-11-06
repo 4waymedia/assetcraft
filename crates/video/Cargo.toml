@@ -1,0 +1,20 @@
+[package]
+name = "assetcraft-video"
+description = "Video export in pure Rust (SF5): RGBA frames → H.264 (rusty_h264-encoder), PCM → AAC-LC (rusty_aac), muxed into MP4 / MOV by this crate. No C, no FFmpeg; the encoders are BSD-2 / Apache-2.0."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rusty_h264-encoder = { workspace = true }
+rusty_h264-common = { workspace = true }
+rusty_aac = { workspace = true }
+
+[dev-dependencies]
+rusty_h264-decoder = { workspace = true }
