@@ -97,7 +97,7 @@ MP4 and AV1 WebM, Safari AV1 only on M3+):
 | Route | File                               | Encoder / muxer (licence)                                                   | Windows | macOS QuickTime           | Linux | 90 s 1080p24 animatic | Status      |
 |-------|------------------------------------|-----------------------------------------------------------------------------|---------|---------------------------|-------|-----------------------|-------------|
 | C′    | `.mov` / `.mp4` · H.264 · PCM      | `openh264` (Cisco OpenH264, BSD-2, C++ compiled in); muxer pure Rust        | yes     | yes                       | yes   | ≈ 45–70 MB + 16 MB    | recommended |
-| C″    | `.mp4` · H.264 · AAC, all Rust     | `rusty_h264` + `rusty_aac` (remade_ffmpeg_rs, Apache-2.0, pure Rust, pre-1.0, states "no FFmpeg source was copied") | yes | yes             | yes   | ≈ 45–70 MB + 1.5 MB   | candidate (Paul, 2026-11-05) — provenance and encoder quality to verify before it goes in |
+| C″    | `.mp4` / `.mov` · H.264 · AAC, all Rust | `rusty_h264-encoder` (BSD-2) + `rusty_aac` (Apache-2.0), muxer written here | yes | yes              | yes   | ≈ 60–110 MB (2.5–3× x264 at equal quality; spike 2026-11-06) | **chosen (D-SF6)**: files decode clean, 11–12 fps per core at 1080p, constant-QP mode |
 | B     | `.mkv` / `.webm` · AV1 · FLAC/Opus | `rav1e` (BSD-2, Rust), `flacenc` (Apache-2) or libopus (BSD-3, C)           | Win 11  | macOS 14+ on M3+ only     | yes   | ≈ 25–45 MB            | option      |
 | A     | `.avi` · Motion-JPEG · PCM         | none new (`image` encodes JPEG; RIFF/AVI and WAV written here)              | yes     | yes                       | yes   | ≈ 400–500 MB          | fallback    |
 | C     | `.mp4` · H.264 · AAC via `ffmpeg`  | none linked: an `ffmpeg` found on `PATH` is run as a separate program       | yes     | yes                       | yes   | ≈ 45–70 MB            | optional    |
@@ -116,10 +116,10 @@ larger. The one gap in an H.264 export is the audio track — there is no clean-
 | Opus (libopus, BSD-3, C)                     | yes          | no              | yes   | +1 MB                       |
 | AAC                                          | yes          | yes             | yes   | +1.5 MB — `rusty_aac` (AAC-LC, Apache-2.0, pure Rust) is the one candidate; `fdk-aac` is out (Fraunhofer licence) |
 
-So the universal clean-room file is **`.mov` · H.264 · PCM** today, and **`.mp4` · H.264 · AAC**
-if `rusty_h264` / `rusty_aac` hold up (a pre-1.0 clean-room rewrite: their licence passes
-`cargo deny`, their *provenance* — a rewrite, not a translation of FFmpeg's LGPL code — and
-their encoder quality are what the check is for). Shipping an H.264 *encoder* in a public build is
+So the universal clean-room file is **`.mp4` / `.mov` · H.264 · AAC**, all in Rust (D-SF6,
+spike in `docs/storyboard-plan.md` § Files): the encoder trades file size for a clean licence —
+about 2.5–3× x264's bitrate at the same quality — which an animatic can afford. The export sits
+behind a `video` cargo feature, so a build without it carries no H.264 or AAC code. Shipping an H.264 *encoder* in a public build is
 patent-pool territory (Via LA; most base patents have expired) — a check for the project owner,
 not something the code decides. Decode stays with FilmCraft either way.
 

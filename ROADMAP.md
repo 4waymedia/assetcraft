@@ -39,13 +39,13 @@ committed), **next** (the step after the one building), **planned** (specced, or
 
 | Order | Milestone | What it delivers | Status | Waits on | Doc |
 |-------|-----------|------------------|--------|----------|-----|
-| 1 | W2b window chrome | The app's own 30 px title bar: icon · context · menus inline · ⎯ ▢ ✕, drag / double-click / edge resize via `ViewportCommand`; macOS keeps its traffic lights | **building** (delivered 2026-11-05; Paul's look check + commit) | — | `STATUS.md` § SB-3D1 (W2b) |
-| 2 | SF1a Save / Save As | `storyboard.save` / `saveAs`, atomic `.storyboard.json`, dirty flag, Ctrl+S, title `Name •`, "Save changes?" before close; D-SF5: New doesn't ask | **building** (delivered 2026-11-06; `xtask ci` on the PC) | — | `docs/storyboard-plan.md` § Files |
-| 3 | SF1b Save as FilmCraft… / Export Video… | OTIO written to FilmCraft's reader conventions (one video track, `Gap`, `Marker.2`, song as audio, motion in an `assetcraft` namespace); Export Video = FilmCraft renders (D-SF3), greyed without FilmCraft | **next** | D-SF3 decided | § Files SF1b |
+| 1 | W2b window chrome | The app's own 30 px title bar: icon · context · menus inline · ⎯ ▢ ✕, drag / double-click / edge resize via `ViewportCommand`; macOS keeps its traffic lights | shipped `c814bb4` (look check open) | — | `STATUS.md` § SB-3D1 (W2b) |
+| 2 | SF1a Save / Save As | `storyboard.save` / `saveAs`, atomic `.storyboard.json`, dirty flag, Ctrl+S, title `Name •`, "Save changes?" before close; D-SF5: New doesn't ask | shipped `81cd6bc` | — | `docs/storyboard-plan.md` § Files |
+| 4 | SF1b Save as FilmCraft… / Export via FilmCraft… | OTIO written to FilmCraft's reader conventions (one video track, `Gap`, `Marker.2`, song as audio, motion in an `assetcraft` namespace); Export Video = FilmCraft renders (D-SF3), greyed without FilmCraft | **next** | D-SF3 decided | § Files SF1b |
 | 4 | SF2 Open / Recent | `storyboard.open` with hostile-input limits, missing assets reported per clip, Open Recent, double-click in the Organizer | planned | — | § Files SF2 |
 | 5 | SF4 Export shot list + stills | CSV / Markdown shot list, every hero as PNG at the Viewer's framing, contact sheet; pure Rust | planned | — | § Files SF4 |
 | 6 | SF3 Send to (App) | `storyboard.sendTo {app}` — FilmCraft via OTIO + `filmcraft-cli run`; EffectCraft after a look at its registry | planned | D-SF4 decided | § Files SF3 |
-| 7 | SF5 native video export | Export without FilmCraft: the route ladder in `README.md` § Video (C″ `rusty_h264` + `rusty_aac` pure-Rust MP4 if provenance and quality check out; C′ `openh264`; B `rav1e` AV1; A Motion-JPEG AVI; C external `ffmpeg`) | planned | **D-SF6 open** (route; Paul) | `README.md` § Video, § Files SF5 |
+| 3 | SF5 native video export | `.mp4` / `.mov` · H.264 · AAC in pure Rust (D-SF6 chosen on the spike, 2026-11-06): SF5-2 `crates/video` encoder + muxer → SF5-3 `crates/animatic` frame compositor → SF5-4 `storyboard.exportVideo` job → SF5-5 File › Export Video… | **building** (SF5-1 spike done; SF5-2 next) | patent note for a public build (Paul) | `docs/storyboard-plan.md` § Files SF5, D-SF6 |
 | 8 | ST1–ST4 storyboard templates | `template` flag + Save as Template; bundled Review · Tutorial · 5-minute instructions; Start › New › Template; user templates in `<working>/Templates/` | planned | SF1–SF2, SF5 | `docs/storyboard-plan.md` § Templates |
 | 9 | SB-3D1 steps 4–5 | Set from Viewer (orbit / pan in the Storyboard Viewer, `storyboard.motion.capture`), Apply to all model / still shots | planned | — | `docs/design/clip-motion-handoff.md` |
 | 10 | T-OS1 CI matrix | GitHub Actions on ubuntu / macos / windows + a `wasm32` check, so a first compile on another OS never fails in Paul's hands again (finder `is_absolute`, `/x` paths, label casing were all this class) | planned (steps 1–4 specced) | — | `STATUS.md` § Folders panel (T-OS1) |
@@ -94,13 +94,16 @@ needs Paul's priority before it becomes a planned row.
 | PC | PrepressCraft (sibling app) | Print prep / prepress for the suite | Project doc `claude/prepresscraft-plan.md` | Paul | idea |
 | SUB | Submission readiness | What AssetCraft needs before it is offered to the ArtCraft team (D-S2–D-S5) | Project doc `claude/assetcraft-submission-readiness.md` | Paul | open |
 | CACHE | Suite cache | D-C3, D-C5, D-C6 (shared analyses in the cache, redo vs migrate — audit D6) | `docs/design/cache.md` | Paul | open |
+| DOC-FEAT | README (Paul, 2026-11-05) | Dedicated feature lists for the Organizer and for Storyboard mode, beside the three screenshots | Two README sections, each a checklist of shipped items with the command ids, built from § What it does today | Claude | planned |
+| RATE | Organize (Paul, 2026-11-05: "build out the rating system") | Stars, colour labels and keywords on assets, shared with LightCraft through `.xmp` sidecars (`lightcraft-meta`), shown on the cards and in Metadata, filterable | Stage 2 T3 after the write seam (audit wave 1): `asset.rate {paths, stars}`, `asset.label`, `asset.keywords` with undo; read-only display first | Claude (Paul: D5 write seam) | planned |
+| COLL | Organize (Paul, 2026-11-05: "collection tags") | Collections as tags: a named set an asset can belong to across folders, with a Collections list in the Folders panel; smart collections (saved searches such as `rating:>3 kw:reaper`) after | Start as `<working>/Collections/<name>.json` (atomic, versioned) + a `collection:` keyword in the sidecar so LightCraft sees it; Stage 3 adds the catalog and smart collections | Claude | planned |
 | W2-SNAP | Window chrome | With our own title bar, Windows 11 Snap Layouts on hover of ▢ are lost | Re-enable via `WM_NCHITTEST` later if missed | Claude | idea |
 
 ## 5. Open decisions (index)
 
 | ID | Decision | Where | Blocks |
 |----|----------|-------|--------|
-| D-SF6 | Native video export route (C″ pure-Rust MP4 / C′ openh264 / B AV1 / A MJPEG / C ffmpeg) | `README.md` § Video | SF5 |
+| D-SF6 | Native video export route — **decided on the spike: C″ pure-Rust H.264 + AAC**; the patent note for a public build stays with Paul | `docs/storyboard-plan.md` § Files | — |
 | D-SF1–D-SF5 | File name and place, autosave, FilmCraft renders, send-to transport, New doesn't ask — built on the recommendations; confirm or change | `docs/storyboard-plan.md` § Files | — |
 | D-AI1–D-AI3 | AI Prompt & Insert: plan data vs compositor; storyline slice C path; save before/after | `docs/design/ai-prompt-insert.md` | AI Prompt & Insert |
 | D-A2–D-A4, D-API1 | Stage 1.5 control channel and API shape | `docs/assetcraft-plan.md` § Stage 1.5, `docs/control-protocol.md` | 2b, C2 |
