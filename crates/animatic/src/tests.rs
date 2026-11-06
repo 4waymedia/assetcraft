@@ -26,7 +26,7 @@ fn clip(id: u32, shot: ShotType, secs: u64) -> Clip {
 fn stats(img: &Rgba, rgb: [u8; 3]) -> (usize, [f32; 3]) {
     let mut n = 0usize;
     let mut sum = [0.0f32; 3];
-    for p in img.data.chunks_exact(4) {
+    for p in img.data.as_chunks::<4>().0 {
         if p[..3] != rgb {
             n += 1;
             for c in 0..3 {
@@ -223,7 +223,7 @@ fn dump() {
     ] {
         let f = c.clip_frame(clip, t);
         let mut ppm = format!("P6 {} {} 255\n", f.width, f.height).into_bytes();
-        for p in f.data.chunks_exact(4) {
+        for p in f.data.as_chunks::<4>().0 {
             ppm.extend_from_slice(&p[..3]);
         }
         std::fs::write(format!("{dir}/{name}.ppm"), ppm).unwrap_or_else(|e| panic!("{e}"));
