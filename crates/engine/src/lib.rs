@@ -12,6 +12,7 @@ mod decode;
 pub mod document_cmd;
 pub mod effect;
 mod enabled;
+pub mod export_job;
 pub mod generate_cmd;
 pub mod launch;
 mod library_cmd;
@@ -37,6 +38,7 @@ pub use assetcraft_thumbs::DiskCache;
 pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
 pub use effect::{EffectClass, Effects};
+pub use export_job::{ExportPlan, ExportProgress, ExportStage};
 pub use generate_cmd::{CUEMAP_SUFFIX, GeneratedFrom, LENGTHS, cue_map_label};
 pub use launch::{
     LaunchAction, Launcher, PROGRAM_EXTENSIONS, RecordingLauncher, SystemLauncher, explorer_command_line,
@@ -209,6 +211,8 @@ pub struct Session {
     analysis_dir: Option<std::path::PathBuf>,
     /// The background track analyser (`storyboard.analyse`).
     analyser: analyse_job::Analyser,
+    /// The video export job (`storyboard.exportVideo`).
+    exporter: export_job::Exporter,
 }
 
 impl Session {
@@ -257,6 +261,7 @@ impl Session {
             working_folder: prefs.working_folder.clone(),
             analysis_dir: None,
             analyser: analyse_job::Analyser::default(),
+            exporter: export_job::Exporter::default(),
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -670,6 +675,8 @@ mod audio_tests;
 mod document_tests;
 #[cfg(test)]
 mod enabled_tests;
+#[cfg(test)]
+mod export_tests;
 #[cfg(test)]
 mod generate_tests;
 #[cfg(test)]

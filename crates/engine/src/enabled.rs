@@ -46,6 +46,23 @@ impl Session {
             | "storyboard.pause"
             | "storyboard.seek"
             | "storyboard.saveAs" => self.board().map(|_| ()),
+            "storyboard.exportVideo" => {
+                let board = self.board()?;
+                if board.clips.is_empty() {
+                    return Err("the storyboard has no clips to export".into());
+                }
+                if self.exporter_running() {
+                    return Err("an export is already running".into());
+                }
+                Ok(())
+            }
+            "storyboard.exportCancel" => {
+                if self.exporter_running() {
+                    Ok(())
+                } else {
+                    Err("no export is running".into())
+                }
+            }
             "storyboard.save" => {
                 self.board()?;
                 if self.boards.document.is_none() {

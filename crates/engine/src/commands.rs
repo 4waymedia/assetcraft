@@ -253,6 +253,33 @@ static COMMANDS: &[CommandSpec] = &[
         crate::document_cmd::sb_save_as
     ),
     cmd!(
+        EXPORT,
+        "storyboard.exportVideo",
+        "Export Video",
+        "File",
+        None,
+        "{path (.mp4|.mov), size?: '720p'|'1080p'|'4k'|{width,height}, fps?: 24|25|30|50|60, quality?: 16..=36 (QP, default 24), overwrite?, dryRun?, wait?} → the plan + status (a background job: frames through the compositor into H.264, the song through its edit into AAC, written atomically; `dryRun` plans only; `wait` blocks until done)",
+        crate::export_job::sb_export_video
+    ),
+    cmd!(
+        READ,
+        "storyboard.exportStatus",
+        "Export Status",
+        "File",
+        None,
+        "{} → {stage, framesDone, framesTotal, path, bytes, elapsedSecs, problems, message}",
+        crate::export_job::sb_export_status
+    ),
+    cmd!(
+        APP,
+        "storyboard.exportCancel",
+        "Cancel Export",
+        "File",
+        None,
+        "{} → {cancelled, message} (stops at the next frame; the temp file is removed)",
+        crate::export_job::sb_export_cancel
+    ),
+    cmd!(
         READ,
         "storyboard.cueMaps",
         "Cue Maps Here",

@@ -549,6 +549,7 @@ pub(crate) fn state(s: &Session) -> Value {
         "canRedo": !b.redo.is_empty(),
         "document": s.document().map(|p| p.to_string_lossy()),
         "dirty": s.storyboard_dirty(),
+        "export": crate::export_job::status_json(s),
     })
 }
 

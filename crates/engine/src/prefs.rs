@@ -178,6 +178,26 @@ impl ModelPrefs {
     pub fn exposure_factor(self) -> f32 {
         f32::from(self.exposure.clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1)) / 100.0
     }
+
+    /// The renderer's look for these settings (mode, background, exposure); size and quality
+    /// are the caller's. The viewer, the storyboard Viewer and the video export share it.
+    pub fn render_look(self) -> assetcraft_mesh::RenderOptions {
+        use assetcraft_mesh::{Background, DisplayMode, Lighting, RenderOptions};
+        RenderOptions {
+            mode: match self.mode {
+                ModelDisplay::Shaded => DisplayMode::Shaded,
+                ModelDisplay::Wireframe => DisplayMode::Wireframe,
+                ModelDisplay::Normals => DisplayMode::Normals,
+                ModelDisplay::Uv => DisplayMode::UvChecker,
+            },
+            background: match self.background.rgb() {
+                Some(rgb) => Background::Solid(rgb),
+                None => Background::Transparent,
+            },
+            lighting: Lighting { exposure: self.exposure_factor(), ..Lighting::STUDIO },
+            ..RenderOptions::new(16, 16)
+        }
+    }
 }
 
 /// Content-panel view settings.

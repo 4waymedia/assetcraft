@@ -180,8 +180,9 @@ suite adds an `external-process` class. AssetCraft also marks `file.run` `remote
 it is refused on every remote door (`serve`, MCP, `--control`), whatever the grants. The commands
 that write a user file are `storyboard.musicImport` (new files only) and, since SF1 (2026-11-06),
 `storyboard.save` / `storyboard.saveAs` (the storyboard's own document, written atomically; a
-different existing file only with `overwrite: true`): `write-user-file` + `write-app-state`, so
-remote callers confirm them (`Effects::COPY`, `Effects::SAVE`).
+different existing file only with `overwrite: true`) and `storyboard.exportVideo` (SF5-4, a new
+`.mp4` / `.mov` the user named, same rules): `write-user-file` + `write-app-state`, so remote
+callers confirm them (`Effects::COPY`, `Effects::SAVE`, `Effects::EXPORT`).
 
 **Features**
 - **Command effects:** each `CommandSpec` declares classes (`read`, `write-app-state`,

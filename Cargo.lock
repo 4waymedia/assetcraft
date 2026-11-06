@@ -353,12 +353,15 @@ name = "assetcraft-engine"
 version = "0.0.1"
 dependencies = [
  "assetcraft-analysis",
+ "assetcraft-animatic",
  "assetcraft-audio",
  "assetcraft-cache",
  "assetcraft-fs",
+ "assetcraft-mesh",
  "assetcraft-probe",
  "assetcraft-storyboard",
  "assetcraft-thumbs",
+ "assetcraft-video",
  "assetcraft-watch",
  "serde",
  "serde_json",

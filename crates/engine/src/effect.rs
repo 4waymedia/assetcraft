@@ -103,6 +103,9 @@ impl Effects {
     /// user file, written whole or not at all; a *different* existing file is never replaced
     /// without `overwrite: true`. Saving again changes nothing, so it is idempotent.
     pub const SAVE: Effects = Effects { classes: COPY_IN, ..Effects::READ };
+    /// Writes a new file the user asked for (`storyboard.exportVideo`): one user file, written
+    /// whole or not at all beside nothing else; an existing file only with `overwrite: true`.
+    pub const EXPORT: Effects = Effects { classes: COPY_IN, ..Effects::READ };
 
     /// Read only: MCP `readOnlyHint`.
     pub fn read_only(&self) -> bool {
@@ -166,7 +169,8 @@ mod tests {
                 "file.run",
                 "storyboard.musicImport",
                 "storyboard.save",
-                "storyboard.saveAs"
+                "storyboard.saveAs",
+                "storyboard.exportVideo"
             ])
         );
         assert_eq!(
@@ -179,6 +183,7 @@ mod tests {
                 "file.renamePreview",
                 "item.probe",
                 "storyboard.cueMaps",
+                "storyboard.exportStatus",
                 "storyboard.preview",
                 "storyboard.state",
                 "storyboard.tracks",
@@ -191,7 +196,12 @@ mod tests {
         // own document (SF1). Nothing else writes a user file yet.
         assert_eq!(
             ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
-            BTreeSet::from(["storyboard.musicImport", "storyboard.save", "storyboard.saveAs"])
+            BTreeSet::from([
+                "storyboard.musicImport",
+                "storyboard.save",
+                "storyboard.saveAs",
+                "storyboard.exportVideo"
+            ])
         );
         assert!(ids(|e| e.classes.contains(&EffectClass::ExternalNetwork)).is_empty(), "no network before Stage 5");
     }

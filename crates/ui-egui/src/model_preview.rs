@@ -19,10 +19,7 @@ use crate::widgets::fit_at_most;
 use assetcraft_engine::{ModelBackground, ModelDisplay, ModelPrefs};
 use assetcraft_fs::{Entry, EntryKind};
 use assetcraft_probe::Format;
-use assetcraft_thumbs::model::{
-    Background, DRAG_BUDGET, DisplayMode, Lighting, MIN_DRAG_SCALE, ModelState, ModelView, RenderOptions, View,
-    is_model,
-};
+use assetcraft_thumbs::model::{DRAG_BUDGET, MIN_DRAG_SCALE, ModelState, ModelView, RenderOptions, View, is_model};
 use egui::{
     Align2, Color32, ColorImage, FontId, Id, Order, Rect, Response, TextureHandle, TextureOptions, Ui, Vec2, pos2, vec2,
 };
@@ -124,20 +121,7 @@ impl ModelPreview {
 /// The renderer options for the session's `view.model` settings (size fields are placeholders:
 /// the model view sets them per frame).
 pub(crate) fn look(prefs: ModelPrefs) -> RenderOptions {
-    RenderOptions {
-        mode: match prefs.mode {
-            ModelDisplay::Shaded => DisplayMode::Shaded,
-            ModelDisplay::Wireframe => DisplayMode::Wireframe,
-            ModelDisplay::Normals => DisplayMode::Normals,
-            ModelDisplay::Uv => DisplayMode::UvChecker,
-        },
-        background: match prefs.background.rgb() {
-            Some(rgb) => Background::Solid(rgb),
-            None => Background::Transparent,
-        },
-        lighting: Lighting { exposure: prefs.exposure_factor(), ..Lighting::STUDIO },
-        ..RenderOptions::new(16, 16)
-    }
+    prefs.render_look()
 }
 
 /// `true` when `entry` should get the orbit preview (decided by extension, so it works before
@@ -545,6 +529,7 @@ mod tests {
     fn look_maps_the_settings_and_changing_them_re_requests_a_frame() {
         use assetcraft_engine::{ModelBackground, ModelDisplay, ModelPrefs, Prefs, RecordingLauncher, Session};
         use assetcraft_fs::RealFs;
+        use assetcraft_thumbs::model::{Background, DisplayMode};
         use serde_json::json;
         use std::sync::Arc;
         let l = look(ModelPrefs {

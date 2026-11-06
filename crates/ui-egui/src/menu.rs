@@ -33,6 +33,10 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "app.commands",
     "app.openInTargets",
     // Storyboard mode drives these from its mode bar, Shot map and Inspector (and Ctrl+Z / Ctrl+Y).
+    // The video export's menu item, picker and progress come with SF5-5.
+    "storyboard.exportVideo",
+    "storyboard.exportStatus",
+    "storyboard.exportCancel",
     "storyboard.select",
     "storyboard.recut",
     "storyboard.text.kind",
