@@ -362,6 +362,7 @@ pub fn track_from_cue(
             .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
             .collect(),
         edit: edit_of(cue, fit, &tl),
+        credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
     })
 }
 
@@ -583,6 +584,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
             .collect(),
         edit: edit_of(cue, fit, &tl),
+        credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
     });
     board.validate(&Limits::default()).map_err(|e| GenerateError::Invalid(e.to_string()))?;
     if board.total() != report.length {

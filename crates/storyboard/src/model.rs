@@ -272,6 +272,10 @@ pub struct Track {
     /// `docs/track-analysis.md` §6.5); `None` plays the file from its start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit: Option<TrackEdit>,
+    /// The credit line the cue map carries for the song ("Music: Song by Me · CC BY 4.0"),
+    /// for the credits clip (`{music}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit: Option<String>,
 }
 
 /// An audio edit: which parts of the file play, in order, and how they join and end. Frames are

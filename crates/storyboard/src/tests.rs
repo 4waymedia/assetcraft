@@ -42,6 +42,7 @@ fn sample() -> Storyboard {
         beat_grid: vec![],
         song_sections: vec![],
         edit: None,
+        credit: None,
     });
     board
 }
@@ -948,4 +949,44 @@ fn as_template_strips_assets_and_from_template_makes_a_fresh_board() {
     assert_eq!(fresh.name, "Episode 2");
     assert_eq!(fresh.clips, t.clips);
     assert_eq!(fresh.scenes, t.scenes);
+}
+
+#[test]
+fn the_credits_clip_is_appended_last_with_its_placeholders_filled() {
+    let credits = credits_template();
+    assert!(credits.template && credits.clips.len() == 1 && credits.clips[0].shot_type == ShotType::Ttl);
+    // With a song: the credit line comes from the track.
+    let mut board = sample();
+    board.name = "Hollow Saint".into();
+    if let Some(t) = board.track.as_mut() {
+        t.credit = Some("Music: Sample track by Nobody · CC0".into());
+    }
+    let before = board.clips.len();
+    let last_scene = board.scenes.len();
+    assert_eq!(board.append_credits(&credits), 1);
+    assert_eq!(board.clips.len(), before + 1);
+    assert_eq!(board.scenes.len(), last_scene + 1);
+    let card = board.clips.last().unwrap();
+    assert_eq!(card.description, "Hollow Saint\nMusic: Sample track by Nobody · CC0\nMade with AssetCraft");
+    assert_eq!(card.shot_type, ShotType::Ttl);
+    assert_eq!(card.transition_out, Transition::FadeOut);
+    assert_eq!(board.clips[before - 1].transition_out, Transition::Cut, "the old last clip no longer fades out");
+    assert_eq!(card.scene_id, board.scenes.last().unwrap().id);
+    assert!(
+        board.clips.iter().map(|c| c.id).collect::<std::collections::BTreeSet<_>>().len() == board.clips.len(),
+        "ids unique"
+    );
+    board.validate(&Limits::default()).unwrap_or_else(|e| panic!("{e}"));
+    // No song: the music line is dropped; no credit text: "Music: <name>".
+    let mut plain = Storyboard::new("Plain");
+    plain.scenes.push(Scene { id: SceneId(1), song_section: None });
+    plain.append_credits(&credits);
+    assert_eq!(plain.clips.last().unwrap().description, "Plain\nMade with AssetCraft");
+    let mut named = sample();
+    named.append_credits(&credits);
+    assert!(
+        named.clips.last().unwrap().description.contains("Music: Hollow"),
+        "{}",
+        named.clips.last().unwrap().description
+    );
 }

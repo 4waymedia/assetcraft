@@ -113,3 +113,34 @@ fn save_as_template_writes_the_shape_and_new_reads_it_back() {
     assert_eq!(s.storyboard().unwrap().assets_assigned(), 0, "its assets are left behind");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_credits_clip_is_appended_on_request_and_the_users_own_version_wins() {
+    let (mut s, dir) = session("credits");
+    // Bundled until the user edits it.
+    let where_ = run(&mut s, "storyboard.credits", json!({}));
+    assert_eq!(where_["bundled"], true);
+    assert_eq!(PathBuf::from(where_["path"].as_str().unwrap()), dir.join("Templates").join("Credits.storyboard.json"));
+    // New with credits: the last clip is the credits card with the name filled in.
+    run(&mut s, "storyboard.new", json!({ "template": "review", "name": "Lamp review", "credits": true }));
+    let board = s.storyboard().unwrap();
+    let last = board.clips.last().unwrap();
+    assert_eq!(last.description, "Lamp review\nMade with AssetCraft");
+    assert_eq!(board.scenes.last().unwrap().song_section.as_deref(), Some("Credits"));
+    let without = run(&mut s, "storyboard.new", json!({ "template": "review" }));
+    assert!(!s.storyboard().unwrap().clips.last().unwrap().description.contains("AssetCraft"));
+    assert_eq!(without["dirty"], false);
+    // Edit: the file appears and opens as the board; a change saved there is what New appends.
+    let opened = run(&mut s, "storyboard.credits", json!({ "edit": true }));
+    assert!(opened["message"].as_str().unwrap().starts_with("Editing the credits clip"));
+    assert!(dir.join("Templates").join("Credits.storyboard.json").exists());
+    assert!(s.storyboard().unwrap().template);
+    assert_eq!(s.document(), s.credits_path().as_deref());
+    s.boards.board.as_mut().unwrap().clips[0].description = "{title}\nA film by Paul\n{music}".into();
+    run(&mut s, "storyboard.save", json!({}));
+    assert_eq!(run(&mut s, "storyboard.credits", json!({}))["bundled"], false);
+    run(&mut s, "storyboard.new", json!({ "sample": true, "credits": true }));
+    let last = s.storyboard().unwrap().clips.last().unwrap().description.clone();
+    assert_eq!(last, "Hollow Saint teaser\nA film by Paul\nMusic: Sample track");
+    let _ = std::fs::remove_dir_all(&dir);
+}

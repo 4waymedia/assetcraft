@@ -9,7 +9,7 @@
 use crate::storyboard::{Mode, Transport};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::cuemap::MAX_CUEMAP_BYTES;
-use assetcraft_storyboard::{CueMap, FitMode, GenerateOptions, Pacing, generate, next_empty};
+use assetcraft_storyboard::{CueMap, FitMode, GenerateOptions, Pacing, RecutOptions, generate, next_empty};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -191,7 +191,17 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
         density,
         shape,
     };
-    let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    let (mut board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    if crate::template_cmd::append_credits_if(s, p, &mut board) > 0
+        && let Some(track) = board.track.clone()
+    {
+        // The generated clips make room for the credits card, so the Cut still ends with the song.
+        let fit =
+            assetcraft_storyboard::recut(&board, track.bpm, track.duration, RecutOptions { keep_title_cards: true });
+        for (clip, d) in board.clips.iter_mut().zip(&fit.durations) {
+            clip.duration = *d;
+        }
+    }
     let lengths = fit_lengths(&cue);
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board);

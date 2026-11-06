@@ -483,6 +483,9 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         ],
         // Listed under New from Template (above); the item itself would only repeat it.
         "storyboard.templates" => vec![],
+        "storyboard.credits" => {
+            vec![item(format!("{}…", spec.label), None, true, cmd(spec.id, json!({ "edit": true })))]
+        }
         "storyboard.saveTemplate" => {
             vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveTemplate)]
         }

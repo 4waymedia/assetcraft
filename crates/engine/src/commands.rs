@@ -222,7 +222,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, cueMap?, seconds?, fitMode?} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — with `cueMap` the song becomes its track and the clips are re-cut to fit); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, cueMap?, seconds?, fitMode?, credits?: bool} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — with `cueMap` the song becomes its track and the clips are re-cut to fit); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(
@@ -231,7 +231,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard from Track",
         "File",
         None,
-        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, density?: 0.5..2, name?} (scenes from sections, clips on bars and hits; density: fewer, longer shots below 1, more, shorter above; one undo step)",
+        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, density?: 0.5..2, name?, credits?: bool} (scenes from sections, clips on bars and hits; `credits` appends the credits clip; density: fewer, longer shots below 1, more, shorter above; one undo step)",
         crate::generate_cmd::sb_generate
     ),
     cmd!(
@@ -260,6 +260,15 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{name, overwrite?} → {path, message} + state (the open board with assets and track removed, `template: true`, written to <working>/Templates/<name>.storyboard.json; an existing template only with `overwrite`)",
         crate::template_cmd::sb_save_template
+    ),
+    cmd!(
+        APP,
+        "storyboard.credits",
+        "Edit Credits Clip",
+        "File",
+        None,
+        "{on?: bool, edit?: bool} → {path, exists, bundled, on} (`on` sets the Start screen's checkbox, remembered; the credits clip template: the user's Templates/Credits.storyboard.json or the bundled one; `edit` writes the default when missing and opens it to edit — File › Save keeps it). New and Generate take `credits: true` to append it last",
+        crate::template_cmd::sb_credits
     ),
     cmd!(
         READ,

@@ -180,6 +180,7 @@ fn a_small_cut_exports_to_a_playable_file_and_reports() {
         beat_grid: Vec::new(),
         song_sections: Vec::new(),
         edit: None,
+        credit: None,
     });
     let mov = dir.join("Cut.mov");
     std::fs::write(&mov, b"old").unwrap();

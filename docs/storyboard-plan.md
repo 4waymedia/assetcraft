@@ -264,7 +264,23 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   becomes the track (`track_from_cue`: tempo, length, beat grid, sections, the fit's edit) and
   Re-cut fits the template's clips to it in whole beats, title cards kept; without a song the
   template keeps its own seconds. ST4 (a template's intros as prompts for AI Prompt & Insert)
-  stays planned. Tests: storyboard 2, engine 3, ui-egui 2. Owner: Claude; Paul owns the beats.
+  stays planned. **ST5 credits clip, built 2026-11-06** (Paul: "a prebuilt and saved template… a
+  simple checkbox next to 'create storyboard' that will insert the credit clip at the end"):
+  `template::credits()` — one scene, one 6 s title card "{title} · {music} · Made with
+  AssetCraft" (Minimal, fade in / out); `Storyboard::append_credits` renumbers it in as the last
+  scene, fills `{title}` and `{music}` (`Track.credit`, new, from the cue map's credit line, else
+  "Music: <name>"; the line is dropped without a song) and moves the fade-out to it;
+  `storyboard.new` / `storyboard.generate {credits: true}` append it *before* the re-cut, so with a
+  song the credits sit inside the song's length (title cards keep their seconds); the user's own
+  version is `<working>/Templates/Credits.storyboard.json` — `storyboard.credits {edit: true}`
+  (File › Edit Credits Clip…, the Start screen's "Edit…") writes the bundled default when missing
+  and opens it, File › Save keeps it, and it wins from then on; `{on}` sets the Start screen's
+  **Add the credits clip at the end** checkbox, remembered in prefs (`credits`, on by default).
+  Tests: storyboard 1, engine 2, ui-egui 1. **Next (Paul, 2026-11-06, discussed):** formats ×
+  styles (Vlog · Voice over · Slides), "Unknown" length as a scaffold of n sections at 30 s each
+  that the user stretches (`storyboard.resize`), the chorus loop under the sections at a gain,
+  per-section music — spec first (`docs/design/template-formats.md`). Tests: storyboard 3,
+  engine 5, ui-egui 2. Owner: Claude; Paul owns the beats.
 
 ## Decisions (Paul)
 

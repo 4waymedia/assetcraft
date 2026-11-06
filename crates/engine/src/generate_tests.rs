@@ -149,7 +149,13 @@ fn a_template_with_a_cue_map_takes_the_song_as_its_track_and_is_recut_to_fit() {
     assert_eq!(board.name, "Lamp");
     assert_eq!(board.total(), Ticks::from_secs(30).unwrap());
     assert!(board.track.as_ref().and_then(|t| t.edit.as_ref()).is_some(), "the 30 s fade edit");
+    // Generate with credits: the credits card closes the Cut with the song's credit line.
+    run(&mut s, "storyboard.generate", json!({ "cueMap": "/music/song.cuemap.json", "credits": true }));
+    let board = s.storyboard().unwrap();
+    let last = board.clips.last().unwrap();
+    assert!(last.description.ends_with("Music: Song by Me\nMade with AssetCraft"), "{}", last.description);
+    assert_eq!(board.total(), board.track.as_ref().unwrap().duration, "the credits sit inside the song");
     // A bad cue map is refused before anything changes.
     assert!(s.execute("storyboard.new", &json!({ "template": "review", "cueMap": "/music/bad.cuemap.json" })).is_err());
-    assert_eq!(s.storyboard().unwrap().name, "Lamp");
+    assert_eq!(s.storyboard().unwrap().name, "Song · Trailer");
 }

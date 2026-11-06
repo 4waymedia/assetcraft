@@ -54,7 +54,8 @@ pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
 pub use template::{
-    BUNDLED, STEPS_RANGE, TemplateInfo, bundled as bundled_template, bundled_with as bundled_template_with,
+    BUNDLED, CREDITS_NAME, STEPS_RANGE, TemplateInfo, bundled as bundled_template,
+    bundled_with as bundled_template_with, credits as credits_template,
 };
 pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,

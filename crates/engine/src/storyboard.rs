@@ -216,6 +216,9 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // A template with a track (Start › New › Template, ST3b): the song's tempo, length and
     // sections become the board's track and Re-cut fits the template's clips to it in whole
     // beats, title cards kept.
+    // The credits clip goes on before the re-cut, so with a song it sits inside the song's
+    // length (title cards keep their seconds; the shots share the rest).
+    crate::template_cmd::append_credits_if(s, p, &mut board);
     let mut fitted = None;
     if p.get("template").is_some() && p.get("cueMap").is_some() {
         let path = crate::generate_cmd::cue_map_param(p)?;

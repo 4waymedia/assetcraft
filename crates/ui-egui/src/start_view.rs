@@ -816,6 +816,23 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
             .on_hover_text("Places the Organizer's files into the empty clips in order (Quick fill's Auto-fill rest)");
             ui.add_space(12.0);
         }
+        // The credits clip (Paul, 2026-11-06): one checkbox, remembered; the clip is the
+        // user's own template once edited.
+        let mut credits = nav.session.credits_on();
+        ui.horizontal(|ui| {
+            if ui
+                .checkbox(&mut credits, "Add the credits clip at the end")
+                .on_hover_text("A title card with the storyboard's name, the song's credit and \"Made with AssetCraft\" — edit it to make it yours")
+                .changed()
+            {
+                nav.run("storyboard.credits", json!({ "on": credits }));
+            }
+            if ui.small_button("Edit…").on_hover_text("Open the credits clip as a storyboard; File › Save keeps your version").clicked() {
+                nav.run("storyboard.credits", json!({ "edit": true }));
+                nav.state.storyboard.start.open = false;
+            }
+        });
+        ui.add_space(12.0);
         let ready = match style {
             Style::Pacing(_) => selected_track(nav).is_some(),
             _ => true,
@@ -847,12 +864,13 @@ pub(crate) fn create_board(nav: &mut Navigator) {
     let name = start.name.trim().to_owned();
     let (style, track, length, autofill, density, shape) =
         (start.style, start.track.clone(), start.length, start.autofill, start.density(), start.shape);
+    let credits = nav.session.credits_on();
     let ok = match style {
         Style::Pacing(p) => {
             let Some(cue) = track else { return };
             let mut params = json!({
                 "cueMap": cue, "pacing": p.id(), "seconds": length, "density": density,
-                "shape": serde_json::to_value(shape).unwrap_or(json!({})),
+                "shape": serde_json::to_value(shape).unwrap_or(json!({})), "credits": credits,
             });
             if !name.is_empty() {
                 params["name"] = json!(name);
@@ -865,7 +883,7 @@ pub(crate) fn create_board(nav: &mut Navigator) {
         }
         Style::Template(i) => {
             let Some(t) = BUNDLED.get(i) else { return };
-            let mut params = json!({ "template": t.id });
+            let mut params = json!({ "template": t.id, "credits": credits });
             if let Some(steps) = nav.state.storyboard.start.steps {
                 params["steps"] = json!(steps);
             }
@@ -880,9 +898,12 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             }
             nav.run("storyboard.new", params).is_some()
         }
-        Style::Sample => nav.run("storyboard.new", json!({ "sample": true })).is_some(),
+        Style::Sample => nav.run("storyboard.new", json!({ "sample": true, "credits": credits })).is_some(),
         Style::Blank => {
-            let params = if name.is_empty() { json!({}) } else { json!({ "name": name }) };
+            let mut params = json!({ "credits": credits });
+            if !name.is_empty() {
+                params["name"] = json!(name);
+            }
             nav.run("storyboard.new", params).is_some()
         }
     };

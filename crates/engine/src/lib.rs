@@ -216,6 +216,8 @@ pub struct Session {
     exporter: export_job::Exporter,
     /// Storyboards opened or saved, newest first (`storyboard.recent`; saved in prefs).
     recent_storyboards: Vec<PathBuf>,
+    /// The Start screen's "Add the credits clip" (saved in prefs).
+    credits: bool,
 }
 
 impl Session {
@@ -266,6 +268,7 @@ impl Session {
             analyser: analyse_job::Analyser::default(),
             exporter: export_job::Exporter::default(),
             recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
+            credits: prefs.credits,
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -542,7 +545,18 @@ impl Session {
             model: self.model,
             working_folder: self.working_folder.clone().filter(|p| p.to_str().is_some()),
             recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
+            credits: self.credits,
         }
+    }
+
+    /// Whether the Start screen adds the credits clip (the checkbox; remembered).
+    pub fn credits_on(&self) -> bool {
+        self.credits
+    }
+
+    /// Set the Start screen's credits checkbox (remembered in prefs).
+    pub fn set_credits_on(&mut self, on: bool) {
+        self.credits = on;
     }
 
     /// The services this session reads through (the thumbnail pool shares them).

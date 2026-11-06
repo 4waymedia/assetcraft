@@ -8,6 +8,12 @@
 //!   as a template (`Storyboard::as_template`: assets and track removed, `template: true`)
 //!   written atomically to `<working>/Templates/<name>.storyboard.json`; an existing file only
 //!   with `overwrite`. The open board itself is unchanged.
+//! - `storyboard.credits {edit?: bool}` → `{path, exists, bundled}`: where the credits clip
+//!   template is — the user's `<working>/Templates/Credits.storyboard.json` when it exists, else
+//!   the bundled one; with `edit`, the user's file is written from the bundled default when
+//!   missing and opened as the storyboard, so File › Save keeps the user's version.
+//!   `storyboard.new` and `storyboard.generate` take `credits: true` to append it last
+//!   (`Storyboard::append_credits`: `{title}` and `{music}` filled).
 //! - `storyboard.new {template: <id | path>, steps?, name?, cueMap?, seconds?}`: a fresh board
 //!   from a template (`Storyboard::from_template`), named after it unless `name` is given; a
 //!   bundled template takes `steps` (its points or steps, 1–12); a path is read and validated
@@ -17,7 +23,9 @@
 use crate::document_cmd::{SUFFIX, document_name, write_atomic};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
-use assetcraft_storyboard::{BUNDLED, Limits, STEPS_RANGE, Storyboard, bundled_template_with};
+use assetcraft_storyboard::{
+    BUNDLED, CREDITS_NAME, Limits, STEPS_RANGE, Storyboard, bundled_template_with, credits_template,
+};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -128,6 +136,58 @@ pub(crate) fn sb_save_template(s: &mut Session, p: &Value) -> CmdResult {
     if let Value::Object(map) = &mut out {
         map.insert("path".into(), json!(path.to_string_lossy()));
         map.insert("message".into(), json!(format!("Saved template {clean}")));
+    }
+    Ok(out)
+}
+
+impl Session {
+    /// The user's credits template file (may not exist).
+    pub fn credits_path(&self) -> Option<PathBuf> {
+        self.templates_folder().map(|d| d.join(format!("{CREDITS_NAME}{SUFFIX}")))
+    }
+
+    /// The credits clip template: the user's file when it reads as a board, else the bundled one.
+    pub fn credits_template(&self) -> Storyboard {
+        let limits = Limits::default();
+        self.credits_path()
+            .and_then(|p| self.services.read_head(&p, limits.max_bytes + 1).ok())
+            .and_then(|bytes| Storyboard::from_json_with(&bytes, &limits).ok())
+            .unwrap_or_else(credits_template)
+    }
+}
+
+/// Append the credits clip when `p.credits` is true (New and Generate).
+pub(crate) fn append_credits_if(s: &Session, p: &Value, board: &mut Storyboard) -> usize {
+    if p.get("credits").and_then(Value::as_bool).unwrap_or(false) {
+        board.append_credits(&s.credits_template())
+    } else {
+        0
+    }
+}
+
+/// `storyboard.credits {on?: bool, edit?: bool}`.
+pub(crate) fn sb_credits(s: &mut Session, p: &Value) -> CmdResult {
+    if let Some(v) = p.get("on") {
+        let on = v.as_bool().ok_or_else(|| CmdError::BadParams("`on` must be true/false".into()))?;
+        s.set_credits_on(on);
+    }
+    let path = s.credits_path().ok_or_else(|| CmdError::Unavailable("no working folder for templates".into()))?;
+    let exists = s.services.entry(&path).is_ok();
+    if !p.get("edit").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(
+            json!({ "path": path.to_string_lossy(), "exists": exists, "bundled": !exists, "on": s.credits_on() }),
+        );
+    }
+    if !exists {
+        let json = credits_template()
+            .to_json()
+            .map_err(|e| CmdError::Unavailable(format!("could not encode the credits template: {e}")))?;
+        write_atomic(&path, json.as_bytes())
+            .map_err(|e| CmdError::Unavailable(format!("could not write {}: {e}", path.display())))?;
+    }
+    let mut out = crate::document_cmd::sb_open(s, &json!({ "path": path.to_string_lossy() }))?;
+    if let Value::Object(map) = &mut out {
+        map.insert("message".into(), json!("Editing the credits clip · File › Save keeps it"));
     }
     Ok(out)
 }

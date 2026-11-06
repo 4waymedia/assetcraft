@@ -238,7 +238,81 @@ pub fn instructions(steps: usize) -> Storyboard {
     build("5-minute instructions", "Instructions", TextTheme::Paper, &scenes)
 }
 
+/// The credits template's name (the user's own lives at `<working>/Templates/Credits.storyboard.json`).
+pub const CREDITS_NAME: &str = "Credits";
+
+/// The bundled credits clip (Paul, 2026-11-06: "a prebuilt and saved template… a simple
+/// checkbox next to Create storyboard that will insert the credit clip at the end"): one scene
+/// with one title card. Its words carry placeholders filled when it is appended
+/// ([`Storyboard::append_credits`]): `{title}` the storyboard's name, `{music}` the song's
+/// credit line (dropped with its line when there is no song).
+pub fn credits() -> Storyboard {
+    let mut board = Storyboard::new(CREDITS_NAME);
+    board.format = Some("Credits".into());
+    board.template = true;
+    board.scenes.push(Scene { id: SceneId(1), song_section: Some(CREDITS_NAME.into()) });
+    let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(6).unwrap_or(Ticks::ZERO));
+    card.description = "{title}\n{music}\nMade with AssetCraft".into();
+    card.text_style =
+        TextStyle { theme: TextTheme::Minimal, animation: TextAnimation::Fade, position: TextPosition::Center };
+    card.transition_in = Transition::FadeIn;
+    card.transition_out = Transition::FadeOut;
+    board.clips.push(card);
+    board
+}
+
 impl Storyboard {
+    /// Append `credits` (a template, usually [`credits`] or the user's own) as the last scene(s)
+    /// of this board: scenes and clips renumbered after the board's own, placeholders in the
+    /// words filled (`{title}`, `{music}`; a line left empty is dropped), the last clip fading
+    /// out. Returns how many clips were added.
+    pub fn append_credits(&mut self, credits: &Storyboard) -> usize {
+        let next_scene = self.scenes.iter().map(|s| s.id.0).max().unwrap_or(0) + 1;
+        let next_clip = self.clips.iter().map(|c| c.id.0).max().unwrap_or(0) + 1;
+        let music = self
+            .track
+            .as_ref()
+            .map(|t| t.credit.clone().unwrap_or_else(|| format!("Music: {}", t.name)))
+            .unwrap_or_default();
+        let title = self.name.clone();
+        let fill = |text: &str| -> String {
+            text.replace("{title}", &title)
+                .replace("{music}", &music)
+                .lines()
+                .map(str::trim_end)
+                .filter(|l| !l.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mut scene_map: Vec<(SceneId, SceneId)> = Vec::new();
+        for (i, scene) in credits.scenes.iter().enumerate() {
+            let id = SceneId(next_scene + i as u32);
+            scene_map.push((scene.id, id));
+            self.scenes.push(Scene { id, song_section: scene.song_section.clone() });
+        }
+        if let Some(last) = self.clips.last_mut()
+            && last.transition_out == Transition::FadeOut
+        {
+            last.transition_out = Transition::Cut;
+        }
+        let mut added = 0;
+        for (i, clip) in credits.clips.iter().enumerate() {
+            let Some((_, scene_id)) = scene_map.iter().find(|(from, _)| *from == clip.scene_id) else { continue };
+            let mut c = clip.clone();
+            c.id = ClipId(next_clip + i as u32);
+            c.scene_id = *scene_id;
+            c.asset_ids.clear();
+            c.description = fill(&clip.description);
+            c.overlay = clip.overlay.as_deref().map(fill).filter(|o| !o.is_empty());
+            self.clips.push(c);
+            added += 1;
+        }
+        if let Some(last) = self.clips.last_mut() {
+            last.transition_out = Transition::FadeOut;
+        }
+        added
+    }
+
     /// This board as a template: the same scenes, shots, cards, overlays, durations and motion,
     /// with every asset and the track removed, `template` set.
     pub fn as_template(&self, name: &str) -> Storyboard {

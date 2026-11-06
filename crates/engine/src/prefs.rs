@@ -245,7 +245,7 @@ impl Default for ViewPrefs {
 }
 
 /// Everything persisted between sessions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
     /// File format version, for future migrations.
@@ -276,6 +276,33 @@ pub struct Prefs {
     /// Storyboards opened or saved, newest first (File › Open Recent; SF2).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_storyboards: Vec<PathBuf>,
+    /// The Start screen's "Add the credits clip at the end" (Paul, 2026-11-06); on by default.
+    #[serde(default = "yes")]
+    pub credits: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs {
+            version: 0,
+            favorites: Vec::new(),
+            recent: Vec::new(),
+            last_folder: None,
+            view: ViewPrefs::default(),
+            panels: None,
+            formats: FormatPrefs::default(),
+            music_folder: None,
+            preview_volume: None,
+            working_folder: None,
+            model: ModelPrefs::default(),
+            recent_storyboards: Vec::new(),
+            credits: true,
+        }
+    }
 }
 
 /// Largest panel-layout JSON accepted by `view.panels` and restored from disk.
@@ -324,6 +351,9 @@ impl Prefs {
         prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
         prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
         prefs.working_folder = root.get("working_folder").and_then(Value::as_str).map(PathBuf::from);
+        if let Some(c) = root.get("credits").and_then(Value::as_bool) {
+            prefs.credits = c;
+        }
         if let Some(Value::Array(items)) = root.get("recent_storyboards") {
             prefs.recent_storyboards = items
                 .iter()
