@@ -28,6 +28,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("playback", Class::Layer(2)),
     ("analysis", Class::Layer(2)),
     ("storyboard", Class::Layer(3)),
+    ("animatic", Class::Layer(4)),
     // L3 (planned): interchange. L4 (planned): bridge.
     ("engine", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),

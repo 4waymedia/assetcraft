@@ -1,0 +1,20 @@
+[package]
+name = "assetcraft-animatic"
+description = "The storyboard as frames (SF5): one RGBA picture of the Cut at any time — stills through their pan/zoom window, models through the mesh renderer at the clip's camera, title cards and overlays with their theme, drawn the way the Viewer shows them, without a window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+assetcraft-fs = { workspace = true }
+assetcraft-probe = { workspace = true }
+assetcraft-mesh = { workspace = true }
+assetcraft-thumbs = { workspace = true }
+assetcraft-storyboard = { workspace = true }
+ab_glyph = { workspace = true }

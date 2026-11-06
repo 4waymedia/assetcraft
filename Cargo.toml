@@ -26,6 +26,7 @@ assetcraft-playback = { path = "crates/playback" }
 assetcraft-analysis = { path = "crates/analysis" }
 assetcraft-cache = { path = "crates/cache" }
 assetcraft-video = { path = "crates/video" }
+assetcraft-animatic = { path = "crates/animatic" }
 # external
 # SoundCraft's audio file I/O (MIT OR Apache-2.0; symphonia inside, MPL-2.0 by decision AD1).
 # Pinned to SoundCraft 0.7.0, the commit docs/track-analysis.md was written against.
@@ -66,6 +67,9 @@ rusty_h264-encoder = { version = "=0.17.0", default-features = false, features =
 rusty_h264-common = { version = "=0.17.0", default-features = false, features = ["std"] }
 rusty_h264-decoder = { version = "=0.17.0", default-features = false, features = ["std"] }
 rusty_aac = { version = "=2.0.1", default-features = false }
+# Text in exported frames (Apache-2.0; alexheretic/ab-glyph): rasterizes the bundled Inter font
+# where egui's text engine isn't available (the animatic crate is below the UI layer).
+ab_glyph = "0.2"
 lightcraft-meta = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }
 # HEIF/HEIC: LightCraft 0.8.0 over heic-rs (pure Rust). Optional (`heic` feature of thumbs, off by default).
 lightcraft-heif = { git = "https://github.com/storytold/lightcraft", rev = "16dbb90499d3c63a6582fcbba1b2550a6e2da032" }
