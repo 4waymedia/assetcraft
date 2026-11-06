@@ -10,8 +10,9 @@ DesignCraft, WordCraft).
 - **Immediate area of improvement:** the Crafting Apps have no Bridge. Each app opens its own
   files, and nothing sits above them to find, group, plan and hand off work.
 
-**Status (2026-10-22):** Stages 0 and 1 done; Stage 4 Storyboard mode largely built; Stage 2 (Organize) and Stage 1.5
-(API) under way; 3D viewer V0 in progress. The "Now" table in [STATUS.md](STATUS.md) has the details.
+**Status (2026-11-06):** Stages 0 and 1 done; the 3D viewer V0 complete; Stage 4 Storyboard mode
+shipping (clip motion, Save); Stage 2 (Organize) and Stage 1.5 (API) under way. [ROADMAP.md](ROADMAP.md)
+is the index of shipped, building and planned work; the "Now" table in [STATUS.md](STATUS.md) is the log.
 
 ## Build (Windows, PowerShell)
 
@@ -27,7 +28,8 @@ cargo run -p assetcraft-playback --release --example play -- "<an .mp3>" 30 10  
 Watch your Cut plays the storyboard's track on the default output device (cpal). Windows and macOS
 need nothing extra; Linux builds need the ALSA headers (`sudo apt install libasound2-dev`).
 
-Needs Rust 1.95 or later (`rustup update stable`).
+The toolchain is pinned by `rust-toolchain.toml` (1.99.0; rustup installs it on first build), so
+the Mac, the PC and CI lint identically.
 
 ## Optional formats
 
@@ -87,6 +89,7 @@ MP4 and AV1 WebM, Safari AV1 only on M3+):
 | Route | File                               | Encoder / muxer (licence)                                                   | Windows | macOS QuickTime           | Linux | 90 s 1080p24 animatic | Status      |
 |-------|------------------------------------|-----------------------------------------------------------------------------|---------|---------------------------|-------|-----------------------|-------------|
 | C′    | `.mov` / `.mp4` · H.264 · PCM      | `openh264` (Cisco OpenH264, BSD-2, C++ compiled in); muxer pure Rust        | yes     | yes                       | yes   | ≈ 45–70 MB + 16 MB    | recommended |
+| C″    | `.mp4` · H.264 · AAC, all Rust     | `rusty_h264` + `rusty_aac` (remade_ffmpeg_rs, Apache-2.0, pure Rust, pre-1.0, states "no FFmpeg source was copied") | yes | yes             | yes   | ≈ 45–70 MB + 1.5 MB   | candidate (Paul, 2026-11-05) — provenance and encoder quality to verify before it goes in |
 | B     | `.mkv` / `.webm` · AV1 · FLAC/Opus | `rav1e` (BSD-2, Rust), `flacenc` (Apache-2) or libopus (BSD-3, C)           | Win 11  | macOS 14+ on M3+ only     | yes   | ≈ 25–45 MB            | option      |
 | A     | `.avi` · Motion-JPEG · PCM         | none new (`image` encodes JPEG; RIFF/AVI and WAV written here)              | yes     | yes                       | yes   | ≈ 400–500 MB          | fallback    |
 | C     | `.mp4` · H.264 · AAC via `ffmpeg`  | none linked: an `ffmpeg` found on `PATH` is run as a separate program       | yes     | yes                       | yes   | ≈ 45–70 MB            | optional    |
@@ -103,10 +106,12 @@ larger. The one gap in an H.264 export is the audio track — there is no clean-
 | PCM in `.mov` (what Canon/Sony cameras write) | yes          | yes             | yes   | +16 MB (16-bit 44.1 k)      |
 | PCM in `.mp4` (`ipcm`, ISO 23003-5)          | newer builds | macOS 14+       | yes   | +16 MB                      |
 | Opus (libopus, BSD-3, C)                     | yes          | no              | yes   | +1 MB                       |
-| AAC                                          | yes          | yes             | yes   | +1.5 MB — no clean encoder  |
+| AAC                                          | yes          | yes             | yes   | +1.5 MB — `rusty_aac` (AAC-LC, Apache-2.0, pure Rust) is the one candidate; `fdk-aac` is out (Fraunhofer licence) |
 
-So the universal clean-room file is **`.mov` · H.264 · PCM**; `.mp4` with `ipcm` is the second
-flavour once QuickTime's floor is confirmed. Shipping an H.264 *encoder* in a public build is
+So the universal clean-room file is **`.mov` · H.264 · PCM** today, and **`.mp4` · H.264 · AAC**
+if `rusty_h264` / `rusty_aac` hold up (a pre-1.0 clean-room rewrite: their licence passes
+`cargo deny`, their *provenance* — a rewrite, not a translation of FFmpeg's LGPL code — and
+their encoder quality are what the check is for). Shipping an H.264 *encoder* in a public build is
 patent-pool territory (Via LA; most base patents have expired) — a check for the project owner,
 not something the code decides. Decode stays with FilmCraft either way.
 
@@ -138,23 +143,37 @@ metallic-roughness map with an environment term, vertex colours, alpha (3D viewe
 In the storyboard a model clip carries a camera motion (turntable, push in, rise…) as data on
 the clip, rendered at full quality ahead of the playhead (Return builds the whole cache).
 
-## What it will do
+## What it does today
 
-| Verb      | Highlights                                                                                     |
-|-----------|------------------------------------------------------------------------------------------------|
-| Browse    | Bridge-style folder navigator, thumbnails for every Craft format (PSD, raw, video, PDF, DOCX, 3D) |
-| Structure | Catalog with undo, entities (characters, locations, props), version stacks, lineage            |
-| Organize  | XMP ratings, labels and keywords (shared with LightCraft), collections, smart collections, batch rename |
-| Plan      | [Storyline Builder](docs/storyline-builder.md): blocks, animatic preview, OTIO export into FilmCraft |
-| Execute   | Recipes that drive the sibling apps headlessly, any-CLI steps, hot folders                     |
+Verified against the code on 2026-11-06 (command ids are the registry's; `assetcraft-cli commands`
+lists all 69).
+
+| Area | Shipped |
+|------|---------|
+| Browse (Organizer) | Bridge-style navigator: Computer, Folders panel (Computer · Favorites · Craft tabs; Explorer Quick Access pins, Finder favorites, My Folders shared with the suite in `places.json`), recent, back / forward / up, grid / list, sort, selection, hidden files, live folder watching |
+| Formats | Thumbnails and previews for PNG, JPEG, GIF, BMP, WebP, TIFF, camera raw, PSD, HEIC / HEIF (opt-in), AVIF, PDF, video poster frames (via `filmcraft-cli`), WAV / MP3 facts, GLB / glTF / OBJ; type icons for ZIP and the rest |
+| 3D | Viewer with orbit / zoom / pan, shaded / wireframe / normals / UV checker, backgrounds, turntable; light copy for dense models; Polygons and Textures in Metadata; `assetcraft-cli info` — see § 3D assets |
+| Metadata | Header facts per file (`item.probe`), mesh facts (`asset.meshInfo`), track summary (`track.summary`) |
+| Open In | PhotoCraft, LightCraft, FilmCraft, EffectCraft when installed (`file.openIn`, `app.openInTargets`); reveal in Explorer / Finder; run |
+| Tools | Batch Rename… **preview** (`file.renamePreview`): tokens, presets, never-overwrite plan — nothing is renamed yet (T2) |
+| Storyboard mode | Start screen (song → preset → length → output settings), generate a Cut from a track's cue map, Shot map, Strip view (Content · Viewer · Inspector · timeline), Quick fill, Re-cut, text clips (cards, overlays, themes, intros), clip motion for stills and 3D models (turntable, push in / pull out, pan, rise), Watch your Cut with the song, Render Motion Cache (Return), undo / redo, **Save / Save As** (`.storyboard.json`) |
+| Music | Track analysis in pure Rust (beats, bars, sections, hits, tempo, fits), Analyse all, cue-map sidecars, working folder with Copy & analyse, preview playback |
+| Window | In-app title bar and scroll bars (Trellis-style), docking panel layout saved in prefs, light / dark theme |
+| Automation | `assetcraft-cli` (`probe`, `thumb`, `analyze`, `info`, `sidebar`, `commands`, `exec`); every command carries suite effects and `enabled` / `disabledReason` |
+
+Not yet (see [ROADMAP.md](ROADMAP.md)): opening a saved storyboard (SF2), Send to FilmCraft / export
+(SF1b–SF5), renaming and metadata writes (Stage 2 T2–T4), the control channel and MCP server
+(Stage 1.5 2b), catalog / collections / entities (Stage 3), Develop (3.5), AI providers (5),
+recipes and hot folders (6).
 
 AI is optional. Each capability uses a provider chosen in Preferences: **Local**, **API**, or
-**ArtCraft account**.
+**ArtCraft account** (Stage 5).
 
 ## Docs
 
 | Doc                                                        | What it covers                                        |
 |------------------------------------------------------------|-------------------------------------------------------|
+| [ROADMAP.md](ROADMAP.md)                                   | Shipped · building · planned · ideas · open decisions |
 | [docs/assetcraft-plan.md](docs/assetcraft-plan.md)         | Stages 0–7, Stage 0 in detail, feature backlog        |
 | [docs/storyline-builder.md](docs/storyline-builder.md)     | Plan mode spec, slices A–F, provider design           |
 | [docs/crafting-apps-notes.md](docs/crafting-apps-notes.md) | What we learned from each sibling app, with file refs |
@@ -170,7 +189,7 @@ AI is optional. Each capability uses a provider chosen in Preferences: **Local**
 
 ## Stack (planned, following the siblings)
 
-- Rust (edition 2024, 1.95+), egui/eframe on wgpu, WASM web build. No Tauri, Electron or JS.
+- Rust (edition 2024, pinned 1.99.0), egui/eframe on wgpu, WASM web build. No Tauri, Electron or JS.
 - Every action is a command; opt-in MCP server and loopback control channel.
 - `craft-ui` from [storytold/craft-libs](https://github.com/storytold/craft-libs) for docking
   and theming.
