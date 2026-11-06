@@ -12,6 +12,7 @@ mod chrome;
 mod content;
 mod dock;
 mod document_view;
+mod export_view;
 mod folders;
 mod inspector;
 mod keys;
@@ -88,6 +89,10 @@ struct UiState {
     exit_requested: bool,
     /// "Save changes?" before the window closes (SF1), while it is up.
     unsaved: Option<document_view::Pending>,
+    /// The Export Video window (SF5-5), while it is open.
+    export: Option<export_view::ExportDialog>,
+    /// The export stage last seen, to notice when a job ends.
+    export_seen: Option<assetcraft_engine::ExportStage>,
     /// What the Save picker "returns" in tests (no native dialog there).
     #[cfg(test)]
     test_save_path: Option<PathBuf>,
@@ -345,6 +350,8 @@ impl Navigator {
         rename_dialog::window(self, &ctx);
         document_view::intercept_close(self, &ctx);
         document_view::window(self, &ctx);
+        export_view::window(self, &ctx);
+        export_view::tick(self, &ctx);
         if self.state.custom_chrome {
             chrome::resize_edges(&ctx);
         }
@@ -393,7 +400,9 @@ impl Navigator {
             if enter && !starting {
                 motion_view::toggle_render_job(self);
             }
-            if escape && motion_view::job_progress(self).is_some() {
+            if escape && export_view::cancel_if_running(self) {
+                // Esc stops the export first; the render job keeps its own Esc.
+            } else if escape && motion_view::job_progress(self).is_some() {
                 motion_view::toggle_render_job(self);
             }
             // Space: on the Start screen, the selected track's cut (timeline); else the Cut.

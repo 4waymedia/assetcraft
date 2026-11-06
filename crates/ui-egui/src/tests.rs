@@ -497,6 +497,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::SaveAs => {
                 used.insert("storyboard.saveAs");
             }
+            MenuAction::ExportVideo => {
+                used.insert("storyboard.exportVideo");
+            }
             MenuAction::ResetLayout
             | MenuAction::RenderCache
             | MenuAction::Shortcuts
@@ -888,5 +891,51 @@ fn save_saves_the_storyboard_marks_the_title_and_asks_before_exit_with_unsaved_c
     press(&ctx, &mut nav, Key::S, Modifiers::COMMAND);
     frame(&ctx, &mut nav);
     assert!(nav.state.unsaved.is_none() && nav.exit_requested(), "saved, so the close goes ahead");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_video_opens_the_settings_window_runs_the_job_and_shows_its_progress() {
+    use assetcraft_engine::ExportStage;
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-sf5-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let ctx = Context::default();
+    let (mut nav, _) = navigator(fake(), Prefs::default());
+    frame(&ctx, &mut nav);
+    // No storyboard: greyed with the reason.
+    let item = find_item(&nav, "File", "Export Video…");
+    assert!(matches!(&item, MenuEntry::Item { enabled: false, tooltip: Some(_), .. }), "{item:?}");
+
+    nav.run("storyboard.new", json!({ "sample": true }));
+    frame(&ctx, &mut nav);
+    assert!(nav.activate(&ctx, &find_item(&nav, "File", "Export Video…")));
+    assert!(nav.state.export.is_some(), "the settings window is open");
+    frame(&ctx, &mut nav);
+    let dialog = nav.state.export.clone().unwrap();
+    let plan = dialog.plan.clone().expect("a dry run for the settings");
+    assert_eq!(plan["dryRun"], true);
+    assert!(plan["frames"].as_u64().unwrap() > 0);
+
+    // Export… through the (stubbed) picker: the job runs, the window closes, the bar shows.
+    let path = dir.join("Cut.mp4");
+    nav.state.test_save_path = Some(path.clone());
+    let mut tiny = dialog;
+    tiny.tiny = true;
+    tiny.quality = 36;
+    crate::export_view::start(&mut nav, &tiny);
+    assert!(nav.state.export.is_none(), "closed once started");
+    assert!(nav.session().export_progress().running() || nav.session().export_progress().stage == ExportStage::Done);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while nav.session().export_progress().running() && std::time::Instant::now() < deadline {
+        frame(&ctx, &mut nav);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    frame(&ctx, &mut nav);
+    let progress = nav.session().export_progress();
+    assert_eq!(progress.stage, ExportStage::Done, "{progress:?}");
+    assert!(path.exists());
+    assert!(nav.state.export_seen.is_none(), "the end was noticed");
+    assert!(nav.session().enabled("storyboard.exportCancel").is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }

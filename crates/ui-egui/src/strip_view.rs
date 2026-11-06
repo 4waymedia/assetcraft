@@ -461,6 +461,7 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     if let Some((done, total)) = crate::motion_view::job_progress(nav) {
         render_progress(ui, frame, done, total);
     }
+    crate::export_view::progress(nav, ui, frame);
     if playing || paused_mid {
         if let Some(clip) = board.clip_at(at).cloned() {
             let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);

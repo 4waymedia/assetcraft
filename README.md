@@ -89,8 +89,9 @@ stated here so a build never surprises anyone.
 it in FilmCraft, which does the encoding. One place in the suite encodes, no licence question
 in AssetCraft.
 
-**Route 2 (planned, D-SF6): a native export when FilmCraft isn't installed.** What we can write
-clean-room, and what plays where without installing anything (stock players: Windows Media
+**Route 2 (built, D-SF6): the native export — File › Export Video…** `.mp4` / `.mov` with H.264
+and AAC-LC, all in Rust (`crates/video`, `crates/animatic`, `storyboard.exportVideo`). What we
+can write clean-room, and what plays where without installing anything (stock players: Windows Media
 Player / Movies & TV, macOS QuickTime Player, GNOME Videos on Linux; every browser plays H.264
 MP4 and AV1 WebM, Safari AV1 only on M3+):
 
@@ -164,13 +165,13 @@ lists all 69).
 | Metadata | Header facts per file (`item.probe`), mesh facts (`asset.meshInfo`), track summary (`track.summary`) |
 | Open In | PhotoCraft, LightCraft, FilmCraft, EffectCraft when installed (`file.openIn`, `app.openInTargets`); reveal in Explorer / Finder; run |
 | Tools | Batch Rename… **preview** (`file.renamePreview`): tokens, presets, never-overwrite plan — nothing is renamed yet (T2) |
-| Storyboard mode | Start screen (song → preset → length → output settings), generate a Cut from a track's cue map, Shot map, Strip view (Content · Viewer · Inspector · timeline), Quick fill, Re-cut, text clips (cards, overlays, themes, intros), clip motion for stills and 3D models (turntable, push in / pull out, pan, rise), Watch your Cut with the song, Render Motion Cache (Return), undo / redo, **Save / Save As** (`.storyboard.json`) |
+| Storyboard mode | Start screen (song → preset → length → output settings), generate a Cut from a track's cue map, Shot map, Strip view (Content · Viewer · Inspector · timeline), Quick fill, Re-cut, text clips (cards, overlays, themes, intros), clip motion for stills and 3D models (turntable, push in / pull out, pan, rise), Watch your Cut with the song, Render Motion Cache (Return), undo / redo, **Save / Save As** (`.storyboard.json`), **Export Video…** (MP4 / MOV, H.264 + AAC, all in Rust — § Video) |
 | Music | Track analysis in pure Rust (beats, bars, sections, hits, tempo, fits), Analyse all, cue-map sidecars, working folder with Copy & analyse, preview playback |
 | Window | In-app title bar and scroll bars (Trellis-style), docking panel layout saved in prefs, light / dark theme |
 | Automation | `assetcraft-cli` (`probe`, `thumb`, `analyze`, `info`, `sidebar`, `commands`, `exec`); every command carries suite effects and `enabled` / `disabledReason` |
 
-Not yet (see [ROADMAP.md](ROADMAP.md)): opening a saved storyboard (SF2), Send to FilmCraft / export
-(SF1b–SF5), renaming and metadata writes (Stage 2 T2–T4), the control channel and MCP server
+Not yet (see [ROADMAP.md](ROADMAP.md)): opening a saved storyboard (SF2), Send to FilmCraft and the
+shot-list export (SF1b, SF3, SF4), renaming and metadata writes (Stage 2 T2–T4), the control channel and MCP server
 (Stage 1.5 2b), catalog / collections / entities (Stage 3), Develop (3.5), AI providers (5),
 recipes and hot folders (6).
 

@@ -33,8 +33,7 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "app.commands",
     "app.openInTargets",
     // Storyboard mode drives these from its mode bar, Shot map and Inspector (and Ctrl+Z / Ctrl+Y).
-    // The video export's menu item, picker and progress come with SF5-5.
-    "storyboard.exportVideo",
+    // The video export's progress and Esc live in the Viewer (`export_view`).
     "storyboard.exportStatus",
     "storyboard.exportCancel",
     "storyboard.select",
@@ -93,6 +92,8 @@ pub enum MenuAction {
     Save,
     /// File → Save Storyboard As…: the native picker, then `storyboard.save`.
     SaveAs,
+    /// File → Export Video…: the settings window, the picker, then `storyboard.exportVideo`.
+    ExportVideo,
     /// File → Exit.
     Exit,
     /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
@@ -476,6 +477,20 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         "storyboard.saveAs" => {
             vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveAs)]
         }
+        "storyboard.exportVideo" => {
+            let enabled = s.enabled(spec.id);
+            vec![
+                MenuEntry::Separator,
+                MenuEntry::Item {
+                    label: format!("{}…", spec.label),
+                    shortcut: None,
+                    enabled: enabled.is_ok(),
+                    checked: None,
+                    tooltip: enabled.err(),
+                    action: MenuAction::ExportVideo,
+                },
+            ]
+        }
         "storyboard.delete" => {
             let storyboard = s.mode() == assetcraft_engine::Mode::Storyboard;
             simple(storyboard && !s.selected_clips().is_empty())
@@ -570,6 +585,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         MenuAction::SaveAs => {
             crate::document_view::save_as(nav);
         }
+        MenuAction::ExportVideo => crate::export_view::open(nav),
         MenuAction::Exit => crate::document_view::request_exit(nav, ctx),
     }
 }
