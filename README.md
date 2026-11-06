@@ -1,7 +1,7 @@
 # AssetCraft
 
 Browse, structure, organize, plan and execute: an asset app for creative work, in the spirit
-of Adobe Bridge. Built in pure Rust as a sibling of the storytold
+of all digital Artists and studios. Built in pure Rust as a inspiration from the storytold
 [Crafting Apps](https://getartcraft.com/apps) (PhotoCraft, FilmCraft, LightCraft, PdfCraft,
 DesignCraft, WordCraft).
 
