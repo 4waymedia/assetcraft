@@ -14,6 +14,8 @@ DesignCraft, WordCraft).
 shipping (clip motion, Save); Stage 2 (Organize) and Stage 1.5 (API) under way. [ROADMAP.md](ROADMAP.md)
 is the index of shipped, building and planned work; the "Now" table in [STATUS.md](STATUS.md) is the log.
 
+<img width="1436" height="865" alt="Screenshot 2026-11-05 185231" src="https://github.com/user-attachments/assets/4896d472-c53a-4232-9540-1d3cb0154d06" />
+
 ## Build (Windows, PowerShell)
 
 ```powershell
@@ -63,11 +65,17 @@ cargo build -p assetcraft-cli --release --features heic
 For anything you distribute, decide on HEVC licensing first; builds without the feature
 contain no HEVC code.
 
+<img width="1434" height="864" alt="Screenshot 2026-11-05 185248" src="https://github.com/user-attachments/assets/739709b2-efc6-4923-b1e3-37946f19d010" />
+
+
 ### Video poster frames
 
 Video thumbnails (MP4, MOV, MKV/WebM, AVI) come from FilmCraft's `filmcraft-cli`, run as a
 separate program. Put it on `PATH` or set `ASSETCRAFT_FILMCRAFT_CLI` to its full path, then
 restart AssetCraft. Without it, videos show a type icon.
+
+<img width="1434" height="862" alt="Screenshot 2026-11-05 185302" src="https://github.com/user-attachments/assets/75adb866-01bd-4acd-b4c9-5aaa5b94104c" />
+
 
 ## Video: decode, encode and export
 
