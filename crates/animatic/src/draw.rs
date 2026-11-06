@@ -73,8 +73,8 @@ impl Rgba {
 
 /// Fill the whole picture.
 pub fn fill(out: &mut Rgba, rgb: [u8; 3]) {
-    for p in out.data.chunks_exact_mut(4) {
-        p.copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    for p in out.data.as_chunks_mut::<4>().0 {
+        *p = [rgb[0], rgb[1], rgb[2], 255];
     }
 }
 
