@@ -45,8 +45,8 @@ pub use model::{
     Transition,
 };
 pub use motion::{
-    Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, clear_motion, set_motion,
-    swap_motion,
+    Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, STILL_PAN_TRAVEL,
+    STILL_PAN_ZOOM, clear_motion, set_motion, swap_motion,
 };
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;

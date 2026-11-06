@@ -798,13 +798,25 @@ fn presets_fill_amount_and_ease_and_edits_make_custom() {
     let pan = MotionEdit { preset: Some(MotionPreset::PanRight), ..Default::default() };
     assert!(set_motion(&mut board, still, pan).unwrap());
     let m = board.clip(still).unwrap().motion.unwrap();
-    assert_eq!((m.amount.pan, m.ease, m.glyph()), ([0.12, 0.0], Ease::Out, Some("⇆")));
+    assert_eq!((m.amount.pan, m.ease, m.glyph()), ([STILL_PAN_TRAVEL, 0.0], Ease::Out, Some("⇆")));
+    // A still's pan starts zoomed in on the far side, so the window has room to travel.
+    assert_eq!((m.start.zoom, m.start.pan), (STILL_PAN_ZOOM, [-STILL_PAN_TRAVEL / 2.0, 0.0]));
+    assert!((m.end().pan[0] - STILL_PAN_TRAVEL / 2.0).abs() < 1e-6);
+    let pull = MotionEdit { preset: Some(MotionPreset::PullOut), ..Default::default() };
+    assert!(set_motion(&mut board, still, pull).unwrap());
+    let m = board.clip(still).unwrap().motion.unwrap();
+    assert!(
+        (m.start.zoom - 1.6).abs() < 1e-6 && (m.end().zoom - 1.0).abs() < 1e-6,
+        "pull out: from 1.6× to the whole picture"
+    );
+    assert!(set_motion(&mut board, still, pan).unwrap());
 
     // Editing an amount flips the chip to Custom and keeps the start.
     let zoom = MotionEdit { amount: Some(Camera { zoom: 1.6, ..Camera::NONE }), ..Default::default() };
     assert!(set_motion(&mut board, still, zoom).unwrap());
     let m = board.clip(still).unwrap().motion.unwrap();
     assert_eq!((m.preset, m.glyph(), m.ease), (MotionPreset::Custom, Some("⤢"), Ease::Out));
+    assert_eq!(m.start.zoom, 1.6, "the start stays (Pull out had left it at 1.6×, which a pan keeps)");
     // An ease change alone also makes it Custom; a preset on top resets both.
     assert!(set_motion(&mut board, model, MotionEdit { ease: Some(Ease::Out), ..Default::default() }).unwrap());
     assert_eq!(board.clip(model).unwrap().motion.unwrap().preset, MotionPreset::Custom);

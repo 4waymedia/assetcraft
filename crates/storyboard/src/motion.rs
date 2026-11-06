@@ -127,13 +127,40 @@ impl MotionPreset {
             (MotionPreset::PanLeft, MotionKind::Orbit) => (Camera { yaw: -PI / 6.0, ..a }, Ease::Out),
             (MotionPreset::PanRight, MotionKind::Orbit) => (Camera { yaw: PI / 6.0, ..a }, Ease::Out),
             (MotionPreset::Rise, MotionKind::Orbit) => (Camera { pitch: PI / 9.0, ..a }, Ease::InOut),
-            (MotionPreset::PanLeft, MotionKind::PanZoom) => (Camera { pan: [-0.12, 0.0], ..a }, Ease::Out),
-            (MotionPreset::PanRight, MotionKind::PanZoom) => (Camera { pan: [0.12, 0.0], ..a }, Ease::Out),
-            (MotionPreset::Rise, MotionKind::PanZoom) => (Camera { pan: [0.0, -0.12], ..a }, Ease::InOut),
+            // A still's window must stay inside the picture, so a pan travels across a zoomed-in
+            // view: from one side to the other (the start is set by [`MotionPreset::start`]).
+            (MotionPreset::PanLeft, MotionKind::PanZoom) => (Camera { pan: [-STILL_PAN_TRAVEL, 0.0], ..a }, Ease::Out),
+            (MotionPreset::PanRight, MotionKind::PanZoom) => (Camera { pan: [STILL_PAN_TRAVEL, 0.0], ..a }, Ease::Out),
+            (MotionPreset::Rise, MotionKind::PanZoom) => (Camera { pan: [0.0, -STILL_PAN_TRAVEL], ..a }, Ease::InOut),
             (MotionPreset::Custom, _) => (a, Ease::InOut),
         }
     }
+
+    /// Where the preset starts, given the clip's current start. Orbit presets keep it. A still's
+    /// window can't leave the picture (`zoom ≥ 1`, pan clamped), so the presets that need room
+    /// start zoomed in: a pan starts at [`STILL_PAN_ZOOM`] on the far side and travels across,
+    /// Pull out starts at 1.6× and settles on the whole picture (Paul, 2026-11-05: on images
+    /// "the only motion effect working is the 'Push in'").
+    fn start(self, kind: MotionKind, current: Camera) -> Camera {
+        if kind == MotionKind::Orbit {
+            return current;
+        }
+        let room = Camera { zoom: current.zoom.max(STILL_PAN_ZOOM), ..current };
+        match self {
+            MotionPreset::PullOut => Camera { zoom: current.zoom.max(1.6), ..current },
+            MotionPreset::PanLeft => Camera { pan: [STILL_PAN_TRAVEL / 2.0, current.pan[1]], ..room },
+            MotionPreset::PanRight => Camera { pan: [-STILL_PAN_TRAVEL / 2.0, current.pan[1]], ..room },
+            MotionPreset::Rise => Camera { pan: [current.pan[0], STILL_PAN_TRAVEL / 2.0], ..room },
+            _ => current,
+        }
+    }
 }
+
+/// A still's pan presets zoom in this far (the window at 1.3× is 77 % wide, so its centre may
+/// move ±11.5 %).
+pub const STILL_PAN_ZOOM: f32 = 1.3;
+/// How far a still's pan presets travel, as a fraction of the picture: from −10 % to +10 %.
+pub const STILL_PAN_TRAVEL: f32 = 0.2;
 
 /// How the motion is timed over the clip.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -301,7 +328,7 @@ impl Motion {
     /// The preset's motion for `kind`, from `start`.
     pub fn preset(preset: MotionPreset, kind: MotionKind, start: Camera) -> Motion {
         let (amount, ease) = preset.amount(kind);
-        Motion { preset, start, amount, ease }
+        Motion { preset, start: preset.start(kind, start), amount, ease }
     }
 
     /// Where the clip ends.
