@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) and SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) done; SR2c′ ducking next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) and SR2d (Start screen INSET panel) done; SR4 voice + ducking next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -450,9 +450,21 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   corner/size · swapped; the file's name or the drop hint); a click or right-click opens the
   slot's options (`egui::Popup::menu`: Use / Replace with Organizer selection, Kind, Corner,
   Size, Swap, Mix audio, Clear) and selects the section's first shot so the Inspector follows;
-  the Start timeline's INSET row grew to 24 px. **Next — SR2c′ ducking:** the rule (the music
-  lowered only while an inset with `mix_audio` plays) with Music / Voice per section in the
-  export's `Program` and Watch your Cut, then **SR2d** the Start screen's INSET panel. under the STORYBOARD row (one bar per
+  the Start timeline's INSET row grew to 24 px. **SR2d built 2026-11-07 — the Start screen's INSET
+  panel** (Paul's mock-up, pared to what the model has): under STEP LENGTH, one row — `None ·
+  Graphic · Video`, `Every section · First only`, `TL · TR · BL · BR`, `S · M · L`, "Mix its audio
+  in" (video only) — kept in `StartUi.inset: InsetPanel` and sent as `inset: {kind, corner,
+  size, mixAudio, addTo: every | first}` with `storyboard.preview {template}` (the timeline's
+  INSET row reads "Step 2 · video slot · BR M") and `storyboard.new {template}`
+  (`inset_cmd::apply_defaults`: an empty slot with those options on every section scene, or the
+  first; opening and close untouched; `None` sets nothing — D-SR1, the lane still takes a drop).
+  "Leave empty slots to fill later" is gone (D-SR1); "Steps + review" is covered by the close
+  having its own music and no slot. Tests: engine 1, ui-egui 1. **Next — SR4 voice and
+  ducking** (the mock-up's AUDIO TRACK panel: Song · Voiceover · Song + voiceover · None):
+  ducking needs the inset video's sound, which AssetCraft can't decode yet (pure-Rust AAC
+  decode from MP4 is the step), so it goes with the voiceover track: the music lowered while
+  a voice plays, Music / Voice per section. Then the TITLE CARDS / NUMBERING / SHOT PATTERN
+  panels and the STRUCTURE strip. under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner

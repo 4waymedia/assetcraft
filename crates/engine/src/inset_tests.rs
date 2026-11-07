@@ -240,3 +240,36 @@ fn refusals_leave_no_undo_step_and_the_inset_survives_the_file_and_templates() {
     assert!(s.enabled("storyboard.inset").is_err());
     assert!(matches!(s.execute("storyboard.inset", &json!({"scene": 1})), Err(CmdError::Unavailable(_))));
 }
+
+#[test]
+fn new_from_a_template_presets_every_sections_slot_from_the_inset_panel() {
+    let mut s = session();
+    run(
+        &mut s,
+        "storyboard.new",
+        json!({"template": "tutorial", "steps": 3, "inset": {"kind": "graphic", "corner": "TL", "size": "S", "mixAudio": true}}),
+    );
+    let board = s.storyboard().unwrap();
+    let slots: Vec<_> = board.scenes.iter().filter_map(|sc| sc.inset.clone().map(|i| (sc.part, i))).collect();
+    assert_eq!(slots.len(), 3, "one per step, none on the opening or the close");
+    for (part, i) in &slots {
+        assert_eq!(*part, assetcraft_storyboard::ScenePart::Section);
+        assert!(i.is_empty());
+        assert_eq!(
+            (i.kind, i.corner, i.size, i.mix_audio),
+            (InsetKind::Graphic, Corner::TopLeft, InsetSize::Small, true)
+        );
+    }
+    // First step only.
+    run(&mut s, "storyboard.new", json!({"template": "review", "inset": {"addTo": "first"}}));
+    assert_eq!(s.storyboard().unwrap().scenes.iter().filter(|sc| sc.inset.is_some()).count(), 1);
+    // Absent: no slots set (the lane still draws empty ones, D-SR1).
+    run(&mut s, "storyboard.new", json!({"template": "review"}));
+    assert!(s.storyboard().unwrap().scenes.iter().all(|sc| sc.inset.is_none()));
+    for bad in [json!({"addTo": "half"}), json!({"corner": "mid"}), json!(3)] {
+        assert!(matches!(
+            s.execute("storyboard.new", &json!({"template": "review", "inset": bad})),
+            Err(CmdError::BadParams(_))
+        ));
+    }
+}

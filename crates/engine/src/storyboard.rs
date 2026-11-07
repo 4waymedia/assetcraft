@@ -213,6 +213,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // kept (`storyboard.preview {template}` builds the same board). The credits clip goes on
     // before the snap so it is on the beat too.
     crate::template_cmd::append_credits_if(s, p, &mut board);
+    crate::inset_cmd::apply_defaults(&mut board, p)?;
     let fitted = if p.get("template").is_some() && p.get("cueMap").is_some() {
         Some(crate::template_cmd::fit_to_cue(s, p, &mut board, p.get("name").is_none())?)
     } else {

@@ -191,10 +191,31 @@ pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Action> {
         };
         painter.rect_filled(r, 2, fill);
         painter.rect_stroke(r, 2, Stroke::new(1.0, stroke), StrokeKind::Inside);
+        // A slot the INSET panel preset (SR2d): "Step 2 · video slot · BR M".
+        let preset = sec["inset"].is_object().then(|| {
+            let i = &sec["inset"];
+            let size = match i["size"].as_str() {
+                Some("small") => "S",
+                Some("large") => "L",
+                _ => "M",
+            };
+            let corner = match i["corner"].as_str() {
+                Some("topLeft") => "TL",
+                Some("topRight") => "TR",
+                Some("bottomLeft") => "BL",
+                _ => "BR",
+            };
+            format!(
+                "{} · {} slot · {corner} {size}",
+                sec["title"].as_str().unwrap_or(""),
+                i["kind"].as_str().unwrap_or("video")
+            )
+        });
         let text = match set {
             Some(path) => {
                 std::path::Path::new(path).file_name().map_or(path.to_owned(), |f| f.to_string_lossy().into_owned())
             }
+            None if r.width() > 120.0 && preset.is_some() => preset.unwrap_or_default(),
             None if r.width() > 170.0 => {
                 format!("{} · drop b-roll, an interview or a host here", sec["title"].as_str().unwrap_or(""))
             }

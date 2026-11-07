@@ -1324,3 +1324,53 @@ fn the_inspector_and_viewer_draw_a_sections_inset_in_its_corner() {
     let r = crate::strip_view::inset_corner(f, Corner::TopLeft, InsetSize::Small);
     assert!((r.left() - 120.0).abs() < 0.01 && (r.top() - 70.0).abs() < 0.01 && (r.width() - 176.0).abs() < 0.01);
 }
+
+#[test]
+fn the_start_screens_inset_panel_presets_the_slots_of_the_new_board() {
+    use assetcraft_storyboard::{Corner, InsetKind, InsetSize};
+    let dir = cue_folder();
+    let cue_path = dir.join("song.cuemap.json");
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    nav.state.storyboard.start.open = true;
+    nav.state.storyboard.start.choose_template(1, Some(2), Some(&cue_path.to_string_lossy()), 20);
+    nav.state.storyboard.start.inset = crate::start_view::InsetPanel {
+        kind: Some(InsetKind::Graphic),
+        first_only: false,
+        corner: Corner::TopRight,
+        size: InsetSize::Large,
+        mix_audio: true,
+    };
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    // The preview carries the preset slots.
+    let preview = nav
+        .state
+        .storyboard
+        .start
+        .previews
+        .iter()
+        .find(|(k, _)| k.contains("template:tutorial|2|20|") && k.contains("graphic"))
+        .and_then(|(_, v)| v.clone())
+        .expect("previewed with the panel's inset");
+    let sections = preview["sections"].as_array().unwrap();
+    assert_eq!(sections.iter().filter(|s| s["inset"]["corner"] == "topRight").count(), 2, "{sections:?}");
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().unwrap();
+    let slots: Vec<_> = board.scenes.iter().filter_map(|sc| sc.inset.clone()).collect();
+    assert_eq!(slots.len(), 2);
+    assert!(
+        slots.iter().all(|i| i.kind == InsetKind::Graphic
+            && i.corner == Corner::TopRight
+            && i.size == InsetSize::Large
+            && !i.mix_audio),
+        "mix audio is for video only: {slots:?}"
+    );
+    // None: no slots set.
+    nav.state.storyboard.start.choose_template(1, Some(2), Some(&cue_path.to_string_lossy()), 20);
+    nav.state.storyboard.start.inset.kind = None;
+    crate::start_view::create_board(&mut nav);
+    assert!(nav.session().storyboard().unwrap().scenes.iter().all(|sc| sc.inset.is_none()));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -289,3 +289,46 @@ pub(crate) fn inset_json(i: &Inset) -> Value {
         "swap": i.swap,
     })
 }
+
+/// `inset: {kind?, corner?, size?, mixAudio?, addTo?: every | first}` on `storyboard.new
+/// {template}` / `storyboard.preview {template}` (SR2d, the Start screen's INSET panel): every
+/// section scene (or only the first) gets an empty slot with these options, ready for a drop.
+/// Opening and closing scenes are left alone. Absent → nothing changes.
+pub(crate) fn apply_defaults(board: &mut Storyboard, p: &Value) -> Result<(), CmdError> {
+    let Some(d) = p.get("inset").filter(|v| !v.is_null()) else { return Ok(()) };
+    if !d.is_object() {
+        return Err(CmdError::BadParams("`inset` must be an object".into()));
+    }
+    let mut slot = Inset::slot(InsetKind::Video);
+    if let Some(v) = d.get("kind") {
+        slot.kind = kind(v)?;
+    }
+    if let Some(v) = d.get("corner") {
+        slot.corner = corner(v)?;
+    }
+    if let Some(v) = d.get("size") {
+        slot.size = size(v)?;
+    }
+    if let Some(b) = flag(d, "mixAudio")? {
+        slot.mix_audio = b;
+    }
+    let first_only = match d.get("addTo").and_then(Value::as_str) {
+        None | Some("every") => false,
+        Some("first") => true,
+        Some(_) => return Err(CmdError::BadParams("`inset.addTo` must be every or first".into())),
+    };
+    let ids: Vec<SceneId> = board
+        .inset_scenes()
+        .filter(|sc| sc.part == assetcraft_storyboard::ScenePart::Section)
+        .map(|sc| sc.id)
+        .collect();
+    for (i, id) in ids.into_iter().enumerate() {
+        if first_only && i > 0 {
+            break;
+        }
+        if let Some(sc) = board.scenes.iter_mut().find(|sc| sc.id == id) {
+            sc.inset = Some(slot.clone());
+        }
+    }
+    Ok(())
+}

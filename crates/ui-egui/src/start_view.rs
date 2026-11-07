@@ -82,6 +82,47 @@ pub(crate) struct StartUi {
     pub(crate) steps: Option<usize>,
     /// How long each of them runs, title card included (SR2; `STEP_SECS` by default).
     pub(crate) step_secs: u32,
+    /// The INSET panel (SR2d): how a template's section slots start out.
+    pub(crate) inset: InsetPanel,
+}
+
+/// The Start screen's INSET panel (SR2d, Paul's mock-up): None · Graphic · Video, add to every
+/// step or the first only, corner, size, mix the video's audio in. `None` sends nothing (the
+/// lane still draws empty slots, D-SR1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct InsetPanel {
+    pub(crate) kind: Option<assetcraft_storyboard::InsetKind>,
+    pub(crate) first_only: bool,
+    pub(crate) corner: assetcraft_storyboard::Corner,
+    pub(crate) size: assetcraft_storyboard::InsetSize,
+    pub(crate) mix_audio: bool,
+}
+
+impl Default for InsetPanel {
+    fn default() -> Self {
+        InsetPanel {
+            kind: Some(assetcraft_storyboard::InsetKind::Video),
+            first_only: false,
+            corner: assetcraft_storyboard::Corner::BottomRight,
+            size: assetcraft_storyboard::InsetSize::Medium,
+            mix_audio: false,
+        }
+    }
+}
+
+impl InsetPanel {
+    /// The `inset` parameter for `storyboard.new` / `storyboard.preview`, or null.
+    pub(crate) fn param(&self) -> Value {
+        use assetcraft_storyboard::{InsetKind, InsetSize};
+        let Some(kind) = self.kind else { return Value::Null };
+        json!({
+            "kind": if kind == InsetKind::Video { "video" } else { "graphic" },
+            "corner": self.corner.code(),
+            "size": match self.size { InsetSize::Small => "S", InsetSize::Medium => "M", InsetSize::Large => "L" },
+            "mixAudio": self.mix_audio && kind == InsetKind::Video,
+            "addTo": if self.first_only { "first" } else { "every" },
+        })
+    }
 }
 
 impl Default for StartUi {
@@ -97,6 +138,7 @@ impl Default for StartUi {
             library: None,
             pace: PACE_PRESET,
             step_secs: assetcraft_storyboard::STEP_SECS as u32,
+            inset: InsetPanel::default(),
             shape: Shape::default(),
             previews: HashMap::new(),
             waveform: None,
@@ -524,6 +566,53 @@ fn template_cards(nav: &mut Navigator, ui: &mut Ui) {
     });
 }
 
+/// The INSET panel (SR2d): one row of chips — what goes in each section's slot, which
+/// sections, the corner, the size, the video's audio. Changing it re-previews.
+fn inset_panel(nav: &mut Navigator, ui: &mut Ui) {
+    use assetcraft_storyboard::{Corner, InsetKind, InsetSize};
+    let mut p = nav.state.storyboard.start.inset;
+    ui.horizontal_wrapped(|ui| {
+        section_label(ui, "INSET");
+        ui.add_space(6.0);
+        for (k, name, tip) in [
+            (None, "None", "No slots set up (the lane still takes a drop later)"),
+            (Some(InsetKind::Graphic), "Graphic", "A diagram, a part, a label over each section"),
+            (Some(InsetKind::Video), "Video", "Your host, b-roll or an interview over each section"),
+        ] {
+            if ui.selectable_label(p.kind == k, name).on_hover_text(tip).clicked() {
+                p.kind = k;
+            }
+        }
+        if p.kind.is_some() {
+            ui.add_space(8.0);
+            for (first, name) in [(false, "Every section"), (true, "First only")] {
+                if ui.selectable_label(p.first_only == first, name).clicked() {
+                    p.first_only = first;
+                }
+            }
+            ui.add_space(8.0);
+            for c in Corner::ALL {
+                if ui.selectable_label(p.corner == c, c.code()).clicked() {
+                    p.corner = c;
+                }
+            }
+            ui.add_space(8.0);
+            for (sz, code) in [(InsetSize::Small, "S"), (InsetSize::Medium, "M"), (InsetSize::Large, "L")] {
+                let tip = format!("{:.0} % of the frame's width", sz.share() * 100.0);
+                if ui.selectable_label(p.size == sz, code).on_hover_text(tip).clicked() {
+                    p.size = sz;
+                }
+            }
+            if p.kind == Some(InsetKind::Video) {
+                ui.add_space(8.0);
+                ui.checkbox(&mut p.mix_audio, "Mix its audio in");
+            }
+        }
+    });
+    nav.state.storyboard.start.inset = p;
+    ui.add_space(4.0);
+}
+
 /// Step lengths offered, in seconds (Paul, 2026-11-06: "a 'title' clip every 30 seconds").
 pub(crate) const STEP_CHOICES: [u32; 4] = [20, 30, 45, 60];
 
@@ -711,7 +800,8 @@ fn template_preview(nav: &mut Navigator, cue: &str, index: usize) -> Option<Valu
     let steps = nav.state.storyboard.start.steps.unwrap_or(t.steps);
     let step_secs = nav.state.storyboard.start.step_secs;
     let credits = nav.session.credits_on();
-    let key = format!("{cue}|template:{}|{steps}|{step_secs}|{credits}", t.id);
+    let inset = nav.state.storyboard.start.inset.param();
+    let key = format!("{cue}|template:{}|{steps}|{step_secs}|{credits}|{inset}", t.id);
     if let Some(v) = nav.state.storyboard.start.previews.get(&key) {
         return v.clone();
     }
@@ -719,7 +809,7 @@ fn template_preview(nav: &mut Navigator, cue: &str, index: usize) -> Option<Valu
         .session
         .execute(
             "storyboard.preview",
-            &json!({ "cueMap": cue, "template": t.id, "steps": steps, "stepSeconds": step_secs, "credits": credits }),
+            &json!({ "cueMap": cue, "template": t.id, "steps": steps, "stepSeconds": step_secs, "credits": credits, "inset": inset }),
         )
         .ok();
     nav.state.storyboard.start.previews.insert(key, v.clone());
@@ -773,6 +863,7 @@ fn cards(nav: &mut Navigator, ui: &mut Ui) {
                 ui.label(RichText::new(c).small().color(ui.visuals().weak_text_color()));
             }
             ui.add_space(4.0);
+            inset_panel(nav, ui);
         }
         let (rect, _) = ui.allocate_exact_size(CARD, Sense::hover());
         card_frame(ui, rect, true);
@@ -959,6 +1050,7 @@ pub(crate) fn create_board(nav: &mut Navigator) {
                 params["steps"] = json!(steps);
             }
             params["stepSeconds"] = json!(nav.state.storyboard.start.step_secs);
+            params["inset"] = nav.state.storyboard.start.inset.param();
             if let Some(cue) = track {
                 params["cueMap"] = json!(cue);
             }
