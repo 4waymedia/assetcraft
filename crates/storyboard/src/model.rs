@@ -240,12 +240,37 @@ pub struct Scene {
     /// or an empty slot. Left out of the file when there is none, so older boards load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inset: Option<crate::inset::Inset>,
+    /// What part of the piece this scene is (SR3b): the opening, a section, or the close —
+    /// the music under it follows (intro · a chorus each · outro). Left out of the file when
+    /// it is the default (a section), so older boards load.
+    #[serde(default, skip_serializing_if = "ScenePart::is_default")]
+    pub part: ScenePart,
+}
+
+/// Which part of the piece a scene is (SR3b; Paul, 2026-11-07: "use the intro for the first
+/// title, then rotate the chorus per section, and for the final section use the outro").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScenePart {
+    /// Before the sections: the song's intro plays under it.
+    Opening,
+    /// A section: a chorus starts on its title card.
+    #[default]
+    Section,
+    /// After the sections (a verdict, a recap, the credits): the song's outro plays under it.
+    Close,
+}
+
+impl ScenePart {
+    fn is_default(p: &ScenePart) -> bool {
+        *p == ScenePart::Section
+    }
 }
 
 impl Scene {
-    /// A scene with no inset.
+    /// A scene with no inset, a section.
     pub fn new(id: SceneId, song_section: Option<String>) -> Scene {
-        Scene { id, song_section, inset: None }
+        Scene { id, song_section, inset: None, part: ScenePart::Section }
     }
 }
 

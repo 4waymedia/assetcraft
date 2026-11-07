@@ -14,6 +14,7 @@ mod dock;
 mod document_view;
 mod export_view;
 mod folders;
+mod inset_view;
 mod inspector;
 mod keys;
 mod menu;

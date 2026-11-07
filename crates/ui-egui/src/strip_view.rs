@@ -37,7 +37,7 @@ use crate::storyboard_view::{
 use crate::thumbnails::Cell;
 use assetcraft_engine::BoardView;
 use assetcraft_fs::EntryKind;
-use assetcraft_storyboard::{Clip, ClipId, SceneId, ShotType, Storyboard, Ticks, next_empty};
+use assetcraft_storyboard::{Clip, ClipId, ShotType, Storyboard, Ticks, next_empty};
 use assetcraft_thumbs::ThumbKey;
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
@@ -57,7 +57,7 @@ const RULER_H: f32 = 20.0;
 const MARKER_H: f32 = 18.0;
 /// The INSET and AUDIO rows under the strip (SR2b; Paul, 2026-11-06: "when the storyboard is
 /// created, we need to have the audio track, and the inset track available").
-const INSET_H: f32 = 20.0;
+const INSET_H: f32 = 36.0;
 const AUDIO_H: f32 = 40.0;
 pub(crate) const ROWS_H: f32 = INSET_H + AUDIO_H + 8.0;
 const CONTROLS_H: f32 = 30.0;
@@ -505,7 +505,7 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
         if let Some(clip) = board.clip_at(at).cloned() {
             let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
             let elapsed = at.as_secs_f64() - start.as_secs_f64();
-            show_clip(nav, ui, frame, &clip, index, elapsed);
+            show_section(nav, ui, frame, board, &clip, index, elapsed);
         }
         return;
     }
@@ -517,7 +517,7 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     match &selected {
         // Nothing selected: the frame under the playhead (the first clip of a new board).
         None => match board.clip_at(at.min(board.total())).or_else(|| board.clips.first()).cloned() {
-            Some(clip) => show_clip(nav, ui, frame, &clip, index, f64::INFINITY),
+            Some(clip) => show_section(nav, ui, frame, board, &clip, index, f64::INFINITY),
             None => {
                 ui.painter().text(
                     frame.center(),
@@ -528,7 +528,7 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
                 );
             }
         },
-        Some(clip) => show_clip(nav, ui, frame, clip, index, f64::INFINITY),
+        Some(clip) => show_section(nav, ui, frame, board, clip, index, f64::INFINITY),
     }
     // Dropping on the Viewer places into the selected clip (a title card's background).
     if let Some(clip) = selected.filter(|c| c.shot_type.accepts_drop()) {
@@ -554,6 +554,94 @@ fn render_progress(ui: &Ui, frame: Rect, done: u32, total: u32) {
         Rect::from_min_size(frame.right_top() + vec2(-galley.size().x - 20.0, 8.0), galley.size() + vec2(12.0, 4.0));
     painter.rect_filled(band, 2, Color32::from_black_alpha(150));
     painter.galley(band.min + vec2(6.0, 2.0), galley, Color32::from_gray(0xe0));
+}
+
+/// A clip with its section's inset (SR2c): the shot as [`show_clip`], and the inset in its
+/// corner — a graphic as its thumbnail, a video as a poster box with its name (FilmCraft plays
+/// the real video); with Swap the inset takes the frame and the shot sits in the corner. Title
+/// cards never carry one. Mirrors `animatic::Compositor::section_frame` for the export.
+fn show_section(
+    nav: &mut Navigator,
+    ui: &mut Ui,
+    frame: Rect,
+    board: &Storyboard,
+    clip: &Clip,
+    index: &Index,
+    elapsed: f64,
+) {
+    let inset = board
+        .scenes
+        .iter()
+        .find(|s| s.id == clip.scene_id)
+        .and_then(|s| s.inset.as_ref())
+        .filter(|i| i.asset.is_some() && clip.shot_type != ShotType::Ttl);
+    let Some(inset) = inset else {
+        show_clip(nav, ui, frame, clip, index, elapsed);
+        return;
+    };
+    let corner = inset_corner(frame, inset.corner, inset.size);
+    if inset.swap {
+        paint_inset(nav, ui, frame, inset, index);
+        ui.painter().rect_filled(corner.expand(2.0), 0, Color32::from_gray(0x10));
+        ui.painter().rect_filled(corner, 0, Color32::BLACK);
+        show_clip(nav, ui, corner, clip, index, elapsed);
+    } else {
+        show_clip(nav, ui, frame, clip, index, elapsed);
+        ui.painter().rect_filled(corner.expand(2.0), 0, Color32::from_gray(0x10));
+        paint_inset(nav, ui, corner, inset, index);
+    }
+}
+
+/// Where an inset of `size` sits in `corner` of `frame`: 16:9, `size.share()` of the width,
+/// 2.5 % in from the edges (as the compositor).
+pub(crate) fn inset_corner(
+    frame: Rect,
+    corner: assetcraft_storyboard::Corner,
+    size: assetcraft_storyboard::InsetSize,
+) -> Rect {
+    use assetcraft_storyboard::Corner;
+    let w = frame.width() * size.share();
+    let h = (w * 9.0 / 16.0).min(frame.height() * 0.6);
+    let m = frame.width() * 0.025;
+    let x = match corner {
+        Corner::TopLeft | Corner::BottomLeft => frame.left() + m,
+        Corner::TopRight | Corner::BottomRight => frame.right() - m - w,
+    };
+    let y = match corner {
+        Corner::TopLeft | Corner::TopRight => frame.top() + m,
+        Corner::BottomLeft | Corner::BottomRight => frame.bottom() - m - h,
+    };
+    Rect::from_min_size(pos2(x, y), vec2(w, h))
+}
+
+/// The inset's picture into `target`: a graphic's thumbnail, contained; a video as a dark
+/// poster box with "VIDEO" and the file's name.
+fn paint_inset(nav: &mut Navigator, ui: &mut Ui, target: Rect, inset: &assetcraft_storyboard::Inset, index: &Index) {
+    let Some(asset) = &inset.asset else { return };
+    let path = Path::new(asset.0.as_str());
+    let painter = ui.painter().clone();
+    painter.rect_filled(target, 0, Color32::from_rgb(0x1e, 0x1e, 0x22));
+    let graphic = inset.kind == assetcraft_storyboard::InsetKind::Graphic;
+    if graphic && let Cell::Ready(texture, size) = thumb(nav, ui, path, 512.0, index) {
+        let r = contain(target, size);
+        painter.image(texture, r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        return;
+    }
+    let name = assetcraft_fs::display_name(path);
+    painter.with_clip_rect(target).text(
+        target.center() - vec2(0.0, target.height() * 0.1),
+        Align2::CENTER_CENTER,
+        if graphic { "GRAPHIC" } else { "VIDEO" },
+        FontId::proportional((target.height() * 0.16).max(8.0)),
+        Color32::from_gray(0xd0),
+    );
+    painter.with_clip_rect(target).text(
+        target.center() + vec2(0.0, target.height() * 0.12),
+        Align2::CENTER_CENTER,
+        name,
+        FontId::proportional((target.height() * 0.11).max(7.0)),
+        Color32::from_gray(0xa0),
+    );
 }
 
 /// A clip as the Cut shows it, `elapsed` seconds in (`f64::INFINITY` = at rest): a Card, or the
@@ -728,7 +816,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let mut select: Option<ClipId> = None;
     let mut scrub: Option<(f64, crate::timebar::Scrub)> = None;
     let mut drop: Option<(ClipId, String)> = None;
-    let mut inset_drop: Option<(SceneId, String)> = None;
+    let mut inset_cmds: Vec<(&'static str, serde_json::Value)> = Vec::new();
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let mut resize: Option<ResizeDrag> = nav.state.storyboard.resize_drag;
     let mut resized: Option<ResizeDrag> = None;
@@ -762,7 +850,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             let marker_y = area.top() + RULER_H + 2.0;
             let mut prev_scene = None;
             let spans = clip_spans(board, left, Some(&ctx), resize);
-            inset_drop = inset_row(ui, board, &spans, strip_top + STRIP_H + 4.0, left);
+            inset_cmds = inset_row(nav, ui, board, &spans, strip_top + STRIP_H + 4.0);
             audio_row(nav, ui, board, strip_top + STRIP_H + 4.0 + INSET_H + 4.0, left, width);
             for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
                 if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
@@ -844,8 +932,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     if let Some(d) = resized {
         commit_resize(nav, d);
     }
-    if let Some((scene, asset)) = inset_drop {
-        nav.run("storyboard.inset", json!({ "scene": scene.0, "asset": asset }));
+    for (cmd, params) in inset_cmds {
+        nav.run(cmd, params);
     }
     if let Some((clip, to)) = switch {
         crate::text_view::switch_kind(nav, &clip, to);
@@ -857,30 +945,35 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
 }
 
 /// The INSET row (SR2b): a slot per section with shots, spanning them, named by the section;
-/// a drop target for an Organizer file. Returns a drop to run.
+/// a drop target for an Organizer file; a click (or right-click) opens the slot's options —
+/// corner, size, Swap, Mix audio, the Organizer's selection, Clear — and selects the section
+/// (Paul, 2026-11-07: "clicking on the inset should give options for display"). Returns the
+/// commands to run.
 fn inset_row(
+    nav: &Navigator,
     ui: &mut Ui,
     board: &Storyboard,
     spans: &[(ClipId, f32, f32)],
     top: f32,
-    left: f32,
-) -> Option<(SceneId, String)> {
+) -> Vec<(&'static str, serde_json::Value)> {
+    use assetcraft_storyboard::{Corner, InsetKind, InsetSize};
     let painter = ui.painter().clone();
-    let _ = left;
-    let mut out = None;
+    let mut out: Vec<(&'static str, serde_json::Value)> = Vec::new();
+    let focused = crate::storyboard_view::focused_file(nav);
     for scene in board.inset_scenes() {
-        let shots: Vec<(f32, f32)> = spans
+        let shots: Vec<(ClipId, f32, f32)> = spans
             .iter()
             .zip(&board.clips)
             .filter(|(_, c)| c.scene_id == scene.id && c.shot_type != ShotType::Ttl)
-            .map(|((_, x, w), _)| (*x, *w))
+            .map(|((id, x, w), _)| (*id, *x, *w))
             .collect();
-        let (Some(&(x0, _)), Some(&(x1, w1))) = (shots.first(), shots.last()) else { continue };
+        let (Some(&(first_id, x0, _)), Some(&(_, x1, w1))) = (shots.first(), shots.last()) else { continue };
         let rect = Rect::from_min_max(pos2(x0 + 1.0, top + 2.0), pos2(x1 + w1 - 1.0, top + INSET_H - 2.0));
         if !ui.is_rect_visible(rect) {
             continue;
         }
-        let set = scene.inset.as_ref().and_then(|i| i.asset.as_ref());
+        let inset = scene.inset.clone().unwrap_or_else(|| assetcraft_storyboard::Inset::slot(InsetKind::Video));
+        let set = inset.asset.as_ref();
         let response = ui.interact(rect, egui::Id::new(("sb-inset", scene.id.0)), Sense::click());
         let hovering = response.dnd_hover_payload::<DragAsset>().is_some();
         let (fill, stroke) = match set {
@@ -891,38 +984,128 @@ fn inset_row(
         painter.rect_stroke(
             rect,
             2,
-            Stroke::new(if hovering { 2.0 } else { 1.0 }, if hovering { SELECT } else { stroke }),
+            Stroke::new(if hovering || response.hovered() { 2.0 } else { 1.0 }, if hovering { SELECT } else { stroke }),
             StrokeKind::Inside,
         );
         let title = board.scene_title(scene.id).unwrap_or_default();
-        let text = match set {
-            Some(a) => Path::new(&a.0).file_name().map_or(a.0.clone(), |f| f.to_string_lossy().into_owned()),
-            None if rect.width() > 220.0 => format!("{title} · drop b-roll, an interview or a host here"),
-            None if rect.width() > 70.0 => "Inset · empty".to_owned(),
-            None => String::new(),
+        // Two lines: the section and the slot's state; the file's name and its placement.
+        let (line1, line2) = match set {
+            Some(a) => (
+                format!(
+                    "{title} · {} · {} {}{}",
+                    if inset.kind == InsetKind::Video { "video" } else { "graphic" },
+                    inset.corner.code(),
+                    match inset.size {
+                        InsetSize::Small => "S",
+                        InsetSize::Medium => "M",
+                        InsetSize::Large => "L",
+                    },
+                    if inset.swap { " · swapped" } else { "" }
+                ),
+                Path::new(&a.0).file_name().map_or(a.0.clone(), |f| f.to_string_lossy().into_owned()),
+            ),
+            None => (title.to_owned(), "Drop b-roll, an interview, a host or a graphic here".to_owned()),
         };
-        if !text.is_empty() {
-            painter.with_clip_rect(rect).text(
-                pos2(rect.left() + 4.0, rect.center().y),
-                Align2::LEFT_CENTER,
-                text,
+        let clip = painter.with_clip_rect(rect);
+        if rect.width() > 24.0 {
+            clip.text(
+                pos2(rect.left() + 4.0, rect.top() + 4.0),
+                Align2::LEFT_TOP,
+                line1,
                 FontId::proportional(9.0),
-                Color32::from_gray(if set.is_some() { 0xd0 } else { 0x80 }),
+                Color32::from_gray(if set.is_some() { 0xd0 } else { 0x90 }),
+            );
+            clip.text(
+                pos2(rect.left() + 4.0, rect.bottom() - 4.0),
+                Align2::LEFT_BOTTOM,
+                line2,
+                FontId::proportional(9.0),
+                Color32::from_gray(if set.is_some() { 0xa8 } else { 0x70 }),
             );
         }
         let tip = match set {
-            Some(a) => format!(
-                "Inset on {title}: {}
-Drop another file to replace it",
-                a.0
-            ),
+            Some(a) => format!("Inset on {title}: {}\nClick for options · drop another file to replace it", a.0),
             None => format!(
-                "Inset slot for {title}: drop a video (its length sizes the section) or a graphic from the Organizer"
+                "Inset slot for {title}: drop a video (its length sizes the section) or a graphic from the Organizer · click for options"
             ),
         };
-        if let Some(asset) = response.on_hover_text(tip).dnd_release_payload::<DragAsset>() {
-            out = Some((scene.id, asset.0.clone()));
+        let response = response.on_hover_text(tip);
+        if let Some(asset) = response.dnd_release_payload::<DragAsset>() {
+            out.push(("storyboard.inset", json!({ "scene": scene.id.0, "asset": asset.0.clone() })));
         }
+        if response.clicked() || response.secondary_clicked() {
+            out.push(("storyboard.select", json!({ "clip": first_id.0 })));
+        }
+        let scene_id = scene.id.0;
+        let options = |ui: &mut Ui, out: &mut Vec<(&'static str, serde_json::Value)>| {
+            ui.set_min_width(220.0);
+            ui.label(RichText::new(format!("INSET · {title}")).small().strong());
+            match set {
+                Some(a) => {
+                    ui.label(RichText::new(assetcraft_fs::display_name(Path::new(&a.0))).small());
+                }
+                None => {
+                    ui.weak("Empty slot");
+                }
+            }
+            let label = if set.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
+            if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
+                && let Some(p) = &focused
+            {
+                out.push(("storyboard.inset", json!({ "scene": scene_id, "asset": p.to_string_lossy() })));
+                ui.close();
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Kind");
+                for (k, name) in [(InsetKind::Video, "Video"), (InsetKind::Graphic, "Graphic")] {
+                    if ui.selectable_label(inset.kind == k, name).clicked() && inset.kind != k {
+                        out.push((
+                            "storyboard.inset",
+                            json!({ "scene": scene_id, "kind": if k == InsetKind::Video { "video" } else { "graphic" } }),
+                        ));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Corner");
+                for c in Corner::ALL {
+                    if ui.selectable_label(inset.corner == c, c.code()).clicked() && inset.corner != c {
+                        out.push(("storyboard.inset", json!({ "scene": scene_id, "corner": c.code() })));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                for (sz, code) in [(InsetSize::Small, "S"), (InsetSize::Medium, "M"), (InsetSize::Large, "L")] {
+                    if ui.selectable_label(inset.size == sz, code).clicked() && inset.size != sz {
+                        out.push(("storyboard.inset", json!({ "scene": scene_id, "size": code })));
+                    }
+                }
+            });
+            let mut swap = inset.swap;
+            if ui.checkbox(&mut swap, "Swap: inset fills the frame, the shot in the corner").changed() {
+                out.push(("storyboard.inset", json!({ "scene": scene_id, "swap": swap })));
+            }
+            let mut mix = inset.mix_audio;
+            if ui
+                .add_enabled(inset.kind == InsetKind::Video, egui::Checkbox::new(&mut mix, "Mix the video's audio in"))
+                .changed()
+            {
+                out.push(("storyboard.inset", json!({ "scene": scene_id, "mixAudio": mix })));
+            }
+            if set.is_some() {
+                ui.separator();
+                if ui.button("Clear the slot").clicked() {
+                    out.push(("storyboard.insetClear", json!({ "scene": scene_id })));
+                    ui.close();
+                }
+            }
+        };
+        egui::Popup::menu(&response).id(egui::Id::new(("sb-inset-menu", scene_id))).show(|ui| options(ui, &mut out));
+        egui::Popup::context_menu(&response)
+            .id(egui::Id::new(("sb-inset-ctx", scene_id)))
+            .show(|ui| options(ui, &mut out));
     }
     out
 }

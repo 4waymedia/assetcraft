@@ -22,7 +22,7 @@ use std::fmt;
 
 use crate::cuemap::{CueMap, Fit, FitMode, Timeline};
 use crate::model::{
-    AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Storyboard, Track, TrackEdit, Transition,
+    AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Storyboard, Track, TrackEdit, Transition,
 };
 use crate::shape::{ResolvedShape, SceneTransition, Shape, Titles, pick_shot};
 use crate::text::{TextAnimation, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind};
@@ -368,17 +368,22 @@ pub fn track_from_cue(
 
 /// How a template's music runs under its sections (SR3; Paul, 2026-11-06: "the selected song
 /// needs to use the 'chorus' section as a repeating background loop… the chorus music between
-/// each title").
+/// each title"; 2026-11-07: "use the intro for the first title, then rotate the chorus per
+/// section, and for the final section use the outro… the section title should be the start of
+/// the chorus audio").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MusicMode {
     /// The song from the top; it ends where it ends.
     Whole,
     /// Every chorus span of the cue map in order, joined with a one-beat crossfade, looped
     /// to the Cut's length; no chorus → the highest-energy section.
-    #[default]
     ChorusLoop,
     /// The first chorus only, looped.
     FirstChorus,
+    /// By the piece's parts: the song's intro under the opening scenes, a chorus starting on
+    /// every section's title card (rotating through the choruses), the outro under the close.
+    #[default]
+    Structured,
 }
 
 impl MusicMode {
@@ -388,6 +393,7 @@ impl MusicMode {
             MusicMode::Whole => "whole",
             MusicMode::ChorusLoop => "chorus",
             MusicMode::FirstChorus => "firstChorus",
+            MusicMode::Structured => "structured",
         }
     }
 
@@ -397,9 +403,185 @@ impl MusicMode {
             "whole" => Some(MusicMode::Whole),
             "chorus" => Some(MusicMode::ChorusLoop),
             "firstChorus" => Some(MusicMode::FirstChorus),
+            "structured" => Some(MusicMode::Structured),
             _ => None,
         }
     }
+}
+
+/// A span of the Cut the music follows (SR3b): where it starts, how long it runs, what part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MusicSpan {
+    /// Where in the Cut it starts.
+    pub start: Ticks,
+    /// How long it runs.
+    pub length: Ticks,
+    /// Opening, a section, or the close.
+    pub part: ScenePart,
+}
+
+impl Storyboard {
+    /// The music spans of this board: one per run of scenes with the same part, in Cut order
+    /// — the opening scenes as one span, every section its own (a chorus starts on each), the
+    /// closing scenes as one.
+    pub fn music_spans(&self) -> Vec<MusicSpan> {
+        let starts = self.starts();
+        let mut out: Vec<MusicSpan> = Vec::new();
+        for scene in &self.scenes {
+            let clips: Vec<usize> =
+                self.clips.iter().enumerate().filter(|(_, c)| c.scene_id == scene.id).map(|(i, _)| i).collect();
+            let (Some(&first), Some(&last)) = (clips.first(), clips.last()) else { continue };
+            let start = starts.get(first).copied().unwrap_or(Ticks::ZERO);
+            let end = starts
+                .get(last)
+                .copied()
+                .unwrap_or(Ticks::ZERO)
+                .checked_add(self.clips[last].duration)
+                .unwrap_or(Ticks::ZERO);
+            let length = Ticks(end.0.saturating_sub(start.0));
+            match out.last_mut() {
+                Some(prev) if prev.part == scene.part && scene.part != ScenePart::Section => {
+                    prev.length = Ticks(prev.length.0.saturating_add(length.0));
+                }
+                _ => out.push(MusicSpan { start, length, part: scene.part }),
+            }
+        }
+        out
+    }
+}
+
+/// The song's intro, choruses and outro as source spans snapped to bars (SR3b). Choruses as
+/// [`loop_spans`]; the intro is the section labelled intro, else what comes before the first
+/// chorus; the outro the section labelled outro, else what follows the last chorus. Each falls
+/// back to the choruses when the song has nothing of its own.
+struct SongParts {
+    intro: Vec<[u64; 2]>,
+    choruses: Vec<[u64; 2]>,
+    outro: Vec<[u64; 2]>,
+}
+
+fn song_parts(cue: &CueMap) -> Option<SongParts> {
+    let choruses = loop_spans(cue, false);
+    if choruses.is_empty() {
+        return None;
+    }
+    let sr = u64::from(cue.sample_rate.max(1));
+    let beat = ((60.0 / cue.bpm.max(1.0)) * sr as f64).round().max(1.0) as u64;
+    let bar = beat * u64::from(cue.beats_per_bar.max(1));
+    let grid: &[u64] = if cue.downbeats.is_empty() { &cue.beats } else { &cue.downbeats };
+    let snap = |[a, b]: [u64; 2]| -> Option<[u64; 2]> {
+        let start = grid.iter().copied().find(|g| *g >= a).unwrap_or(a);
+        let end = grid.iter().copied().rev().find(|g| *g <= b).unwrap_or(b);
+        (end > start && end - start >= bar.min(sr)).then_some([start, end])
+    };
+    let labelled = |word: &str| -> Vec<[u64; 2]> {
+        cue.sections
+            .iter()
+            .filter(|s| s.label.to_ascii_lowercase().contains(word))
+            .filter_map(|s| snap([s.start, s.end]))
+            .collect()
+    };
+    let first_chorus = choruses.first().map_or(0, |c| c[0]);
+    let last_chorus = choruses.last().map_or(0, |c| c[1]);
+    let mut intro = labelled("intro");
+    if intro.is_empty() {
+        intro = snap([0, first_chorus]).into_iter().collect();
+    }
+    let mut outro = labelled("outro");
+    if outro.is_empty() {
+        outro = snap([last_chorus, cue.duration_frames]).into_iter().collect();
+    }
+    Some(SongParts { intro, choruses, outro })
+}
+
+/// Fill `want` frames from `source` spans played in order and repeated, pushing pieces onto
+/// `segments`; a tail shorter than a beat goes to the previous piece.
+fn fill_from(segments: &mut Vec<[u64; 2]>, source: &[[u64; 2]], want: u64, beat: u64, song_len: u64) -> u64 {
+    let mut have = 0u64;
+    if source.is_empty() || want == 0 {
+        return 0;
+    }
+    'outer: while have < want {
+        for &[a, b] in source {
+            if have >= want || segments.len() >= LOOP_MAX_SEGMENTS {
+                break 'outer;
+            }
+            let left = want - have;
+            let len = (b - a).min(left);
+            if len < beat
+                && let Some(last) = segments.last_mut()
+                && last[1] + len <= song_len
+            {
+                last[1] += len;
+                have += len;
+                break 'outer;
+            }
+            segments.push([a, a + len]);
+            have += len;
+        }
+    }
+    have
+}
+
+/// The music by the piece's parts (SR3b): the intro under the opening span, a chorus starting
+/// at every section span (rotating through the song's choruses), the outro under the closing
+/// span — each cut or looped to its span's length, every splice a one-beat crossfade, a
+/// two-second fade at the end. `None` when the song gives nothing to work with.
+pub fn structured_fit(cue: &CueMap, spans: &[MusicSpan]) -> Option<Fit> {
+    let parts = song_parts(cue)?;
+    if spans.is_empty() {
+        return None;
+    }
+    let sr = u64::from(cue.sample_rate.max(1));
+    let beat = ((60.0 / cue.bpm.max(1.0)) * sr as f64).round().max(1.0) as u64;
+    let mut segments: Vec<[u64; 2]> = Vec::new();
+    let mut have = 0u64;
+    let mut chorus_i = 0usize;
+    for span in spans {
+        let want = cue.frames(span.length);
+        // Every span starts where the Cut says: the music so far is padded to it (silence is
+        // never inserted: the previous piece is extended into the song, or cut).
+        let at = cue.frames(span.start);
+        if at > have
+            && let Some(last) = segments.last_mut()
+        {
+            let extra = (at - have).min(cue.duration_frames.saturating_sub(last[1]));
+            last[1] += extra;
+            have += extra;
+        }
+        let source: Vec<[u64; 2]> = match span.part {
+            ScenePart::Opening => parts.intro.clone(),
+            ScenePart::Close => parts.outro.clone(),
+            ScenePart::Section => {
+                let c = parts.choruses[chorus_i % parts.choruses.len()];
+                chorus_i += 1;
+                vec![c]
+            }
+        };
+        let source = if source.is_empty() { parts.choruses.clone() } else { source };
+        have += fill_from(&mut segments, &source, want, beat, cue.duration_frames);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+    let length = have;
+    let fade = ((LOOP_FADE_SECS * sr as f64) as u64).min(length / 2).max(1);
+    let sections = spans.iter().filter(|s| s.part == ScenePart::Section).count();
+    Some(Fit {
+        mode: FitMode::Fade,
+        length_frames: length,
+        segments,
+        crossfade_frames: beat,
+        fade_out: Some(crate::cuemap::FadeOut { start: length - fade, frames: fade }),
+        similarity: None,
+        reasons: vec![format!(
+            "Intro under the opening, {} chorus{} over {sections} section{}, the outro under the close",
+            parts.choruses.len(),
+            if parts.choruses.len() == 1 { "" } else { "es" },
+            if sections == 1 { "" } else { "s" }
+        )],
+        changes: "Intro · a chorus per section · outro".into(),
+    })
 }
 
 /// Most pieces a loop is built from (a one-bar chorus under a six-hour Cut stops here; the
@@ -491,17 +673,21 @@ pub fn chorus_loop(cue: &CueMap, total: Ticks, first: bool) -> Option<Fit> {
     })
 }
 
-/// The track a template plays under a Cut `total` long ([`track_from_cue`] with the music
-/// mode): the whole song, or the chorus loop cut to `total` (the whole song when the cue map
-/// gives nothing to loop). The second value says what was done, for the message.
-pub fn track_under(cue: &CueMap, track_path: &str, total: Ticks, music: MusicMode) -> (Track, &'static str) {
+/// The track a template plays under a board ([`track_from_cue`] with the music mode): the
+/// whole song, the chorus loop cut to the Cut's length, or the structured music by the
+/// board's parts (the whole song when the cue map gives nothing to work with). The second
+/// value says what was done, for the message.
+pub fn track_under(cue: &CueMap, track_path: &str, board: &Storyboard, music: MusicMode) -> (Track, &'static str) {
+    let total = board.total();
     let first = music == MusicMode::FirstChorus;
     let fit = match music {
         MusicMode::Whole => None,
         MusicMode::ChorusLoop | MusicMode::FirstChorus => chorus_loop(cue, total, first),
+        MusicMode::Structured => structured_fit(cue, &board.music_spans()),
     };
     let what = match (&fit, music) {
         (Some(_), MusicMode::FirstChorus) => "the first chorus looped",
+        (Some(_), MusicMode::Structured) => "intro · a chorus per section · outro",
         (Some(_), _) => "the chorus looped",
         (None, MusicMode::Whole) => "the whole song",
         (None, _) => "the whole song (nothing to loop)",
@@ -665,7 +851,12 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
     board.scenes = scenes
         .iter()
         .enumerate()
-        .map(|(i, s)| Scene { id: SceneId(i as u32 + 1), song_section: Some(s.label.clone()), inset: None })
+        .map(|(i, s)| Scene {
+            id: SceneId(i as u32 + 1),
+            song_section: Some(s.label.clone()),
+            inset: None,
+            part: ScenePart::Section,
+        })
         .collect();
     let mut report = GenerateReport {
         scenes: scenes.len(),

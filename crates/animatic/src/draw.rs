@@ -150,6 +150,18 @@ pub fn cover(out: &mut Rgba, image: &Rgba) {
     draw_window(out, image, [0.5 - u / 2.0, 0.5 - v / 2.0, 0.5 + u / 2.0, 0.5 + v / 2.0], [0.0, 0.0, w, h]);
 }
 
+/// Draw all of `image` into `target` (`[x, y, w, h]`), bilinear, keeping its aspect inside it
+/// (letterboxed within the target).
+pub fn contain_in(out: &mut Rgba, image: &Rgba, target: [f32; 4]) {
+    let [tx, ty, tw, th] = target;
+    if image.width == 0 || image.height == 0 || tw <= 0.0 || th <= 0.0 {
+        return;
+    }
+    let s = (tw / image.width as f32).min(th / image.height as f32);
+    let (w, h) = (image.width as f32 * s, image.height as f32 * s);
+    draw_window(out, image, [0.0, 0.0, 1.0, 1.0], [tx + (tw - w) / 2.0, ty + (th - h) / 2.0, w, h]);
+}
+
 fn draw_window(out: &mut Rgba, image: &Rgba, window: [f32; 4], target: [f32; 4]) {
     let [tx, ty, tw, th] = target;
     if tw <= 0.0 || th <= 0.0 || image.width == 0 || image.height == 0 {

@@ -163,7 +163,7 @@ fn an_overlay_sits_in_its_corner_and_an_empty_clip_says_so() {
 fn a_cut_is_drawn_by_time_and_bad_assets_are_reported_not_fatal() {
     let mut c = compositor(160, 90);
     let mut board = Storyboard::new("cut");
-    board.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None });
+    board.scenes.push(Scene::new(SceneId(1), None));
     let mut a = clip(1, ShotType::Ttl, 1);
     a.description = "A".into();
     let mut b = clip(2, ShotType::Est, 2);
@@ -261,4 +261,63 @@ fn dump() {
         }
         std::fs::write(format!("{dir}/{name}.ppm"), ppm).unwrap_or_else(|e| panic!("{e}"));
     }
+}
+
+#[test]
+fn a_sections_inset_is_drawn_in_its_corner_a_video_as_a_poster_box_and_swap_flips_them() {
+    use assetcraft_storyboard::{Corner, Inset, InsetKind, InsetSize};
+    let mut comp = compositor(320, 180);
+    let mut board = Storyboard::new("Inset");
+    board.scenes.push(Scene::new(SceneId(1), None));
+    let mut card = clip(1, ShotType::Ttl, 2);
+    card.description = "Step 1".into();
+    let mut shot = clip(2, ShotType::Ms, 4);
+    shot.asset_ids.push(asset("environments/soul_light_forest.jpg"));
+    board.clips = vec![card, shot];
+    let at_shot = Ticks::from_secs(3).unwrap();
+    let plain = comp.frame(&board, at_shot);
+    // A graphic in the bottom-right corner, medium: 30 % of the width, 16:9, inset 2.5 %.
+    board.scenes[0].inset =
+        Some(Inset { asset: Some(asset("environments/snow_clearing_plate.jpg")), ..Inset::slot(InsetKind::Graphic) });
+    let with = comp.frame(&board, at_shot);
+    let corner = |img: &Rgba| -> Vec<[u8; 4]> {
+        // The middle of the bottom-right inset box: x in [224+8, 312-8], y in [172-54+8 .. 172-8].
+        (120..160).flat_map(|y| (240..300).map(move |x| (x, y))).map(|(x, y)| img.get(x, y)).collect()
+    };
+    assert_ne!(corner(&plain), corner(&with), "the corner changed");
+    let top_left = |img: &Rgba| -> Vec<[u8; 4]> {
+        (10..60).flat_map(|y| (10..100).map(move |x| (x, y))).map(|(x, y)| img.get(x, y)).collect()
+    };
+    assert_eq!(top_left(&plain), top_left(&with), "the shot is untouched elsewhere");
+    // A title card never carries the inset.
+    assert_eq!(comp.frame(&board, Ticks::from_secs(1).unwrap()), {
+        let mut no = board.clone();
+        no.scenes[0].inset = None;
+        comp.frame(&no, Ticks::from_secs(1).unwrap())
+    });
+    // Top-left, small: the top-left changes, the bottom-right is the plain shot again.
+    board.scenes[0].inset.as_mut().unwrap().corner = Corner::TopLeft;
+    board.scenes[0].inset.as_mut().unwrap().size = InsetSize::Small;
+    let tl = comp.frame(&board, at_shot);
+    assert_ne!(top_left(&plain), top_left(&tl));
+    assert_eq!(corner(&plain), corner(&tl));
+    // A video: a dark poster box with its name (no decoder here).
+    board.scenes[0].inset = Some(Inset {
+        asset: Some(asset("environments/snow_clearing_flythrough.mov")),
+        ..Inset::slot(InsetKind::Video)
+    });
+    let video = comp.frame(&board, at_shot);
+    let (_, mean) = stats(&Rgba { width: 60, height: 40, data: corner(&video).concat() }, [0, 0, 0]);
+    assert!(mean[0] < 0x60 as f32 && mean[2] < 0x70 as f32, "a dark box: {mean:?}");
+    assert!(comp.problems().is_empty(), "{:?}", comp.problems());
+    // Swap: the inset fills the frame and the shot sits in the corner.
+    board.scenes[0].inset.as_mut().unwrap().swap = true;
+    board.scenes[0].inset.as_mut().unwrap().asset = Some(asset("environments/snow_clearing_plate.jpg"));
+    board.scenes[0].inset.as_mut().unwrap().kind = InsetKind::Graphic;
+    let swapped = comp.frame(&board, at_shot);
+    assert_ne!(top_left(&swapped), top_left(&plain), "the graphic is the picture now");
+    assert_ne!(corner(&swapped), corner(&with), "the shot is in the corner");
+    // An empty slot draws nothing.
+    board.scenes[0].inset = Some(Inset::slot(InsetKind::Video));
+    assert_eq!(comp.frame(&board, at_shot), plain);
 }

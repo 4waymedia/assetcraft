@@ -1,0 +1,103 @@
+//! The Inspector's INSET section (SR2c, `docs/storyboard-plan.md` § Sections): the selected
+//! clip's section and its inset lane — the file (from the Organizer's selection, or a drop on
+//! the Strip's INSET row), video or graphic, the corner, the size, Swap, Mix audio, Clear.
+//! Every control is one `storyboard.inset` / `storyboard.insetClear` (one undo step each).
+
+use crate::Navigator;
+use assetcraft_storyboard::{Clip, Corner, InsetKind, InsetSize, Storyboard};
+use egui::{RichText, Ui};
+use serde_json::json;
+use std::path::Path;
+
+/// The INSET section for `clip`'s section. Nothing for a title card's scene without shots.
+pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, clip: &Clip) {
+    let scene = clip.scene_id;
+    if board.inset_span(scene).next().is_none() {
+        return;
+    }
+    let inset = board.scenes.iter().find(|s| s.id == scene).and_then(|s| s.inset.clone());
+    let title = board.scene_title(scene).map_or_else(|| format!("Scene {}", scene.0), str::to_owned);
+    crate::storyboard_view::section(ui, "INSET");
+    ui.weak(format!("Over {title}'s shots, in a corner"));
+    let focused = crate::storyboard_view::focused_file(nav);
+    let mut edit: Option<serde_json::Value> = None;
+    match inset.as_ref().and_then(|i| i.asset.as_ref()) {
+        Some(a) => {
+            crate::storyboard_view::hero_frame(nav, ui, &a.0);
+            ui.label(RichText::new(assetcraft_fs::display_name(Path::new(&a.0))).small()).on_hover_text(a.0.as_str());
+        }
+        None => {
+            ui.weak("Empty slot: drop b-roll, an interview, a host or a graphic on the Strip's INSET row, or");
+        }
+    }
+    let label = if inset.as_ref().is_some_and(|i| !i.is_empty()) {
+        "Replace with Organizer selection"
+    } else {
+        "Use Organizer selection"
+    };
+    if ui
+        .add_enabled(focused.is_some(), egui::Button::new(label))
+        .on_hover_text("A video's own length sizes the section (MP4 / MOV)")
+        .clicked()
+        && let Some(p) = &focused
+    {
+        edit = Some(json!({ "scene": scene.0, "asset": p.to_string_lossy() }));
+    }
+    let i = inset.clone().unwrap_or_else(|| assetcraft_storyboard::Inset::slot(InsetKind::Video));
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Kind");
+        for (k, name, tip) in [
+            (InsetKind::Video, "Video", "The host, b-roll, an interview: its audio can be mixed in"),
+            (InsetKind::Graphic, "Graphic", "A still: a diagram, a part, a label"),
+        ] {
+            if ui.selectable_label(i.kind == k, name).on_hover_text(tip).clicked() && i.kind != k {
+                edit =
+                    Some(json!({ "scene": scene.0, "kind": if k == InsetKind::Video { "video" } else { "graphic" } }));
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Corner");
+        for c in Corner::ALL {
+            if ui.selectable_label(i.corner == c, c.code()).clicked() && i.corner != c {
+                edit = Some(json!({ "scene": scene.0, "corner": c.code() }));
+            }
+        }
+        ui.add_space(8.0);
+        ui.label("Size");
+        for (sz, code) in [(InsetSize::Small, "S"), (InsetSize::Medium, "M"), (InsetSize::Large, "L")] {
+            let tip = format!("{:.0} % of the frame's width", sz.share() * 100.0);
+            if ui.selectable_label(i.size == sz, code).on_hover_text(tip).clicked() && i.size != sz {
+                edit = Some(json!({ "scene": scene.0, "size": code }));
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut swap = i.swap;
+        if ui
+            .checkbox(&mut swap, "Swap")
+            .on_hover_text("The inset fills the frame and the section's shots sit in the corner")
+            .changed()
+        {
+            edit = Some(json!({ "scene": scene.0, "swap": swap }));
+        }
+        let mut mix = i.mix_audio;
+        if ui
+            .add_enabled(i.kind == InsetKind::Video, egui::Checkbox::new(&mut mix, "Mix audio in"))
+            .on_hover_text("Play the video's sound under the section; the music ducks while it does")
+            .changed()
+        {
+            edit = Some(json!({ "scene": scene.0, "mixAudio": mix }));
+        }
+        if inset.as_ref().is_some_and(|i| !i.is_empty())
+            && ui.button("Clear").on_hover_text("Empty the slot; the options stay (Ctrl+Z undoes)").clicked()
+        {
+            nav.run("storyboard.insetClear", json!({ "scene": scene.0 }));
+        }
+    });
+    if let Some(params) = edit {
+        nav.run("storyboard.inset", params);
+    }
+    ui.add_space(6.0);
+}

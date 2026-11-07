@@ -461,6 +461,7 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
         }
         ui.add_space(6.0);
         crate::motion_view::inspector_section(nav, ui, &board, &clip);
+        crate::inset_view::inspector_section(nav, ui, &board, &clip);
     });
 }
 

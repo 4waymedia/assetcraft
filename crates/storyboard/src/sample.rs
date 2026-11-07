@@ -4,7 +4,7 @@
 //! scenes, each opened by a title card, so 19 clips take shots. The track is a stand-in (no audio
 //! file) at 92 BPM and 60 s, enough for Re-cut and the timecode. Nothing here is a preset.
 
-use crate::model::{AssetId, Clip, ClipId, Scene, SceneId, ShotType, Storyboard, Track, Transition};
+use crate::model::{AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, Storyboard, Track, Transition};
 use crate::time::{Bpm, Ticks};
 
 /// Tempo of the sample track.
@@ -78,7 +78,12 @@ pub fn sample() -> Storyboard {
     let mut next = 1u32;
     for (s, (section, title, shots)) in SCENES.iter().enumerate() {
         let scene_id = SceneId(s as u32 + 1);
-        board.scenes.push(Scene { id: scene_id, song_section: Some((*section).into()), inset: None });
+        board.scenes.push(Scene {
+            id: scene_id,
+            song_section: Some((*section).into()),
+            inset: None,
+            part: ScenePart::Section,
+        });
         let mut card = Clip::new(ClipId(next), scene_id, ShotType::Ttl, bpm.beats_to_ticks(4));
         card.description = (*title).into();
         card.transition_in = if s == 0 { Transition::FadeIn } else { Transition::Cut };

@@ -26,7 +26,9 @@ pub use draw::Rgba;
 
 use assetcraft_fs::Services;
 use assetcraft_mesh::{RenderOptions, View};
-use assetcraft_storyboard::{AnimFrame, Camera, Clip, MotionKind, ShotType, Storyboard, TextKind, Ticks};
+use assetcraft_storyboard::{
+    AnimFrame, Camera, Clip, Corner, Inset, InsetKind, InsetSize, MotionKind, ShotType, Storyboard, TextKind, Ticks,
+};
 use assetcraft_thumbs::model::{Model, load_model, render_view};
 use assetcraft_thumbs::{DecodeOptions, ThumbError, ThumbKey};
 use std::collections::HashMap;
@@ -151,9 +153,100 @@ impl Compositor {
             starts.get(i).map(|s| (c, *s))
         });
         match found {
-            Some((clip, start)) => self.clip_frame(clip, Ticks(at.0.saturating_sub(start.0)).as_secs_f64()),
+            Some((clip, start)) => {
+                let elapsed = Ticks(at.0.saturating_sub(start.0)).as_secs_f64();
+                let inset = board.scenes.iter().find(|s| s.id == clip.scene_id).and_then(|s| s.inset.as_ref());
+                self.section_frame(clip, elapsed, inset)
+            }
             None => Rgba::filled(self.width, self.height, [0, 0, 0]),
         }
+    }
+
+    /// `clip` with its section's inset (SR2c): the shot as [`clip_frame`](Self::clip_frame),
+    /// and the inset in its corner — a graphic drawn at full quality, a video as a poster box
+    /// with its name (FilmCraft renders the real video from the OTIO). With `swap`, the inset
+    /// takes the frame and the shot sits in the corner. Title cards never carry one.
+    pub fn section_frame(&mut self, clip: &Clip, elapsed: f64, inset: Option<&Inset>) -> Rgba {
+        let shot = self.clip_frame(clip, elapsed);
+        let Some(inset) = inset.filter(|i| i.asset.is_some() && clip.shot_type != ShotType::Ttl) else {
+            return shot;
+        };
+        if inset.swap {
+            let mut out = Rgba::filled(self.width, self.height, [0, 0, 0]);
+            let full = [0.0, 0.0, self.width as f32, self.height as f32];
+            self.paint_inset(&mut out, inset, full);
+            let corner = self.corner_rect(inset.corner, inset.size);
+            let [x, y, w, h] = corner;
+            draw::rect(&mut out, x - 2.0, y - 2.0, w + 4.0, h + 4.0, [0x10, 0x10, 0x10], 1.0);
+            draw::contain_in(&mut out, &shot, corner);
+            out
+        } else {
+            let mut out = shot;
+            let corner = self.corner_rect(inset.corner, inset.size);
+            let [x, y, w, h] = corner;
+            draw::rect(&mut out, x - 2.0, y - 2.0, w + 4.0, h + 4.0, [0x10, 0x10, 0x10], 1.0);
+            self.paint_inset(&mut out, inset, corner);
+            out
+        }
+    }
+
+    /// Where an inset of `size` sits in `corner`: 16:9, `size.share()` of the frame's width,
+    /// 2.5 % of the width in from the edges.
+    fn corner_rect(&self, corner: Corner, size: InsetSize) -> [f32; 4] {
+        let (fw, fh) = (self.width as f32, self.height as f32);
+        let w = (fw * size.share()).max(8.0);
+        let h = (w * 9.0 / 16.0).min(fh * 0.6);
+        let m = fw * 0.025;
+        let x = match corner {
+            Corner::TopLeft | Corner::BottomLeft => m,
+            Corner::TopRight | Corner::BottomRight => fw - m - w,
+        };
+        let y = match corner {
+            Corner::TopLeft | Corner::TopRight => m,
+            Corner::BottomLeft | Corner::BottomRight => fh - m - h,
+        };
+        [x, y, w, h]
+    }
+
+    /// The inset's picture into `target`: a graphic as itself; a video as a dark poster box
+    /// with a play mark and the file's name.
+    fn paint_inset(&mut self, out: &mut Rgba, inset: &Inset, target: [f32; 4]) {
+        let Some(asset) = &inset.asset else { return };
+        let path = Path::new(asset.0.as_str());
+        let [x, y, w, h] = target;
+        draw::rect(out, x, y, w, h, [0x1e, 0x1e, 0x22], 1.0);
+        let graphic = inset.kind == InsetKind::Graphic
+            || !matches!(format_of(path).category(), assetcraft_probe::Category::Video);
+        if graphic && let Some(image) = self.still(path) {
+            draw::contain_in(out, &image, target);
+            return;
+        }
+        // A video: the poster box. (Decoding video is FilmCraft's; the Viewer shows where it
+        // goes and the export carries the box so the cut is readable without it.)
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (fw, fh) = (self.width as f32, self.height as f32);
+        let cx = (x + w / 2.0) / fw;
+        let cy = (y + h / 2.0) / fh;
+        self.fonts.draw_centered(
+            out,
+            "VIDEO",
+            (h * 0.16).max(7.0),
+            [0xd0, 0xd0, 0xd0],
+            1.0,
+            cx,
+            cy - (h * 0.1) / fh,
+            w,
+        );
+        self.fonts.draw_centered(
+            out,
+            &name,
+            (h * 0.11).max(6.0),
+            [0xa0, 0xa0, 0xa0],
+            1.0,
+            cx,
+            cy + (h * 0.12) / fh,
+            w * 0.9,
+        );
     }
 
     /// `clip` as the Viewer shows it `elapsed` seconds in (`f64::INFINITY` = at rest).

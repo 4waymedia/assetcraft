@@ -19,6 +19,7 @@ fn sample() -> Storyboard {
             id: SceneId(s + 1),
             song_section: Some(["Intro", "Verse", "Pre-chorus", "Chorus", "Outro"][s as usize].into()),
             inset: None,
+            part: ScenePart::Section,
         });
         let mut t = Clip::new(ClipId(id), SceneId(s + 1), ShotType::Ttl, b.beats_to_ticks(4));
         t.description = format!("Title {}", s + 1);
@@ -1002,7 +1003,7 @@ fn the_credits_clip_is_appended_last_with_its_placeholders_filled() {
     board.validate(&Limits::default()).unwrap_or_else(|e| panic!("{e}"));
     // No song: the music line is dropped; no credit text: "Music: <name>".
     let mut plain = Storyboard::new("Plain");
-    plain.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None });
+    plain.scenes.push(Scene { id: SceneId(1), song_section: None, inset: None, part: ScenePart::Section });
     plain.append_credits(&credits);
     assert_eq!(plain.clips.last().unwrap().description, "Plain\nMade with AssetCraft");
     let mut named = sample();
@@ -1067,7 +1068,14 @@ fn the_chorus_loops_under_a_cut_longer_than_the_song_and_the_track_carries_it() 
     assert_eq!(fit.mode, FitMode::Fade);
     // The track under a 100 s Cut: as long as the Cut, every piece labelled Chorus, beats in
     // every repeat.
-    let (track, what) = track_under(&m, "/music/song.wav", total, MusicMode::ChorusLoop);
+    // A board as long as `total` with one plain section.
+    let board_of = |secs: u64| {
+        let mut b = Storyboard::new("Loop");
+        b.scenes.push(Scene::new(SceneId(1), None));
+        b.clips.push(Clip::new(ClipId(1), SceneId(1), ShotType::Ms, Ticks::from_secs(secs).unwrap()));
+        b
+    };
+    let (track, what) = track_under(&m, "/music/song.wav", &board_of(100), MusicMode::ChorusLoop);
     assert_eq!(what, "the chorus looped");
     assert_eq!(track.duration, total);
     assert!(track.song_sections.iter().all(|s| s.name == "Chorus"), "{:?}", track.song_sections);
@@ -1085,7 +1093,7 @@ fn the_chorus_loops_under_a_cut_longer_than_the_song_and_the_track_carries_it() 
     assert_eq!(odd.segments, vec![[24 * BAR, 40 * BAR + SR / 4]]);
     assert_eq!(odd.length_frames, 32 * SR + SR / 4);
     // Whole: the song from the top, no edit, its own length.
-    let (whole, what) = track_under(&m, "/music/song.wav", total, MusicMode::Whole);
+    let (whole, what) = track_under(&m, "/music/song.wav", &board_of(100), MusicMode::Whole);
     assert_eq!(what, "the whole song");
     assert_eq!(whole.duration, Ticks::from_secs(128).unwrap());
     assert!(whole.edit.is_none());
@@ -1105,8 +1113,92 @@ fn the_chorus_loops_under_a_cut_longer_than_the_song_and_the_track_carries_it() 
     assert_eq!(fit.segments[0][0], 24 * BAR, "the Build at energy 1.0");
     none.sections.clear();
     assert!(chorus_loop(&none, Ticks::from_secs(10).unwrap(), false).is_none());
-    let (_, what) = track_under(&none, "/music/song.wav", total, MusicMode::ChorusLoop);
+    let (_, what) = track_under(&none, "/music/song.wav", &board_of(100), MusicMode::ChorusLoop);
     assert_eq!(what, "the whole song (nothing to loop)");
     assert_eq!(MusicMode::parse("firstChorus"), Some(MusicMode::FirstChorus));
-    assert_eq!(MusicMode::default().id(), "chorus");
+    assert_eq!(MusicMode::default().id(), "structured");
+}
+
+#[test]
+fn structured_music_puts_the_intro_under_the_opening_a_chorus_on_every_section_title_and_the_outro_under_the_close() {
+    use cue::{BAR, BEAT, SR};
+    let m = cue::map();
+    // A Tutorial with two 20 s steps: Goal + Setup (opening) · Step 1 · Step 2 · Result (close).
+    let t = bundled_template_sized("tutorial", 2, 20.0).unwrap();
+    let spans = t.music_spans();
+    assert_eq!(
+        spans.iter().map(|s| s.part).collect::<Vec<_>>(),
+        [ScenePart::Opening, ScenePart::Section, ScenePart::Section, ScenePart::Close]
+    );
+    let opening = spans[0].length.as_secs_f64();
+    assert!(
+        opening > 0.0 && (spans[1].start.as_secs_f64() - opening).abs() < 1e-9,
+        "the first section starts where the opening ends"
+    );
+    assert!((spans[1].length.as_secs_f64() - 20.0).abs() < 1e-9 && (spans[2].length.as_secs_f64() - 20.0).abs() < 1e-9);
+    let fit = structured_fit(&m, &spans).expect("a song with a chorus");
+    // Intro (bars 0–8 = 16 s) under the opening, cut to its length; a chorus from bar 24 at
+    // each step's start; the outro (bars 56–64) under the close.
+    let intro_len = fit.segments[0][1] - fit.segments[0][0];
+    assert_eq!(fit.segments[0][0], 0);
+    assert!(intro_len <= 8 * BAR);
+    let frames = |secs: f64| (secs * SR as f64).round() as u64;
+    // Where each span starts in the output = the sum of the pieces before it.
+    let mut off = 0u64;
+    let mut starts = Vec::new();
+    for s in &fit.segments {
+        starts.push((off, *s));
+        off += s[1] - s[0];
+    }
+    let at = |t: u64| {
+        starts.iter().find(|(o, s)| *o <= t && t < *o + (s[1] - s[0])).map(|(o, s)| (s[0] + (t - o), s)).unwrap()
+    };
+    let (src1, piece1) = at(frames(opening));
+    assert_eq!(src1, 24 * BAR, "step 1's title lands on the chorus start: {piece1:?}");
+    let (src2, piece2) = at(frames(opening + 20.0));
+    assert_eq!(src2, 24 * BAR, "step 2's title lands on the chorus start again (one chorus rotates): {piece2:?}");
+    let close_at = frames(opening + 40.0);
+    let (src3, _) = at(close_at);
+    assert_eq!(src3, 56 * BAR, "the outro under the close");
+    assert_eq!(fit.length_frames, m.frames(t.total()));
+    assert_eq!(fit.crossfade_frames, BEAT);
+    assert!(fit.reasons[0].contains("1 chorus over 2 sections"), "{:?}", fit.reasons);
+    // Through the track: as long as the Cut, with the edit.
+    let (track, what) = track_under(&m, "/music/song.wav", &t, MusicMode::Structured);
+    assert_eq!(what, "intro · a chorus per section · outro");
+    assert_eq!(track.duration, t.total());
+    assert_eq!(track.edit.as_ref().unwrap().segments, fit.segments);
+    // Two choruses rotate: section 1 gets the first, section 2 the second, section 3 the first.
+    let mut two = m.clone();
+    two.sections[3].label = "Chorus".into();
+    let t3 = bundled_template_sized("tutorial", 3, 20.0).unwrap();
+    let fit = structured_fit(&two, &t3.music_spans()).unwrap();
+    let mut off = 0u64;
+    let mut starts = Vec::new();
+    for s in &fit.segments {
+        starts.push((off, *s));
+        off += s[1] - s[0];
+    }
+    let src =
+        |t: u64| starts.iter().find(|(o, s)| *o <= t && t < *o + (s[1] - s[0])).map(|(o, s)| s[0] + (t - o)).unwrap();
+    let o = t3.music_spans()[0].length.as_secs_f64();
+    assert_eq!(src(frames(o)), 24 * BAR);
+    assert_eq!(src(frames(o + 20.0)), 40 * BAR);
+    assert_eq!(src(frames(o + 40.0)), 24 * BAR);
+    // A song without intro / outro labels: the stretch before the first chorus and after the
+    // last stand in; no chorus at all → the loudest section; no sections → nothing.
+    let mut bare = m.clone();
+    bare.sections[0].label = "Part A".into();
+    bare.sections[4].label = "Part E".into();
+    let fit = structured_fit(&bare, &spans).unwrap();
+    assert_eq!(fit.segments[0][0], 0, "the stretch before the chorus");
+    bare.sections.clear();
+    assert!(structured_fit(&bare, &spans).is_none());
+    assert!(structured_fit(&m, &[]).is_none());
+    // A board with only sections (an old board, a preset): choruses throughout.
+    let mut plain = Storyboard::new("Plain");
+    plain.scenes.push(Scene::new(SceneId(1), None));
+    plain.clips.push(Clip::new(ClipId(1), SceneId(1), ShotType::Ms, Ticks::from_secs(10).unwrap()));
+    let fit = structured_fit(&m, &plain.music_spans()).unwrap();
+    assert_eq!(fit.segments, vec![[24 * BAR, 24 * BAR + 10 * SR]]);
 }

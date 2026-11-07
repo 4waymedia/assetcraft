@@ -196,7 +196,7 @@ pub(crate) fn fit_to_cue(s: &Session, p: &Value, board: &mut Storyboard, rename:
     for (clip, d) in board.clips.iter_mut().zip(&report.durations) {
         clip.duration = *d;
     }
-    let (track, what) = assetcraft_storyboard::track_under(&cue, &track_path.to_string_lossy(), board.total(), music);
+    let (track, what) = assetcraft_storyboard::track_under(&cue, &track_path.to_string_lossy(), board, music);
     if rename || board.name == "Untitled storyboard" {
         board.name = format!("{} · {}", cue.track.title, board.name);
     }
@@ -204,14 +204,14 @@ pub(crate) fn fit_to_cue(s: &Session, p: &Value, board: &mut Storyboard, rename:
     Ok(Fitted { report, music: what })
 }
 
-/// `music` as the way a template's song runs under it (`chorus` by default).
+/// `music` as the way a template's song runs under it (`structured` by default).
 pub(crate) fn music_param(p: &Value) -> Result<assetcraft_storyboard::MusicMode, CmdError> {
     match p.get("music") {
         None | Some(Value::Null) => Ok(assetcraft_storyboard::MusicMode::default()),
         Some(v) => v
             .as_str()
             .and_then(assetcraft_storyboard::MusicMode::parse)
-            .ok_or_else(|| CmdError::BadParams("`music` must be chorus, firstChorus or whole".into())),
+            .ok_or_else(|| CmdError::BadParams("`music` must be structured, chorus, firstChorus or whole".into())),
     }
 }
 

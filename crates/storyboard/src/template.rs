@@ -22,7 +22,7 @@
 //! designed beats. With a song, the engine snaps the shots to the beat at the template's own
 //! length and attaches the whole song (the chorus loop under the sections is SR3).
 
-use crate::model::{AssetId, Clip, ClipId, Scene, SceneId, ShotType, Storyboard, Transition};
+use crate::model::{AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, Storyboard, Transition};
 use crate::motion::{Camera, Motion, MotionKind, MotionPreset};
 use crate::text::{TextAnimation, TextPosition, TextStyle, TextTheme};
 use crate::time::Ticks;
@@ -145,9 +145,19 @@ fn build(name: &str, format: &str, theme: TextTheme, scenes: &[(String, Vec<Beat
     board.format = Some(format.into());
     board.template = true;
     let mut next = 1u32;
+    // Parts (SR3b): the scenes before the first repeating section are the opening, those after
+    // the last are the close; the music under them follows (intro · a chorus each · outro).
+    let is_step = |name: &str| name.starts_with("Step ") || name.starts_with("Point ");
+    let first_step = scenes.iter().position(|(n, _)| is_step(n));
+    let last_step = scenes.iter().rposition(|(n, _)| is_step(n));
     for (s, (section, beats)) in scenes.iter().enumerate() {
         let scene_id = SceneId(s as u32 + 1);
-        board.scenes.push(Scene { id: scene_id, song_section: Some(section.clone()), inset: None });
+        let part = match (first_step, last_step) {
+            (Some(a), _) if s < a => ScenePart::Opening,
+            (_, Some(b)) if s > b => ScenePart::Close,
+            _ => ScenePart::Section,
+        };
+        board.scenes.push(Scene { id: scene_id, song_section: Some(section.clone()), inset: None, part });
         for b in beats.iter() {
             let mut clip =
                 Clip::new(ClipId(next), scene_id, b.shot, Ticks::from_secs_f64(b.secs).unwrap_or(Ticks::ZERO));
@@ -279,7 +289,12 @@ pub fn credits() -> Storyboard {
     let mut board = Storyboard::new(CREDITS_NAME);
     board.format = Some("Credits".into());
     board.template = true;
-    board.scenes.push(Scene { id: SceneId(1), song_section: Some(CREDITS_NAME.into()), inset: None });
+    board.scenes.push(Scene {
+        id: SceneId(1),
+        song_section: Some(CREDITS_NAME.into()),
+        inset: None,
+        part: ScenePart::Close,
+    });
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(6).unwrap_or(Ticks::ZERO));
     card.description = "{title}\n{music}\nMade with AssetCraft".into();
     card.text_style =
@@ -317,7 +332,12 @@ impl Storyboard {
         for (i, scene) in credits.scenes.iter().enumerate() {
             let id = SceneId(next_scene + i as u32);
             scene_map.push((scene.id, id));
-            self.scenes.push(Scene { id, song_section: scene.song_section.clone(), inset: scene.inset.clone() });
+            self.scenes.push(Scene {
+                id,
+                song_section: scene.song_section.clone(),
+                inset: scene.inset.clone(),
+                part: scene.part,
+            });
         }
         if let Some(last) = self.clips.last_mut()
             && last.transition_out == Transition::FadeOut

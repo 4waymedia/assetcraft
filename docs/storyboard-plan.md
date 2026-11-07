@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) and SR2b (Strip INSET + AUDIO rows, drop, a video's length) done; SR2c the Inspector's INSET section + Viewer inset next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) and SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) done; SR2c′ ducking next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -412,9 +412,47 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   extension; AVI / MKV lengths are "unknown" for now and the section keeps its length —
   `assetSeconds` in the result). Tests: probe 2, engine 1 (`a_real_video_sizes_its_section…`),
   ui-egui 1 (the MOV dragged from the Content panel onto section 1's slot → kind video, the
-  section 2 s, the card untouched). **SR2c (next) — the Inspector's INSET section** (kind,
-  slot, corner chips, S / M / L, Swap, Mix audio, Clear) and the Viewer / compositor corner
-  draw; the ducking rule with Music / Voice per section. under the STORYBOARD row (one bar per
+  section 2 s, the card untouched). **SR2c built 2026-11-06 — the inset is seen:**
+  `animatic::Compositor::section_frame(clip, elapsed, inset)` (used by `frame`, so the export
+  carries it): the inset in its corner — 16:9, `size.share()` of the width, 2.5 % in
+  (`corner_rect`), a 2 px dark border; a **graphic** drawn at full quality (`draw::contain_in`);
+  a **video** as a dark poster box reading "VIDEO · name" (decoding video is FilmCraft's: the
+  OTIO carries the real inset); **Swap** puts the inset full-frame and the shot in the corner;
+  an empty slot and a title card draw nothing. The Strip's Viewer mirrors it
+  (`strip_view::show_section`, `inset_corner`, `paint_inset`: a graphic's thumbnail, the same
+  poster box). The Inspector's **INSET** section (`crates/ui-egui/src/inset_view.rs`, under
+  MOTION, for any clip whose section has shots): the file (hero frame + name; "Use / Replace
+  with Organizer selection" → `storyboard.inset {scene, asset}`, so a video sizes the section),
+  Kind Video / Graphic, Corner TL · TR · BL · BR, Size S / M / L, Swap, Mix audio in (videos),
+  Clear → `storyboard.insetClear`. Tests: animatic 1 (corner changes, elsewhere untouched, a
+  card never, top-left small, the video box, swap, empty), ui-egui 1 (Inspector + Viewer draw
+  through every state; the corner geometry). **SR3b structured music built 2026-11-07** (Paul,
+  testing, screenshot of a Review over Black Vortex: "many of the songs in my library have a
+  intro, outro, and 1 or 2 chorus… use the intro for the first title, then rotate the chorus
+  per section, and for the final section use the outro… the section title should be the start
+  of the chorus audio"): `Scene.part: ScenePart { Opening, Section (default), Close }` (left
+  out of the file when default; templates mark the scenes before the first step Opening, after
+  the last Close, the credits Close); `Storyboard::music_spans()` (one span per run of opening
+  scenes, every section its own, one for the close); `generate::song_parts` (intro = the
+  section labelled intro, else what comes before the first chorus; outro = labelled outro, else
+  what follows the last; choruses as the loop; all snapped to bars); `structured_fit(cue,
+  spans)` — the intro under the opening span, **a chorus starting exactly at every section's
+  start (its title card)**, rotating through the song's choruses, the outro under the close,
+  each cut or looped to its span (a tail under a beat joins the previous piece), one-beat
+  crossfades, a 2 s fade; `MusicMode::Structured` is the **default** (`music: structured |
+  chorus | firstChorus | whole`). The AUDIO rows show INTRO · CHORUS… · OUTRO bands with a
+  splice at every title. Tests: storyboard 1 (spans and parts of a two-step Tutorial; the
+  intro cut to the opening; step 1 and step 2 both land on the chorus start; the outro under
+  the close; two choruses rotate 1-2-1; unlabelled songs; no chorus; an old board = choruses
+  throughout), engine (default = structured with Intro … Outro bands; `chorus` still loops).
+  **Strip INSET lane (Paul, same message: "resize the inset lane to a better height… clicking
+  on the inset should give options for display"):** 36 px with two lines (section · kind ·
+  corner/size · swapped; the file's name or the drop hint); a click or right-click opens the
+  slot's options (`egui::Popup::menu`: Use / Replace with Organizer selection, Kind, Corner,
+  Size, Swap, Mix audio, Clear) and selects the section's first shot so the Inspector follows;
+  the Start timeline's INSET row grew to 24 px. **Next — SR2c′ ducking:** the rule (the music
+  lowered only while an inset with `mix_audio` plays) with Music / Voice per section in the
+  export's `Program` and Watch your Cut, then **SR2d** the Start screen's INSET panel. under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner

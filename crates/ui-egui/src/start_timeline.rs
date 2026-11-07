@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 pub(crate) const TIMELINE_H: f32 = 178.0 + INSET_H + 4.0;
 const RULER_H: f32 = 16.0;
 const BOARD_H: f32 = 46.0;
-const INSET_H: f32 = 18.0;
+const INSET_H: f32 = 24.0;
 const AUDIO_H: f32 = 56.0;
 const LABEL_W: f32 = 74.0;
 const WAVE: Color32 = Color32::from_rgb(0x5b, 0x8f, 0xc9);

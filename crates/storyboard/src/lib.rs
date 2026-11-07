@@ -41,12 +41,12 @@ pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
 pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,
-    Pacing, chorus_loop, fit_for, generate, track_edit, track_from_cue, track_under,
+    MusicSpan, Pacing, chorus_loop, fit_for, generate, structured_fit, track_edit, track_from_cue, track_under,
 };
 pub use inset::{Corner, Inset, InsetKind, InsetSize};
 pub use model::{
-    AssetId, Clip, ClipId, Scene, SceneId, ShotType, SongSection, Story, Storyboard, TextClip, Track, TrackEdit,
-    Transition,
+    AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard, TextClip, Track,
+    TrackEdit, Transition,
 };
 pub use motion::{
     Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, STILL_PAN_TRAVEL,

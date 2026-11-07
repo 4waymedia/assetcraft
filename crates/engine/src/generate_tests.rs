@@ -133,14 +133,27 @@ fn a_template_with_a_cue_map_takes_the_song_as_its_track_and_snaps_to_its_beat()
     assert_eq!(track.id.0, song_mp3());
     assert_eq!(track.bpm.get(), 120.0);
     assert_eq!(board.total(), own, "the template's own length, not the song's");
-    // SR3: the song's chorus loops under the whole Cut by default, so the track is as long as
-    // the Cut (this song is 64 s, the Cut about two minutes).
-    assert_eq!(track.duration, board.total(), "the loop runs the length of the Cut");
-    assert_eq!(out["fitted"]["music"], "the chorus looped");
-    let edit = track.edit.as_ref().expect("the loop is an edit");
-    assert!(edit.segments.len() >= 3, "{:?}", edit.segments);
-    assert!(track.song_sections.iter().all(|sc| sc.name == "Chorus"), "{:?}", track.song_sections);
+    // SR3b: by default the music follows the piece — the intro under the hook and "what it
+    // is", a chorus starting on every point's title card, the outro under the verdict and
+    // credits — so the track is as long as the Cut (this song is 64 s, the Cut about two
+    // minutes).
+    assert_eq!(track.duration, board.total(), "the music runs the length of the Cut");
+    assert_eq!(out["fitted"]["music"], "intro · a chorus per section · outro");
+    let edit = track.edit.as_ref().expect("the structure is an edit");
+    assert!(edit.segments.len() >= 4, "{:?}", edit.segments);
+    let names: Vec<&str> = track.song_sections.iter().map(|sc| sc.name.as_str()).collect();
+    assert_eq!(names.first().copied(), Some("Intro"), "{names:?}");
+    assert_eq!(names.last().copied(), Some("Outro"), "{names:?}");
+    assert!(names.contains(&"Chorus"), "{names:?}");
     assert!(edit.fade_out.is_some());
+    // The chorus loop, asked for: Chorus throughout.
+    run(
+        &mut s,
+        "storyboard.new",
+        json!({ "template": "review", "cueMap": "/music/song.cuemap.json", "music": "chorus" }),
+    );
+    let track = s.storyboard().unwrap().track.as_ref().unwrap();
+    assert!(track.song_sections.iter().all(|sc| sc.name == "Chorus"), "{:?}", track.song_sections);
     // The whole song instead: 64 s from the top, no edit.
     run(
         &mut s,

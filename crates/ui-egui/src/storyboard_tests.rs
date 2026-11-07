@@ -1277,3 +1277,50 @@ fn dropping_an_organizer_file_on_a_strip_inset_slot_sets_the_sections_inset() {
     assert!((span - 2.0).abs() < 0.01, "the section took the recording's 2 s: {span}");
     assert!(board.clips[0].shot_type == assetcraft_storyboard::ShotType::Ttl, "the title card is left alone");
 }
+
+#[test]
+fn the_inspector_and_viewer_draw_a_sections_inset_in_its_corner() {
+    use assetcraft_storyboard::{Corner, InsetSize};
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let scene = nav.session().storyboard().unwrap().scenes[0].id;
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    nav.run(
+        "storyboard.inset",
+        json!({ "scene": scene.0, "asset": lib.join("environments/snow_clearing_plate.jpg").to_string_lossy(), "corner": "TL", "size": "L", "swap": false }),
+    );
+    // Select a shot of that section (clip #02) and draw: Inspector INSET section + Viewer corner.
+    nav.run("storyboard.select", json!({ "clip": 2 }));
+    let mut t = 0.0;
+    for _ in 0..3 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    let board = nav.session().storyboard().unwrap().clone();
+    let inset = board.scenes[0].inset.clone().unwrap();
+    assert_eq!((inset.corner, inset.size), (Corner::TopLeft, InsetSize::Large));
+    // Swap, then a video, then the title card selected: all draw.
+    nav.run("storyboard.inset", json!({ "scene": scene.0, "swap": true }));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.05);
+    nav.run(
+        "storyboard.inset",
+        json!({ "scene": scene.0, "asset": lib.join("environments/snow_clearing_flythrough.mov").to_string_lossy(), "swap": false }),
+    );
+    nav.run("storyboard.select", json!({ "clip": 1 }));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.1);
+    nav.run("storyboard.play", json!({}));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.15);
+    assert_eq!(
+        nav.session().storyboard().unwrap().scenes[0].inset.as_ref().unwrap().kind,
+        assetcraft_storyboard::InsetKind::Video
+    );
+    // The corner geometry: 16:9, the share of the width, 2.5 % in.
+    let f = egui::Rect::from_min_size(Pos2::new(100.0, 50.0), egui::vec2(800.0, 450.0));
+    let r = crate::strip_view::inset_corner(f, Corner::BottomRight, InsetSize::Medium);
+    assert!((r.width() - 240.0).abs() < 0.01 && (r.height() - 135.0).abs() < 0.01);
+    assert!((r.right() - (900.0 - 20.0)).abs() < 0.01 && (r.bottom() - (500.0 - 20.0)).abs() < 0.01);
+    let r = crate::strip_view::inset_corner(f, Corner::TopLeft, InsetSize::Small);
+    assert!((r.left() - 120.0).abs() < 0.01 && (r.top() - 70.0).abs() < 0.01 && (r.width() - 176.0).abs() < 0.01);
+}
