@@ -43,7 +43,7 @@ pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,
     MusicSpan, Pacing, chorus_loop, fit_for, generate, structured_fit, track_edit, track_from_cue, track_under,
 };
-pub use inset::{Corner, Inset, InsetKind, InsetSize};
+pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_RANGE, VOICE_DB_RANGE};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard, TextClip, Track,
     TrackEdit, Transition,

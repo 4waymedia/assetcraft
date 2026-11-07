@@ -41,7 +41,7 @@ pub(crate) struct TrackAudio {
     player: Arc<dyn Player>,
     /// A real output was given: decode ahead of the first ▶.
     prefetch: bool,
-    program: Option<(PathBuf, Option<TrackEdit>, Arc<Program>)>,
+    program: Option<(PathBuf, Option<TrackEdit>, String, Arc<Program>)>,
     /// What the player was last started with (`None` = stopped).
     playing: Option<Arc<Program>>,
     /// Why the last start failed; cleared by the next `storyboard.play`.
@@ -122,18 +122,41 @@ impl Session {
         self.decodes.state(path)
     }
 
-    /// The program for the board's track, if decoded (cached per file and edit).
+    /// The program for the board's track, if decoded (cached per file, edit and voices), with
+    /// the voices of every inset video set to "Mix audio in" over it once their sound is decoded
+    /// (SR4: the same mix as the export). A voice still decoding comes in on the next ▶.
     fn program(&mut self) -> Option<Arc<Program>> {
         let (path, edit_now) = self.board_track()?;
-        if let Some((p, e, prog)) = &self.audio.program
+        let board = self.boards.board.clone()?;
+        let wanted = crate::export_job::voices(&board);
+        let mut layers = Vec::new();
+        let mut key = String::new();
+        for v in &wanted {
+            let p = PathBuf::from(&v.path);
+            self.load_slot(&p);
+            if let Some(Load::Ready(d)) = self.load_state(&p) {
+                key.push_str(&format!("{}|{}|{}|{}|{};", v.path, v.start, v.length, v.music_db, v.voice_db));
+                layers.push(assetcraft_audio::Layer {
+                    audio: Arc::clone(&d.audio),
+                    start: v.start,
+                    length: v.length,
+                    voice_gain: assetcraft_audio::mix::db(f64::from(v.voice_db)),
+                    music_gain: assetcraft_audio::mix::db(f64::from(v.music_db)),
+                });
+            }
+        }
+        if let Some((p, e, k, prog)) = &self.audio.program
             && *p == path
             && *e == edit_now
+            && *k == key
         {
             return Some(Arc::clone(prog));
         }
         let Some(Load::Ready(decoded)) = self.load_state(&path) else { return None };
-        let prog = Arc::new(Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref()));
-        self.audio.program = Some((path, edit_now, Arc::clone(&prog)));
+        let prog = Arc::new(
+            Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref()).with_layers(layers),
+        );
+        self.audio.program = Some((path, edit_now, key, Arc::clone(&prog)));
         Some(prog)
     }
 

@@ -100,6 +100,30 @@ pub struct Inset {
     /// The inset full-frame and the section's clips in the corner instead.
     #[serde(default)]
     pub swap: bool,
+    /// The music's level under this section while the inset's audio plays, in dB
+    /// ([`MUSIC_DB_RANGE`]; SR4 ducking). Only used with `mix_audio`.
+    #[serde(default = "default_music_db", skip_serializing_if = "is_default_music_db")]
+    pub music_db: i8,
+    /// The inset's own sound, in dB ([`VOICE_DB_RANGE`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub voice_db: i8,
+}
+
+/// The music under a voice, in dB, by default: low enough to talk over, still there.
+pub const DEFAULT_MUSIC_DB: i8 = -12;
+/// Music level range, in dB (−40 is as good as silent).
+pub const MUSIC_DB_RANGE: (i8, i8) = (-40, 0);
+/// Voice level range, in dB.
+pub const VOICE_DB_RANGE: (i8, i8) = (-24, 12);
+
+fn default_music_db() -> i8 {
+    DEFAULT_MUSIC_DB
+}
+fn is_default_music_db(v: &i8) -> bool {
+    *v == DEFAULT_MUSIC_DB
+}
+fn is_zero(v: &i8) -> bool {
+    *v == 0
 }
 
 impl Inset {
@@ -112,6 +136,8 @@ impl Inset {
             size: InsetSize::default(),
             mix_audio: false,
             swap: false,
+            music_db: DEFAULT_MUSIC_DB,
+            voice_db: 0,
         }
     }
 
@@ -126,6 +152,23 @@ impl Storyboard {
     /// cards (a title card never carries an inset).
     pub fn inset_span(&self, scene: crate::SceneId) -> impl Iterator<Item = &crate::Clip> {
         self.clips.iter().filter(move |c| c.scene_id == scene && c.shot_type != ShotType::Ttl)
+    }
+
+    /// Where `scene`'s inset sits in the Cut: from its first shot for as long as its shots run
+    /// (title cards excluded); `None` without shots.
+    pub fn inset_window(&self, scene: crate::SceneId) -> Option<(crate::Ticks, crate::Ticks)> {
+        let starts = self.starts();
+        let mut first: Option<crate::Ticks> = None;
+        let mut length = crate::Ticks::ZERO;
+        for (i, c) in self.clips.iter().enumerate() {
+            if c.scene_id == scene && c.shot_type != ShotType::Ttl {
+                if first.is_none() {
+                    first = starts.get(i).copied();
+                }
+                length = length.checked_add(c.duration)?;
+            }
+        }
+        first.map(|f| (f, length))
     }
 
     /// The scenes that can carry an inset: those with at least one clip that isn't a title card.

@@ -42,6 +42,19 @@ fn size(v: &Value) -> Result<InsetSize, CmdError> {
     }
 }
 
+/// A whole number of dB within `range`.
+fn level(p: &Value, name: &str, range: (i8, i8)) -> Result<Option<i8>, CmdError> {
+    match p.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_i64()
+            .and_then(|n| i8::try_from(n).ok())
+            .filter(|n| (range.0..=range.1).contains(n))
+            .map(Some)
+            .ok_or_else(|| CmdError::BadParams(format!("`{name}` must be {}..={} dB", range.0, range.1))),
+    }
+}
+
 fn flag(p: &Value, name: &str) -> Result<Option<bool>, CmdError> {
     match p.get(name) {
         None | Some(Value::Null) => Ok(None),
@@ -111,6 +124,12 @@ pub(crate) fn sb_inset(s: &mut Session, p: &Value) -> CmdResult {
     }
     if let Some(b) = flag(p, "swap")? {
         inset.swap = b;
+    }
+    if let Some(v) = level(p, "musicDb", assetcraft_storyboard::MUSIC_DB_RANGE)? {
+        inset.music_db = v;
+    }
+    if let Some(v) = level(p, "voiceDb", assetcraft_storyboard::VOICE_DB_RANGE)? {
+        inset.voice_db = v;
     }
     // A new file: its kind from the extension unless given, and a video's length when asked.
     let new_file = matches!(p.get("asset"), Some(Value::String(_)));
@@ -287,6 +306,8 @@ pub(crate) fn inset_json(i: &Inset) -> Value {
         "size": match i.size { InsetSize::Small => "small", InsetSize::Medium => "medium", InsetSize::Large => "large" },
         "mixAudio": i.mix_audio,
         "swap": i.swap,
+        "musicDb": i.music_db,
+        "voiceDb": i.voice_db,
     })
 }
 

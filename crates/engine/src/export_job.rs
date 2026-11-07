@@ -278,7 +278,7 @@ pub(crate) fn plan(s: &Session, p: &Value) -> Result<ExportPlan, CmdError> {
         return Err(CmdError::BadParams(format!("the Cut is longer than {} hours", MAX_SECONDS / 3600.0)));
     }
     let frames = (seconds * f64::from(fps)).ceil() as usize;
-    let audio = board.track.as_ref().is_some_and(|t| Path::new(&t.id.0).is_absolute());
+    let audio = board.track.as_ref().is_some_and(|t| Path::new(&t.id.0).is_absolute()) || !voices(board).is_empty();
     let rate = s.exporter.rate().unwrap_or(ESTIMATE_BYTES_PER_SEC_1080P24);
     Ok(ExportPlan { rate, path, container, settings, frames, seconds, audio })
 }
@@ -472,7 +472,7 @@ impl Job {
             return Err(Stop::Cancelled);
         }
         lock(&self.progress).stage = ExportStage::Audio;
-        let audio = self.audio()?;
+        let (audio, sound_problems) = self.audio()?;
         if self.cancelled() {
             return Err(Stop::Cancelled);
         }
@@ -481,34 +481,70 @@ impl Job {
             assetcraft_video::mux(&video, audio.as_ref(), self.plan.container, out)
         })
         .map_err(Stop::Failed)?;
-        let problems =
+        let mut problems: Vec<String> =
             compositor.problems().into_iter().map(|p| format!("{}: {}", p.path.display(), p.reason)).collect();
+        problems.extend(sound_problems);
         Ok((bytes, problems))
     }
 
-    /// The song through the board's audio edit, as long as the Cut, or `None` without a track.
-    fn audio(&self) -> Result<Option<AudioTrack>, Stop> {
-        let Some(track) = self.board.track.as_ref() else { return Ok(None) };
-        let path = Path::new(&track.id.0);
-        if !path.is_absolute() {
-            return Ok(None);
+    /// The Cut's sound, as long as the Cut: the song through the board's audio edit, lowered
+    /// under every section whose inset video has "Mix audio in" to that section's Music level,
+    /// with the video's own sound over it at its Voice level (SR4). `None` with neither.
+    fn audio(&self) -> Result<(Option<AudioTrack>, Vec<String>), Stop> {
+        let music = match self.board.track.as_ref().filter(|t| Path::new(&t.id.0).is_absolute()) {
+            Some(track) => {
+                let path = Path::new(&track.id.0);
+                let decoded = assetcraft_audio::load(self.services.as_ref(), path)
+                    .map_err(|e| Stop::Failed(format!("{}: {e}", path.display())))?;
+                let edit = track.edit.as_ref().map(|e| assetcraft_audio::program::Edit {
+                    rate: e.sample_rate,
+                    segments: e.segments.iter().map(|[a, b]| (*a, *b)).collect(),
+                    crossfade: e.crossfade_frames,
+                    fade_out: e.fade_out.map(|[s, n]| (s, n)),
+                    length: e.length_frames,
+                });
+                Some(Program::new(Arc::new(decoded), edit.as_ref()))
+            }
+            None => None,
+        };
+        let voices = voices(&self.board);
+        if music.is_none() && voices.is_empty() {
+            return Ok((None, Vec::new()));
         }
-        let decoded = assetcraft_audio::load(self.services.as_ref(), path)
-            .map_err(|e| Stop::Failed(format!("{}: {e}", path.display())))?;
-        let edit = track.edit.as_ref().map(|e| assetcraft_audio::program::Edit {
-            rate: e.sample_rate,
-            segments: e.segments.iter().map(|[a, b]| (*a, *b)).collect(),
-            crossfade: e.crossfade_frames,
-            fade_out: e.fade_out.map(|[s, n]| (s, n)),
-            length: e.length_frames,
-        });
-        let program = Program::new(Arc::new(decoded), edit.as_ref());
-        let rate = program.rate().clamp(8_000, MAX_AUDIO_RATE);
+        let mut problems = Vec::new();
+        let rate = music.as_ref().map_or(48_000, Program::rate).clamp(8_000, MAX_AUDIO_RATE);
         let frames = (self.plan.seconds * f64::from(rate)).round() as usize;
         let mut pcm = vec![0.0f32; frames * 2];
-        program.render(0.0, rate, &mut pcm, 2);
+        if let Some(program) = &music {
+            program.render(0.0, rate, &mut pcm, 2);
+            // Each section ducks to its own level: one pass per distinct level keeps it simple.
+            for v in &voices {
+                assetcraft_audio::mix::duck(
+                    &mut pcm,
+                    2,
+                    rate,
+                    &[(v.start, v.length)],
+                    assetcraft_audio::mix::db(f64::from(v.music_db)),
+                );
+            }
+        }
+        for v in &voices {
+            // A video whose sound won't decode is reported, not fatal: the Cut still exports.
+            match assetcraft_audio::load(self.services.as_ref(), Path::new(&v.path)) {
+                Ok(sound) => assetcraft_audio::mix::add_voice(
+                    &mut pcm,
+                    2,
+                    rate,
+                    &sound,
+                    v.start,
+                    v.length,
+                    assetcraft_audio::mix::db(f64::from(v.voice_db)),
+                ),
+                Err(e) => problems.push(format!("{}: no sound mixed in ({e})", v.path)),
+            }
+        }
         assetcraft_video::encode_audio(&pcm, 2, rate, DEFAULT_AUDIO_BITRATE)
-            .map(Some)
+            .map(|a| (Some(a), problems))
             .map_err(|e| Stop::Failed(e.to_string()))
     }
 }
@@ -536,4 +572,37 @@ fn write_atomic(
         let _ = std::fs::remove_file(&tmp);
     }
     result.map_err(|e: String| format!("could not write {}: {e}", path.display()))
+}
+
+/// A section's inset sound to mix in (SR4): the file, where its section's shots run in the Cut,
+/// and the two levels. Shared with Watch your Cut (`audio_out`).
+pub(crate) struct Voice {
+    pub(crate) path: String,
+    pub(crate) start: f64,
+    pub(crate) length: f64,
+    pub(crate) music_db: i8,
+    pub(crate) voice_db: i8,
+}
+
+/// Every section whose inset is a video with "Mix audio in" and an absolute path.
+pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
+    board
+        .scenes
+        .iter()
+        .filter_map(|sc| {
+            let i = sc.inset.as_ref()?;
+            let a = i.asset.as_ref()?;
+            if !i.mix_audio || i.kind != assetcraft_storyboard::InsetKind::Video || !Path::new(&a.0).is_absolute() {
+                return None;
+            }
+            let (start, length) = board.inset_window(sc.id)?;
+            Some(Voice {
+                path: a.0.clone(),
+                start: start.as_secs_f64(),
+                length: length.as_secs_f64(),
+                music_db: i.music_db,
+                voice_db: i.voice_db,
+            })
+        })
+        .collect()
 }

@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) and SR2d (Start screen INSET panel) done; SR4 voice + ducking next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) SR2d (Start screen INSET panel) and SR4a (inset sound + ducking, Music / Voice) done; SR4b voiceover track next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -459,12 +459,33 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   (`inset_cmd::apply_defaults`: an empty slot with those options on every section scene, or the
   first; opening and close untouched; `None` sets nothing — D-SR1, the lane still takes a drop).
   "Leave empty slots to fill later" is gone (D-SR1); "Steps + review" is covered by the close
-  having its own music and no slot. Tests: engine 1, ui-egui 1. **Next — SR4 voice and
-  ducking** (the mock-up's AUDIO TRACK panel: Song · Voiceover · Song + voiceover · None):
-  ducking needs the inset video's sound, which AssetCraft can't decode yet (pure-Rust AAC
-  decode from MP4 is the step), so it goes with the voiceover track: the music lowered while
-  a voice plays, Music / Voice per section. Then the TITLE CARDS / NUMBERING / SHOT PATTERN
-  panels and the STRUCTURE strip. under the STORYBOARD row (one bar per
+  having its own music and no slot. Tests: engine 1, ui-egui 1. **SR4a built 2026-11-07 — the inset's sound
+  and ducking.** Finding: MP4 / MOV sound already decodes — `soundcraft-audio-io` carries
+  symphonia's `isomp4` reader and AAC codec (decision AD1), so no new dependency. Model:
+  `Inset.music_db: i8` (−40…0, default −12, `DEFAULT_MUSIC_DB`) and `voice_db: i8` (−24…+12,
+  default 0), left out of the file at their defaults, range-checked by `validate`;
+  `Storyboard::inset_window(scene)` (where a section's shots run in the Cut). Audio:
+  `assetcraft_audio::mix` — `duck` (the music to a gain over a span, 0.25 s linear ramps outside
+  it, `DUCK_RAMP_SECS`), `add_voice` / `add_voice_from` (a decoded file laid in at a time, cut to
+  a length, linear resampling, mono to every channel, clamped), `db`; `program::Layer` and
+  `Program::with_layers` — `render` plays the music, ducks it under each layer and mixes the
+  voice in, for any window (two windows equal one whole render). Engine: `storyboard.inset`
+  takes `musicDb` / `voiceDb`; the export mixes every inset video with "Mix audio in" over its
+  section (`export_job::voices`; a voice that won't decode is a reported problem, not a
+  failure; a board with voices and no song still gets a sound track); Watch your Cut builds the
+  same layers in `audio_out::program` (each voice decodes through the shared decode slots; one
+  still decoding comes in on the next ▶). UI: **Music** and **Voice** sliders under "Mix audio
+  in" in the Inspector's INSET section and the Strip slot's menu (`inset_view::level_slider`:
+  the value follows the drag in egui temp memory, one `storyboard.inset` when it ends). A
+  silent inset (no "Mix audio in") leaves the music untouched — Paul's "what about video clips
+  with no audio? As long as the user can easily change the volume". Tests: audio 3 (duck ramps,
+  voice placement / resample / cut, windowed render = whole render), engine 2 (export: plain vs
+  silent inset equal, mixed → the voice dominates the window and the music outside is
+  unchanged, Voice slider lowers it, out-of-range refused; Watch your Cut: "+ 1 voice" once the
+  host's sound decodes). **Next — SR4b the voiceover track** (the mock-up's AUDIO TRACK panel:
+  Song · Voiceover · Song + voiceover · None — a narration file under the whole Cut, ducking
+  the song with the same `Layer`), then the TITLE CARDS / NUMBERING / SHOT PATTERN panels and
+  the STRUCTURE strip. under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner

@@ -290,3 +290,51 @@ fn recut_to_a_new_length_drops_the_old_audio_edit_and_undo_brings_it_back() {
     run(&mut s, "storyboard.undo", json!({}));
     assert!(!edit(&mut s).is_null(), "undo restores it");
 }
+
+/// MP4 bytes with a sound track, made with our own encoder: `secs` of grey video and a tone.
+fn talking_mp4(secs: u32) -> Vec<u8> {
+    use assetcraft_video::{Container, Settings, VideoEncoder, encode_audio, mux};
+    let st = Settings { width: 64, height: 48, fps: 12, qp: 36 };
+    let mut enc = VideoEncoder::new(st).unwrap();
+    for _ in 0..(secs * 12) {
+        enc.push_rgba(&vec![128u8; 64 * 48 * 4]).unwrap();
+    }
+    let video = enc.finish().unwrap();
+    let pcm: Vec<f32> = (0..48_000 * secs).map(|i| (i as f32 * 0.04).sin() * 0.5).collect();
+    let audio = encode_audio(&pcm, 1, 48_000, 96_000).unwrap();
+    let mut out = Vec::new();
+    mux(&video, Some(&audio), Container::Mp4, &mut out).unwrap();
+    out
+}
+
+#[test]
+fn watch_your_cut_hears_an_inset_videos_sound_over_the_ducked_music() {
+    let player = Arc::new(RecordingPlayer::default());
+    let fs = FakeFs::new()
+        .known(KnownFolder::Home, "/home/paul")
+        .file_with(music("track.cuemap.json"), cue_map().into_bytes())
+        .file_with(music("track.wav"), wav(64))
+        .file_with("/clips/host.mp4", talking_mp4(3));
+    let mut s = Session::new(Arc::new(fs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    s.set_player(Arc::clone(&player) as Arc<dyn assetcraft_audio::Player>);
+    run(&mut s, "storyboard.new", json!({ "template": "tutorial", "steps": 1, "cueMap": music("track.cuemap.json") }));
+    s.poll_audio(Ticks::ZERO);
+    assert!(s.wait_track_audio(Duration::from_secs(10)));
+    let scene = s.storyboard().unwrap().inset_scenes().next().unwrap().id.0;
+    run(&mut s, "storyboard.inset", json!({ "scene": scene, "asset": "/clips/host.mp4", "fit": false }));
+    // Not mixed in: no voice.
+    run(&mut s, "storyboard.play", json!({ "from": 0.0 }));
+    assert!(!player.log().last().unwrap().contains("voice"), "{:?}", player.log());
+    run(&mut s, "storyboard.pause", json!({ "at": 0.0 }));
+    // Mixed in: the first ▶ starts its decode, the next one hears it.
+    run(&mut s, "storyboard.inset", json!({ "scene": scene, "mixAudio": true }));
+    run(&mut s, "storyboard.play", json!({ "from": 0.0 }));
+    run(&mut s, "storyboard.pause", json!({ "at": 0.0 }));
+    let host = std::path::Path::new("/clips/host.mp4");
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while !matches!(s.load_state(host), Some(crate::decode::Load::Ready(_))) && std::time::Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    run(&mut s, "storyboard.play", json!({ "from": 0.0 }));
+    assert!(player.log().last().unwrap().ends_with("+ 1 voice"), "{:?}", player.log());
+}

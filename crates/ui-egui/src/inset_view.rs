@@ -96,8 +96,48 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyb
             nav.run("storyboard.insetClear", json!({ "scene": scene.0 }));
         }
     });
+    if i.kind == InsetKind::Video {
+        ui.add_enabled_ui(i.mix_audio, |ui| {
+            if let Some(v) =
+                level_slider(ui, ("music", scene.0), "Music", i.music_db, assetcraft_storyboard::MUSIC_DB_RANGE)
+            {
+                edit = Some(json!({ "scene": scene.0, "musicDb": v }));
+            }
+            if let Some(v) =
+                level_slider(ui, ("voice", scene.0), "Voice", i.voice_db, assetcraft_storyboard::VOICE_DB_RANGE)
+            {
+                edit = Some(json!({ "scene": scene.0, "voiceDb": v }));
+            }
+        });
+    }
     if let Some(params) = edit {
         nav.run("storyboard.inset", params);
     }
     ui.add_space(6.0);
+}
+
+/// A dB slider that commits once (SR4): the value follows the drag in egui's temp memory and
+/// comes back when the drag ends or a typed / clicked value lands — one `storyboard.inset`,
+/// one undo step.
+pub(crate) fn level_slider(ui: &mut Ui, key: (&str, u32), label: &str, value: i8, range: (i8, i8)) -> Option<i8> {
+    let id = egui::Id::new(("sb-inset-level", key.0, key.1));
+    let mut v: i32 = ui.data(|d| d.get_temp::<i32>(id)).unwrap_or(i32::from(value));
+    let tip = match label {
+        "Music" => "How loud the music is under this section while the video's sound plays",
+        _ => "How loud the video's own sound is",
+    };
+    let r = ui
+        .horizontal(|ui| {
+            ui.label(RichText::new(label).small());
+            ui.add(egui::Slider::new(&mut v, i32::from(range.0)..=i32::from(range.1)).suffix(" dB")).on_hover_text(tip)
+        })
+        .inner;
+    if r.dragged() {
+        ui.data_mut(|d| d.insert_temp(id, v));
+        return None;
+    }
+    ui.data_mut(|d| d.remove::<i32>(id));
+    let done = r.drag_stopped() || (r.changed() && !r.dragged());
+    let v = i8::try_from(v).ok()?;
+    (done && v != value).then_some(v)
 }

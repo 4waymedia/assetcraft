@@ -137,8 +137,17 @@ impl Storyboard {
             if let Some(n) = &s.song_section {
                 text("song section", n, l)?;
             }
-            if let Some(a) = s.inset.as_ref().and_then(|i| i.asset.as_ref()) {
-                text("inset asset", &a.0, l)?;
+            if let Some(i) = &s.inset {
+                if let Some(a) = &i.asset {
+                    text("inset asset", &a.0, l)?;
+                }
+                let (m, v) = (crate::inset::MUSIC_DB_RANGE, crate::inset::VOICE_DB_RANGE);
+                if !(m.0..=m.1).contains(&i.music_db) || !(v.0..=v.1).contains(&i.voice_db) {
+                    return Err(BoardError::Limit(format!(
+                        "an inset level is out of range (music {}..={} dB, voice {}..={} dB)",
+                        m.0, m.1, v.0, v.1
+                    )));
+                }
             }
         }
 

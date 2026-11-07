@@ -41,6 +41,24 @@ pub struct Program {
     half_crossfade: u64,
     fade_out: Option<(u64, u64)>,
     length: u64,
+    /// Voices over the music (SR4): each ducks the music under its window and plays over it.
+    layers: Vec<Layer>,
+}
+
+/// A voice over the program (SR4): a section's inset video sound, from `start` for `length`
+/// seconds of program time, at `voice_gain`, with the music at `music_gain` under it.
+#[derive(Debug, Clone)]
+pub struct Layer {
+    /// The decoded sound.
+    pub audio: Arc<Audio>,
+    /// Program seconds it starts at.
+    pub start: f64,
+    /// Program seconds it runs for (cut there).
+    pub length: f64,
+    /// Linear gain on the voice.
+    pub voice_gain: f32,
+    /// Linear gain on the music under it.
+    pub music_gain: f32,
 }
 
 fn rescale(frames: u64, from: u32, to: u32) -> u64 {
@@ -58,7 +76,14 @@ impl Program {
         let total = audio.frames() as u64;
         let rate = audio.rate();
         let Some(edit) = edit else {
-            return Program { audio, segments: vec![(0, total, 0)], half_crossfade: 0, fade_out: None, length: total };
+            return Program {
+                audio,
+                segments: vec![(0, total, 0)],
+                half_crossfade: 0,
+                fade_out: None,
+                length: total,
+                layers: Vec::new(),
+            };
         };
         let r = |f: u64| rescale(f, edit.rate, rate);
         let mut segments = Vec::with_capacity(edit.segments.len());
@@ -75,7 +100,7 @@ impl Program {
         let shortest = segments.iter().map(|(a, b, _)| b - a).min().unwrap_or(0);
         let half_crossfade = (r(edit.crossfade) / 2).min(shortest / 2);
         let fade_out = edit.fade_out.map(|(s, n)| (r(s), r(n).max(1)));
-        Program { audio, segments, half_crossfade, fade_out, length }
+        Program { audio, segments, half_crossfade, fade_out, length, layers: Vec::new() }
     }
 
     /// Sample rate of the program (the audio's).
@@ -138,9 +163,44 @@ impl Program {
         out
     }
 
+    /// This program with voices over it (SR4).
+    pub fn with_layers(mut self, layers: Vec<Layer>) -> Program {
+        self.layers = layers;
+        self
+    }
+
+    /// The voices over it.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
     /// Fill `out` (interleaved, `channels` per frame) starting `from_secs` into the program, at
-    /// `out_rate`. Channels past the first two get silence; a mono device gets the mean.
+    /// `out_rate`; the music ducked under each layer and the layer over it. Channels past the
+    /// first two get silence; a mono device gets the mean.
     pub fn render(&self, from_secs: f64, out_rate: u32, out: &mut [f32], channels: usize) {
+        self.render_music(from_secs, out_rate, out, channels);
+        if self.layers.is_empty() || channels == 0 || out_rate == 0 || !from_secs.is_finite() {
+            return;
+        }
+        let from = from_secs.max(0.0);
+        let window = (out.len() / channels) as f64 / f64::from(out_rate);
+        for l in &self.layers {
+            let (a, b) = (l.start, l.start + l.length);
+            if b + crate::mix::DUCK_RAMP_SECS < from || a - crate::mix::DUCK_RAMP_SECS > from + window {
+                continue;
+            }
+            crate::mix::duck(out, channels, out_rate, &[(a - from, l.length)], l.music_gain);
+            // The part of the voice in this window: from `max(a, from)`, `skip` seconds in.
+            let at = (a - from).max(0.0);
+            let skip = (from - a).max(0.0);
+            let length = (b - from).min(window) - at;
+            if length > 0.0 {
+                crate::mix::add_voice_from(out, channels, out_rate, &l.audio, at, length, skip, l.voice_gain);
+            }
+        }
+    }
+
+    fn render_music(&self, from_secs: f64, out_rate: u32, out: &mut [f32], channels: usize) {
         if channels == 0 || out_rate == 0 {
             return;
         }
@@ -224,7 +284,12 @@ impl RecordingPlayer {
 impl Player for RecordingPlayer {
     fn play(&self, program: Arc<Program>, from_secs: f64) -> Result<(), String> {
         if let Ok(mut l) = self.log.lock() {
-            l.push(format!("play {:.1}s from {from_secs:.1}", program.seconds()));
+            let voices = match program.layers().len() {
+                0 => String::new(),
+                1 => " + 1 voice".into(),
+                n => format!(" + {n} voices"),
+            };
+            l.push(format!("play {:.1}s from {from_secs:.1}{voices}", program.seconds()));
         }
         if let Ok(mut a) = self.at.lock() {
             *a = Some(from_secs);

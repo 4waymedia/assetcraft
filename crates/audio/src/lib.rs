@@ -25,9 +25,10 @@ use serde::Serialize;
 use soundcraft_audio_io as sio;
 use std::path::Path;
 
+pub mod mix;
 pub mod program;
 
-pub use program::{Edit, Player, Program, RecordingPlayer, SilentPlayer};
+pub use program::{Edit, Layer, Player, Program, RecordingPlayer, SilentPlayer};
 pub use sio::peaks::Peaks;
 
 /// Longest track, in seconds (20 minutes).
@@ -231,6 +232,22 @@ impl Audio {
             }
         }
         Ok(Audio { rate, format, channels, frames })
+    }
+
+    /// Audio from samples already in memory (tests, generated signals): one `Vec` per channel,
+    /// cut to the shortest, non-finite samples silenced. Empty channels → one silent frame.
+    #[cfg(test)]
+    pub(crate) fn from_channels(rate: u32, format: &'static str, mut channels: Vec<Vec<f32>>) -> Audio {
+        let frames = channels.iter().map(Vec::len).min().unwrap_or(0);
+        for c in &mut channels {
+            c.truncate(frames);
+            for s in c.iter_mut() {
+                if !s.is_finite() {
+                    *s = 0.0;
+                }
+            }
+        }
+        Audio { rate: rate.max(1), format, channels, frames }
     }
 
     /// Sample rate in Hz.

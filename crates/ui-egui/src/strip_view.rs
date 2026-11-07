@@ -1094,6 +1094,15 @@ fn inset_row(
             {
                 out.push(("storyboard.inset", json!({ "scene": scene_id, "mixAudio": mix })));
             }
+            if inset.kind == InsetKind::Video && inset.mix_audio {
+                let (m, v) = (assetcraft_storyboard::MUSIC_DB_RANGE, assetcraft_storyboard::VOICE_DB_RANGE);
+                if let Some(db) = crate::inset_view::level_slider(ui, ("music", scene_id), "Music", inset.music_db, m) {
+                    out.push(("storyboard.inset", json!({ "scene": scene_id, "musicDb": db })));
+                }
+                if let Some(db) = crate::inset_view::level_slider(ui, ("voice", scene_id), "Voice", inset.voice_db, v) {
+                    out.push(("storyboard.inset", json!({ "scene": scene_id, "voiceDb": db })));
+                }
+            }
             if set.is_some() {
                 ui.separator();
                 if ui.button("Clear the slot").clicked() {

@@ -244,3 +244,98 @@ fn a_broken_asset_is_reported_and_a_cancel_leaves_no_file() {
     assert!(s.enabled("storyboard.exportVideo").is_ok(), "free again");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An MP4 with a sound track, made with our own encoder: `secs` of grey video and a loud tone.
+fn talking_mp4(path: &Path, secs: u32) {
+    use assetcraft_video::{Container, Settings, VideoEncoder, encode_audio, mux};
+    let s = Settings { width: 64, height: 48, fps: 12, qp: 36 };
+    let mut enc = VideoEncoder::new(s).unwrap();
+    for _ in 0..(secs * 12) {
+        enc.push_rgba(&vec![128u8; 64 * 48 * 4]).unwrap();
+    }
+    let video = enc.finish().unwrap();
+    let rate = 48_000u32;
+    let pcm: Vec<f32> =
+        (0..rate * secs).map(|i| (i as f32 * 2.0 * std::f32::consts::PI * 300.0 / rate as f32).sin() * 0.8).collect();
+    let audio = encode_audio(&pcm, 1, rate, 96_000).unwrap();
+    let mut out = Vec::new();
+    mux(&video, Some(&audio), Container::Mp4, &mut out).unwrap();
+    std::fs::write(path, out).unwrap();
+}
+
+/// RMS of an exported file's sound between `a` and `b` seconds.
+fn rms_between(path: &Path, a: f64, b: f64) -> f64 {
+    let audio = assetcraft_audio::load(&RealFs, path).unwrap();
+    let (r, ch) = (f64::from(audio.rate()), audio.channel(0));
+    let (i, j) = (((a * r) as usize).min(ch.len()), ((b * r) as usize).min(ch.len()));
+    (ch[i..j].iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / (j - i).max(1) as f64).sqrt()
+}
+
+#[test]
+fn an_inset_video_with_mix_audio_is_heard_and_the_music_ducks_under_it() {
+    use assetcraft_storyboard::{Inset, InsetKind};
+    let dir = temp("voice");
+    let song = dir.join("song.wav");
+    std::fs::write(&song, wav(10)).unwrap();
+    let host = dir.join("host.mp4");
+    talking_mp4(&host, 3);
+    // The host's own sound decodes (symphonia's MP4 reader).
+    assert!(assetcraft_audio::load(&RealFs, &host).unwrap().seconds() > 2.9);
+    // Two scenes: scene 1 a 2 s card + 2 s shot (the inset's window: 2–4 s), scene 2 a 2 s shot.
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "storyboard.new", json!({ "name": "Voice" }));
+    let board = s.boards.board.as_mut().unwrap();
+    board.scenes =
+        vec![assetcraft_storyboard::Scene::new(SceneId(1), None), assetcraft_storyboard::Scene::new(SceneId(2), None)];
+    let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(2).unwrap());
+    card.description = "Step 1".into();
+    board.clips = vec![
+        card,
+        Clip::new(ClipId(2), SceneId(1), ShotType::Ms, Ticks::from_secs(2).unwrap()),
+        Clip::new(ClipId(3), SceneId(2), ShotType::Ms, Ticks::from_secs(2).unwrap()),
+    ];
+    board.track = Some(assetcraft_storyboard::Track {
+        id: AssetId(song.to_string_lossy().into_owned()),
+        name: "song".into(),
+        bpm: assetcraft_storyboard::Bpm::DEFAULT,
+        duration: Ticks::from_secs(10).unwrap(),
+        beat_grid: Vec::new(),
+        song_sections: Vec::new(),
+        edit: None,
+        credit: None,
+    });
+    let export = |s: &mut Session, name: &str| -> PathBuf {
+        let path = dir.join(name);
+        let out = run(
+            s,
+            "storyboard.exportVideo",
+            json!({ "path": path.to_string_lossy(), "size": { "width": 160, "height": 96 }, "quality": 36, "wait": true }),
+        );
+        assert_eq!(out["status"]["stage"], "done", "{out}");
+        assert_eq!(out["audio"], true);
+        path
+    };
+    let plain = export(&mut s, "plain.mp4");
+    // The host over scene 1, silent: the music is untouched.
+    s.boards.board.as_mut().unwrap().scenes[0].inset =
+        Some(Inset { asset: Some(AssetId(host.to_string_lossy().into_owned())), ..Inset::slot(InsetKind::Video) });
+    let silent = export(&mut s, "silent.mp4");
+    assert!((rms_between(&silent, 2.5, 3.5) - rms_between(&plain, 2.5, 3.5)).abs() < 0.01, "no mix: same sound");
+    // Mixed in, music at -40 dB, voice at 0: the window carries the host's loud tone, not the
+    // quiet square wave; outside it the music is unchanged.
+    run(&mut s, "storyboard.inset", json!({ "scene": 1, "mixAudio": true, "musicDb": -40, "fit": false }));
+    let mixed = export(&mut s, "mixed.mp4");
+    let (before, under, after) =
+        (rms_between(&mixed, 0.3, 1.5), rms_between(&mixed, 2.5, 3.5), rms_between(&mixed, 4.6, 5.8));
+    let music = rms_between(&plain, 2.5, 3.5);
+    assert!(under > music * 3.0, "the voice is heard: {under} vs music {music}");
+    assert!((before - rms_between(&plain, 0.3, 1.5)).abs() < 0.02, "the card keeps its music: {before}");
+    assert!((after - rms_between(&plain, 4.6, 5.8)).abs() < 0.02, "scene 2 keeps its music: {after}");
+    // Voice down to -24 dB and music back to 0: the window is close to the plain music again.
+    run(&mut s, "storyboard.inset", json!({ "scene": 1, "musicDb": 0, "voiceDb": -24 }));
+    let quiet = export(&mut s, "quiet.mp4");
+    assert!(rms_between(&quiet, 2.5, 3.5) < under * 0.5, "the voice slider works");
+    // A level out of range is refused.
+    assert!(matches!(s.execute("storyboard.inset", &json!({ "scene": 1, "musicDb": 6 })), Err(CmdError::BadParams(_))));
+    let _ = std::fs::remove_dir_all(&dir);
+}
