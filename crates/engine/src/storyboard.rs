@@ -214,6 +214,18 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // before the snap so it is on the beat too.
     crate::template_cmd::append_credits_if(s, p, &mut board);
     crate::inset_cmd::apply_defaults(&mut board, p)?;
+    // The Start screen's AUDIO TRACK "Voiceover" / "Song + voiceover" (SR4c).
+    match p.get("voiceover") {
+        None | Some(Value::Null) => {}
+        Some(v) => {
+            let a = v
+                .as_str()
+                .map(str::trim)
+                .filter(|a| !a.is_empty() && a.len() <= assetcraft_storyboard::Limits::default().max_string)
+                .ok_or_else(|| CmdError::BadParams("`voiceover` must be a path".into()))?;
+            board.voiceover = Some(assetcraft_storyboard::Voiceover::new(assetcraft_storyboard::AssetId(a.to_owned())));
+        }
+    }
     let fitted = if p.get("template").is_some() && p.get("cueMap").is_some() {
         Some(crate::template_cmd::fit_to_cue(s, p, &mut board, p.get("name").is_none())?)
     } else {

@@ -273,3 +273,20 @@ fn new_from_a_template_presets_every_sections_slot_from_the_inset_panel() {
         ));
     }
 }
+
+#[test]
+fn new_takes_a_voiceover_from_the_start_screen() {
+    let mut s = session();
+    run(&mut s, "storyboard.new", json!({"template": "tutorial", "voiceover": "/voice/narration.wav"}));
+    let vo = s.storyboard().unwrap().voiceover.clone().unwrap();
+    assert_eq!(vo.asset.0, "/voice/narration.wav");
+    assert_eq!((vo.music_db, vo.voice_db), (assetcraft_storyboard::DEFAULT_MUSIC_DB, 0));
+    run(&mut s, "storyboard.new", json!({"template": "tutorial"}));
+    assert!(s.storyboard().unwrap().voiceover.is_none());
+    for bad in [json!(""), json!(3)] {
+        assert!(matches!(
+            s.execute("storyboard.new", &json!({"template": "tutorial", "voiceover": bad})),
+            Err(CmdError::BadParams(_))
+        ));
+    }
+}

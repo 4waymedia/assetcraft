@@ -1415,3 +1415,38 @@ fn dropping_an_organizer_file_on_the_strips_voice_row_sets_the_voiceover() {
     nav.run("storyboard.undo", json!({}));
     assert!(nav.session().storyboard().unwrap().voiceover.is_none(), "one undo step");
 }
+
+#[test]
+fn the_start_screens_audio_track_panel_picks_song_voiceover_both_or_none() {
+    use crate::start_view::AudioChoice;
+    let dir = cue_folder();
+    let cue_path = dir.join("song.cuemap.json");
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    let vo = std::env::temp_dir().join("narration.wav");
+    let make = |nav: &mut Navigator, audio: AudioChoice, voice: bool| {
+        nav.state.storyboard.start.open = true;
+        nav.state.storyboard.start.choose_template(1, Some(2), Some(&cue_path.to_string_lossy()), 20);
+        nav.state.storyboard.start.audio = audio;
+        nav.state.storyboard.start.voiceover = voice.then(|| vo.clone());
+        crate::start_view::create_board(nav);
+        let b = nav.session().storyboard().unwrap().clone();
+        (b.track.is_some(), b.voiceover.map(|v| v.asset.0))
+    };
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    let vo_s = vo.to_string_lossy().into_owned();
+    assert_eq!(make(&mut nav, AudioChoice::Song, true), (true, None), "the song only");
+    assert_eq!(make(&mut nav, AudioChoice::Voiceover, true), (false, Some(vo_s.clone())), "the narration only");
+    assert_eq!(make(&mut nav, AudioChoice::Both, true), (true, Some(vo_s)), "both");
+    assert_eq!(make(&mut nav, AudioChoice::None, true), (false, None), "silent");
+    assert_eq!(make(&mut nav, AudioChoice::Voiceover, false), (false, None), "no file yet: added later");
+    // The panel draws for a template, and Choose… takes the picked file.
+    nav.state.storyboard.start.open = true;
+    nav.state.storyboard.start.choose_template(1, Some(2), Some(&cue_path.to_string_lossy()), 20);
+    nav.state.storyboard.start.audio = AudioChoice::Both;
+    nav.state.test_save_path = Some(vo.clone());
+    frame(&ctx, &mut nav, Vec::new(), 0.2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

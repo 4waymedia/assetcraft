@@ -84,6 +84,34 @@ pub(crate) struct StartUi {
     pub(crate) step_secs: u32,
     /// The INSET panel (SR2d): how a template's section slots start out.
     pub(crate) inset: InsetPanel,
+    /// The AUDIO TRACK panel (SR4c): what a template plays.
+    pub(crate) audio: AudioChoice,
+    /// The voiceover picked for it, if any.
+    pub(crate) voiceover: Option<std::path::PathBuf>,
+}
+
+/// The Start screen's AUDIO TRACK panel (SR4c, Paul's mock-up): the song, a voiceover, both, or
+/// neither under a template.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum AudioChoice {
+    /// The picked song (intro · a chorus per section · outro).
+    #[default]
+    Song,
+    /// A narration only.
+    Voiceover,
+    /// The song, ducking under a narration while it speaks.
+    Both,
+    /// Silent: add sound later in the Strip.
+    None,
+}
+
+impl AudioChoice {
+    fn song(self) -> bool {
+        matches!(self, AudioChoice::Song | AudioChoice::Both)
+    }
+    fn voice(self) -> bool {
+        matches!(self, AudioChoice::Voiceover | AudioChoice::Both)
+    }
 }
 
 /// The Start screen's INSET panel (SR2d, Paul's mock-up): None · Graphic · Video, add to every
@@ -139,6 +167,8 @@ impl Default for StartUi {
             pace: PACE_PRESET,
             step_secs: assetcraft_storyboard::STEP_SECS as u32,
             inset: InsetPanel::default(),
+            audio: AudioChoice::default(),
+            voiceover: None,
             shape: Shape::default(),
             previews: HashMap::new(),
             waveform: None,
@@ -566,6 +596,66 @@ fn template_cards(nav: &mut Navigator, ui: &mut Ui) {
     });
 }
 
+/// The AUDIO TRACK panel (SR4c): Song · Voiceover · Song + voiceover · None, and for a
+/// voiceover the file (Choose…, or the Organizer's selection). Without a file the board is made
+/// without one; the Strip's VOICE row takes it later.
+fn audio_panel(nav: &mut Navigator, ui: &mut Ui) {
+    let mut choice = nav.state.storyboard.start.audio;
+    ui.horizontal_wrapped(|ui| {
+        section_label(ui, "AUDIO TRACK");
+        ui.add_space(6.0);
+        for (c, name, tip) in [
+            (AudioChoice::Song, "Song", "The picked song: its intro, a chorus on every section, its outro"),
+            (AudioChoice::Voiceover, "Voiceover", "Your narration only"),
+            (AudioChoice::Both, "Song + voiceover", "The song ducks while the narration speaks"),
+            (AudioChoice::None, "None", "Silent: add sound later in the Strip"),
+        ] {
+            if ui.selectable_label(choice == c, name).on_hover_text(tip).clicked() {
+                choice = c;
+            }
+        }
+    });
+    nav.state.storyboard.start.audio = choice;
+    if choice.voice() {
+        let focused = crate::storyboard_view::focused_file(nav);
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            match &nav.state.storyboard.start.voiceover {
+                Some(p) => ui.label(RichText::new(format!("Voiceover: {}", assetcraft_fs::display_name(p))).small()),
+                None => ui.weak("No voiceover picked yet (the Strip's VOICE row takes one later)"),
+            };
+            if ui.small_button("Choose…").clicked()
+                && let Some(p) = pick_voiceover(nav)
+            {
+                nav.state.storyboard.start.voiceover = Some(p);
+            }
+            if ui.add_enabled(focused.is_some(), egui::Button::new("Use Organizer selection").small()).clicked() {
+                nav.state.storyboard.start.voiceover = focused;
+            }
+        });
+    }
+    ui.add_space(4.0);
+}
+
+#[cfg(test)]
+fn pick_voiceover(nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    nav.state.test_save_path.clone()
+}
+
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
+fn pick_voiceover(_nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Choose a voiceover")
+        .add_filter("Audio or video", &["wav", "mp3", "m4a", "aac", "flac", "ogg", "mp4", "mov"])
+        .pick_file()
+}
+
+#[cfg(all(not(test), target_arch = "wasm32"))]
+fn pick_voiceover(nav: &mut Navigator) -> Option<std::path::PathBuf> {
+    nav.notify("Choosing a file is not available on the web yet".to_owned());
+    None
+}
+
 /// The INSET panel (SR2d): one row of chips — what goes in each section's slot, which
 /// sections, the corner, the size, the video's audio. Changing it re-previews.
 fn inset_panel(nav: &mut Navigator, ui: &mut Ui) {
@@ -864,6 +954,7 @@ fn cards(nav: &mut Navigator, ui: &mut Ui) {
             }
             ui.add_space(4.0);
             inset_panel(nav, ui);
+            audio_panel(nav, ui);
         }
         let (rect, _) = ui.allocate_exact_size(CARD, Sense::hover());
         card_frame(ui, rect, true);
@@ -1051,8 +1142,14 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             }
             params["stepSeconds"] = json!(nav.state.storyboard.start.step_secs);
             params["inset"] = nav.state.storyboard.start.inset.param();
-            if let Some(cue) = track {
+            // The AUDIO TRACK panel (SR4c): the song only when it is chosen, the voiceover when
+            // one is picked.
+            let audio = nav.state.storyboard.start.audio;
+            if let Some(cue) = track.filter(|_| audio.song()) {
                 params["cueMap"] = json!(cue);
+            }
+            if let Some(vo) = nav.state.storyboard.start.voiceover.clone().filter(|_| audio.voice()) {
+                params["voiceover"] = json!(vo.to_string_lossy());
             }
             if !name.is_empty() {
                 params["name"] = json!(name);

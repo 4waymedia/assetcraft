@@ -222,7 +222,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, stepSeconds?: 10..=300, cueMap?, music?: structured | chorus | firstChorus | whole, credits?: bool, inset?: {kind?, corner?, size?, mixAudio?, addTo?: every | first}} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — every repeating section a title card + three shots of `stepSeconds` (30); with `cueMap` the song becomes its track as `music` says — intro · a chorus starting on each section's title · outro (default), the chorus looped, the first chorus only, or the whole song — and the shots snap to its beat at the template's own length); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, stepSeconds?: 10..=300, cueMap?, music?: structured | chorus | firstChorus | whole, credits?: bool, inset?: {kind?, corner?, size?, mixAudio?, addTo?: every | first}, voiceover?: path} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — every repeating section a title card + three shots of `stepSeconds` (30); with `cueMap` the song becomes its track as `music` says — intro · a chorus starting on each section's title · outro (default), the chorus looped, the first chorus only, or the whole song — and the shots snap to its beat at the template's own length); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(

@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) SR2d (Start screen INSET panel) SR4a (inset sound + ducking, Music / Voice) and SR4b (voiceover track, ducks only while it speaks) done; SR4c the Start screen's AUDIO TRACK panel next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) SR2d (Start screen INSET panel) SR4a (inset sound + ducking, Music / Voice) SR4b (voiceover track, ducks only while it speaks) and SR4c (Start screen AUDIO TRACK panel) done; the TITLE CARDS / NUMBERING / SHOT PATTERN panels next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -496,9 +496,18 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   (Organizer selection, Music / Voice, Remove). Tests: audio 1 (speech spans + bridged
   breath), engine 1 (the export: narration over a ducked song, the song back at its level in
   a 3 s pause; command, refusals, undo), ui-egui 1 (the MOV dropped on the VOICE row → the
-  voiceover, one undo step). **Next — SR4c** the Start screen's AUDIO TRACK panel (Song ·
-  Voiceover · Song + voiceover · None; a voiceover picked there), then the TITLE CARDS /
-  NUMBERING / SHOT PATTERN panels and the STRUCTURE strip. under the STORYBOARD row (one bar per
+  voiceover, one undo step). **SR4c built 2026-11-07 — the Start screen's AUDIO TRACK
+  panel** under INSET for templates (`start_view::audio_panel`, `StartUi.audio: AudioChoice`):
+  **Song** (the picked song, structured music) · **Voiceover** (a narration only; the song is
+  not attached) · **Song + voiceover** (the song ducks while it speaks) · **None** (silent; add
+  sound later in the Strip). For a voiceover the file comes from **Choose…** (a file dialog:
+  wav, mp3, m4a, aac, flac, ogg, mp4, mov) or **Use Organizer selection**; with no file the
+  board is made without one and the Strip's VOICE row takes it later. `storyboard.new` takes
+  `voiceover: path`. Tests: engine 1, ui-egui 1 (all four choices + "no file yet"). **Next** —
+  the remaining mock-up panels, each its own step: TITLE CARDS (opening · between · review ·
+  credits; 2 / 4 / 6 s), NUMBERING (Step 1 · Step one · name them later), SHOT PATTERN (varied ·
+  wide to close · close-ups; clips per step), and the STRUCTURE strip (click a part to jump to
+  its options). under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner
