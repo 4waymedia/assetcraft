@@ -584,7 +584,9 @@ pub(crate) struct Voice {
     pub(crate) voice_db: i8,
 }
 
-/// Every section whose inset is a video with "Mix audio in" and an absolute path.
+/// Every section whose inset is a video with "Mix audio in" and a rooted path (`has_root`, as
+/// the track check in `audio_out`: on Windows a path like `/clips/a.mp4` has a root but is not
+/// "absolute").
 pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
     board
         .scenes
@@ -592,7 +594,7 @@ pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
         .filter_map(|sc| {
             let i = sc.inset.as_ref()?;
             let a = i.asset.as_ref()?;
-            if !i.mix_audio || i.kind != assetcraft_storyboard::InsetKind::Video || !Path::new(&a.0).is_absolute() {
+            if !i.mix_audio || i.kind != assetcraft_storyboard::InsetKind::Video || !Path::new(&a.0).has_root() {
                 return None;
             }
             let (start, length) = board.inset_window(sc.id)?;
