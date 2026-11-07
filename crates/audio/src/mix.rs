@@ -118,6 +118,68 @@ pub fn add_voice_from(
     }
 }
 
+/// Analysis window for [`speech_spans`], in seconds.
+pub const SPEECH_WINDOW_SECS: f64 = 0.05;
+/// Below this level (dB below the voice's loudest window) a window is a pause.
+pub const SPEECH_GATE_DB: f64 = -30.0;
+/// Pauses shorter than this don't let the music back up, in seconds (breaths between words).
+pub const SPEECH_HOLD_SECS: f64 = 0.6;
+
+/// Where a narration is speaking (SR4b): `(start, length)` spans in its own seconds. Windows of
+/// [`SPEECH_WINDOW_SECS`] louder than [`SPEECH_GATE_DB`] under its loudest window count; pauses
+/// shorter than [`SPEECH_HOLD_SECS`] are bridged. A silent file has none.
+pub fn speech_spans(voice: &Audio) -> Vec<(f64, f64)> {
+    let rate = voice.rate();
+    let n = voice.frames();
+    if rate == 0 || n == 0 {
+        return Vec::new();
+    }
+    let w = ((SPEECH_WINDOW_SECS * f64::from(rate)) as usize).max(1);
+    let channels = voice.channel_count().max(1);
+    let rms: Vec<f64> = (0..n.div_ceil(w))
+        .map(|k| {
+            let (a, b) = (k * w, ((k + 1) * w).min(n));
+            let mut sum = 0.0f64;
+            for c in 0..channels {
+                for s in voice.channel(c).get(a..b).unwrap_or(&[]) {
+                    sum += f64::from(*s) * f64::from(*s);
+                }
+            }
+            (sum / ((b - a) * channels).max(1) as f64).sqrt()
+        })
+        .collect();
+    let loudest = rms.iter().copied().fold(0.0f64, f64::max);
+    if loudest <= 1e-6 {
+        return Vec::new();
+    }
+    let gate = loudest * 10f64.powf(SPEECH_GATE_DB / 20.0);
+    let secs = |k: usize| (k * w) as f64 / f64::from(rate);
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    let mut open: Option<usize> = None;
+    for (k, level) in rms.iter().enumerate() {
+        match (open, *level >= gate) {
+            (None, true) => open = Some(k),
+            (Some(a), false) => {
+                spans.push((secs(a), secs(k)));
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(a) = open {
+        spans.push((secs(a), n as f64 / f64::from(rate)));
+    }
+    // Bridge short pauses.
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (a, b) in spans {
+        match merged.last_mut() {
+            Some(last) if a - last.1 < SPEECH_HOLD_SECS => last.1 = b,
+            _ => merged.push((a, b)),
+        }
+    }
+    merged.into_iter().map(|(a, b)| (a, b - a)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +187,23 @@ mod tests {
     fn tone(rate: u32, secs: f64, level: f32) -> Audio {
         let n = (secs * f64::from(rate)) as usize;
         Audio::from_channels(rate, "test", vec![(0..n).map(|i| if i % 2 == 0 { level } else { -level }).collect()])
+    }
+
+    #[test]
+    fn speech_spans_find_the_talking_and_bridge_short_pauses() {
+        // 1 s talk, 0.3 s breath, 1 s talk, 2 s silence, 0.5 s talk.
+        let rate = 8_000u32;
+        let mut s = Vec::new();
+        for (secs, loud) in [(1.0, true), (0.3, false), (1.0, true), (2.0, false), (0.5, true)] {
+            let n = (secs * f64::from(rate)) as usize;
+            s.extend((0..n).map(|i| if loud { ((i as f32) * 0.3).sin() * 0.5 } else { 0.0005 }));
+        }
+        let voice = Audio::from_channels(rate, "test", vec![s]);
+        let spans = speech_spans(&voice);
+        assert_eq!(spans.len(), 2, "{spans:?}");
+        assert!(spans[0].0.abs() < 0.06 && (spans[0].1 - 2.3).abs() < 0.11, "{spans:?}");
+        assert!((spans[1].0 - 4.3).abs() < 0.06 && (spans[1].1 - 0.5).abs() < 0.06, "{spans:?}");
+        assert!(speech_spans(&Audio::from_channels(rate, "test", vec![vec![0.0; 8000]])).is_empty());
     }
 
     #[test]
@@ -164,6 +243,7 @@ mod tests {
             length: 3.0,
             voice_gain: 1.0,
             music_gain: 0.25,
+            duck: Vec::new(),
         }]);
         let mut whole = vec![0.0f32; 8_000 * 6 * 2];
         p.render(0.0, 8_000, &mut whole, 2);

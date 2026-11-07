@@ -130,6 +130,13 @@ impl Storyboard {
         }
 
         let mut scene_ids = HashSet::new();
+        if let Some(v) = &self.voiceover {
+            text("voiceover asset", &v.asset.0, l)?;
+            let (m, r) = (crate::inset::MUSIC_DB_RANGE, crate::inset::VOICE_DB_RANGE);
+            if !(m.0..=m.1).contains(&v.music_db) || !(r.0..=r.1).contains(&v.voice_db) {
+                return Err(BoardError::Limit("a voiceover level is out of range".into()));
+            }
+        }
         for s in &self.scenes {
             if !scene_ids.insert(s.id) {
                 return Err(BoardError::Invalid(format!("scene {} appears twice", s.id.0)));

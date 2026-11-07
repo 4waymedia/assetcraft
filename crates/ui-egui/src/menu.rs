@@ -65,6 +65,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // The Strip's INSET row and the Inspector's INSET section drive these (SR2).
     "storyboard.inset",
     "storyboard.insetClear",
+    // The Strip's VOICE row drives it (SR4b).
+    "storyboard.voiceover",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) SR2d (Start screen INSET panel) and SR4a (inset sound + ducking, Music / Voice) done; SR4b voiceover track next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) SR2b (Strip INSET + AUDIO rows, drop, a video's length) SR2c (Inspector INSET section, Viewer + export corner draw) SR3b (structured music: intro · a chorus per section · outro; Strip INSET lane menu) SR2d (Start screen INSET panel) SR4a (inset sound + ducking, Music / Voice) and SR4b (voiceover track, ducks only while it speaks) done; SR4c the Start screen's AUDIO TRACK panel next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -482,10 +482,23 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   voice placement / resample / cut, windowed render = whole render), engine 2 (export: plain vs
   silent inset equal, mixed → the voice dominates the window and the music outside is
   unchanged, Voice slider lowers it, out-of-range refused; Watch your Cut: "+ 1 voice" once the
-  host's sound decodes). **Next — SR4b the voiceover track** (the mock-up's AUDIO TRACK panel:
-  Song · Voiceover · Song + voiceover · None — a narration file under the whole Cut, ducking
-  the song with the same `Layer`), then the TITLE CARDS / NUMBERING / SHOT PATTERN panels and
-  the STRUCTURE strip. under the STORYBOARD row (one bar per
+  host's sound decodes). **SR4b built 2026-11-07 — the voiceover track:**
+  `Storyboard.voiceover: Option<Voiceover { asset, music_db, voice_db }>` (left out of the file
+  when none; levels range-checked; templates drop it; an asset ref). `mix::speech_spans(audio)`
+  finds where a narration speaks (50 ms RMS windows over −30 dB under its loudest, pauses under
+  0.6 s bridged), and `Layer.duck` limits a layer's ducking to those spans — so **the song
+  ducks only while the voice talks and comes back up in the pauses** (an inset still ducks its
+  whole section). `storyboard.voiceover {asset? | null, musicDb?, voiceDb?}` (one undo step;
+  levels kept when the file is replaced; levels without a voiceover → Unavailable); the export
+  and Watch your Cut add it as a layer from 0:00 for the Cut's length (`export_job::voices`,
+  `speech: true`). Strip: a **VOICE** row under AUDIO (purple bar across the Cut, "VOICEOVER ·
+  name · the song at −12 dB while it speaks", or the drop hint), a drop target, a click menu
+  (Organizer selection, Music / Voice, Remove). Tests: audio 1 (speech spans + bridged
+  breath), engine 1 (the export: narration over a ducked song, the song back at its level in
+  a 3 s pause; command, refusals, undo), ui-egui 1 (the MOV dropped on the VOICE row → the
+  voiceover, one undo step). **Next — SR4c** the Start screen's AUDIO TRACK panel (Song ·
+  Voiceover · Song + voiceover · None; a voiceover picked there), then the TITLE CARDS /
+  NUMBERING / SHOT PATTERN panels and the STRUCTURE strip. under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner

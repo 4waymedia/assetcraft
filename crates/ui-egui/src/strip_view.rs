@@ -59,7 +59,9 @@ const MARKER_H: f32 = 18.0;
 /// created, we need to have the audio track, and the inset track available").
 const INSET_H: f32 = 36.0;
 const AUDIO_H: f32 = 40.0;
-pub(crate) const ROWS_H: f32 = INSET_H + AUDIO_H + 8.0;
+/// The VOICE row under AUDIO (SR4b): the voiceover, or a drop target for one.
+const VOICE_H: f32 = 24.0;
+pub(crate) const ROWS_H: f32 = INSET_H + AUDIO_H + VOICE_H + 12.0;
 const CONTROLS_H: f32 = 30.0;
 const TIMELINE_H: f32 = RULER_H + MARKER_H + STRIP_H + ROWS_H + 24.0;
 const NEXT_FILL: Color32 = Color32::from_rgb(0x1f, 0x33, 0x50);
@@ -852,6 +854,13 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             let spans = clip_spans(board, left, Some(&ctx), resize);
             inset_cmds = inset_row(nav, ui, board, &spans, strip_top + STRIP_H + 4.0);
             audio_row(nav, ui, board, strip_top + STRIP_H + 4.0 + INSET_H + 4.0, left, width);
+            inset_cmds.extend(voice_row(
+                nav,
+                ui,
+                board,
+                strip_top + STRIP_H + 4.0 + INSET_H + 4.0 + AUDIO_H + 4.0,
+                left,
+            ));
             for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
                 if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
                     let title = board.scene_title(clip.scene_id).unwrap_or_default();
@@ -1116,6 +1125,91 @@ fn inset_row(
             .id(egui::Id::new(("sb-inset-ctx", scene_id)))
             .show(|ui| options(ui, &mut out));
     }
+    out
+}
+
+/// The VOICE row (SR4b): the voiceover as a bar from the top of the Cut (it plays from 0:00
+/// and is cut at the end), named, with the song's level while it speaks; or "Drop a voiceover
+/// here". Drop an Organizer file on it to set or replace it; click for its options (the
+/// Organizer selection, Music / Voice, Remove). Returns the commands to run.
+fn voice_row(
+    nav: &Navigator,
+    ui: &mut Ui,
+    board: &Storyboard,
+    top: f32,
+    left: f32,
+) -> Vec<(&'static str, serde_json::Value)> {
+    let mut out: Vec<(&'static str, serde_json::Value)> = Vec::new();
+    let painter = ui.painter().clone();
+    let w = (board.total().as_secs_f64() as f32 * PX_PER_SEC).max(120.0);
+    let rect = Rect::from_min_size(pos2(left, top), vec2(w, VOICE_H));
+    let response = ui.interact(rect, egui::Id::new("sb-voiceover"), Sense::click());
+    let hovering = response.dnd_hover_payload::<DragAsset>().is_some();
+    let vo = board.voiceover.as_ref();
+    let (fill, stroke) = match vo {
+        Some(_) => (Color32::from_rgb(0x3a, 0x2f, 0x52), Color32::from_rgb(0x9a, 0x80, 0xd0)),
+        None => (Color32::from_gray(0x1e), Color32::from_gray(0x44)),
+    };
+    painter.rect_filled(rect, 2, fill);
+    painter.rect_stroke(
+        rect,
+        2,
+        Stroke::new(if hovering || response.hovered() { 2.0 } else { 1.0 }, if hovering { SELECT } else { stroke }),
+        StrokeKind::Inside,
+    );
+    let text = match vo {
+        Some(v) => format!(
+            "VOICEOVER · {} · the song at {} dB while it speaks",
+            Path::new(&v.asset.0).file_name().map_or(v.asset.0.clone(), |f| f.to_string_lossy().into_owned()),
+            v.music_db
+        ),
+        None => "VOICEOVER · drop a narration here (the song ducks while it speaks)".to_owned(),
+    };
+    let visible = rect.intersect(ui.clip_rect());
+    if visible.width() > 40.0 {
+        painter.with_clip_rect(rect).text(
+            pos2(visible.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(9.0),
+            Color32::from_gray(if vo.is_some() { 0xd8 } else { 0x80 }),
+        );
+    }
+    let response = response.on_hover_text(match vo {
+        Some(v) => format!("{}\nClick for options · drop another file to replace it", v.asset.0),
+        None => {
+            "Drop an audio file (or a video with sound) from the Organizer: it plays from the top of the Cut".to_owned()
+        }
+    });
+    if let Some(asset) = response.dnd_release_payload::<DragAsset>() {
+        out.push(("storyboard.voiceover", json!({ "asset": asset.0.clone() })));
+    }
+    let focused = crate::storyboard_view::focused_file(nav);
+    egui::Popup::menu(&response).id(egui::Id::new("sb-voiceover-menu")).show(|ui| {
+        ui.set_min_width(220.0);
+        ui.label(RichText::new("VOICEOVER").small().strong());
+        let label = if vo.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
+        if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
+            && let Some(p) = &focused
+        {
+            out.push(("storyboard.voiceover", json!({ "asset": p.to_string_lossy() })));
+            ui.close();
+        }
+        if let Some(v) = vo {
+            let (m, r) = (assetcraft_storyboard::MUSIC_DB_RANGE, assetcraft_storyboard::VOICE_DB_RANGE);
+            if let Some(db) = crate::inset_view::level_slider(ui, ("vo-music", 0), "Music", v.music_db, m) {
+                out.push(("storyboard.voiceover", json!({ "musicDb": db })));
+            }
+            if let Some(db) = crate::inset_view::level_slider(ui, ("vo-voice", 0), "Voice", v.voice_db, r) {
+                out.push(("storyboard.voiceover", json!({ "voiceDb": db })));
+            }
+            ui.separator();
+            if ui.button("Remove the voiceover").clicked() {
+                out.push(("storyboard.voiceover", json!({ "asset": null })));
+                ui.close();
+            }
+        }
+    });
     out
 }
 

@@ -59,6 +59,9 @@ pub struct Layer {
     pub voice_gain: f32,
     /// Linear gain on the music under it.
     pub music_gain: f32,
+    /// Where to duck, in the layer's own seconds (`(start, length)`); empty = all of it. A
+    /// voiceover ducks only while it speaks ([`crate::mix::speech_spans`]).
+    pub duck: Vec<(f64, f64)>,
 }
 
 fn rescale(frames: u64, from: u32, to: u32) -> u64 {
@@ -189,7 +192,17 @@ impl Program {
             if b + crate::mix::DUCK_RAMP_SECS < from || a - crate::mix::DUCK_RAMP_SECS > from + window {
                 continue;
             }
-            crate::mix::duck(out, channels, out_rate, &[(a - from, l.length)], l.music_gain);
+            if l.duck.is_empty() {
+                crate::mix::duck(out, channels, out_rate, &[(a - from, l.length)], l.music_gain);
+            } else {
+                let spans: Vec<(f64, f64)> = l
+                    .duck
+                    .iter()
+                    .filter(|(s, _)| *s < l.length)
+                    .map(|(s, n)| (a + s - from, n.min(l.length - s)))
+                    .collect();
+                crate::mix::duck(out, channels, out_rate, &spans, l.music_gain);
+            }
             // The part of the voice in this window: from `max(a, from)`, `skip` seconds in.
             let at = (a - from).max(0.0);
             let skip = (from - a).max(0.0);

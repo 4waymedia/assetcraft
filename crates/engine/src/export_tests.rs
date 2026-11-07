@@ -339,3 +339,87 @@ fn an_inset_video_with_mix_audio_is_heard_and_the_music_ducks_under_it() {
     assert!(matches!(s.execute("storyboard.inset", &json!({ "scene": 1, "musicDb": 6 })), Err(CmdError::BadParams(_))));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A 16-bit mono WAV at 8 kHz from samples in −1..1.
+fn wav_of(samples: &[f32]) -> Vec<u8> {
+    let rate = 8_000u32;
+    let data = samples.len() as u32 * 2;
+    let mut b = Vec::new();
+    for part in [&b"RIFF"[..], &(36 + data).to_le_bytes(), b"WAVEfmt ", &16u32.to_le_bytes()] {
+        b.extend_from_slice(part);
+    }
+    for v in [1u16, 1] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(&rate.to_le_bytes());
+    b.extend_from_slice(&(rate * 2).to_le_bytes());
+    for v in [2u16, 16] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data.to_le_bytes());
+    for s in samples {
+        b.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes());
+    }
+    b
+}
+
+#[test]
+fn a_voiceover_ducks_the_song_only_while_it_speaks() {
+    let dir = temp("voiceover");
+    let song = dir.join("song.wav");
+    std::fs::write(&song, wav(10)).unwrap();
+    // Talk 0–1.5 s, silence 1.5–4.5 s, talk 4.5–6 s.
+    let talk = |n: usize| (0..n).map(|i| (i as f32 * 0.2).sin() * 0.6).collect::<Vec<f32>>();
+    let mut narration = talk(12_000);
+    narration.extend(std::iter::repeat_n(0.0, 24_000));
+    narration.extend(talk(12_000));
+    let vo = dir.join("narration.wav");
+    std::fs::write(&vo, wav_of(&narration)).unwrap();
+    let mut s = session_with_cut(2);
+    s.boards.board.as_mut().unwrap().clips[0].shot_type = ShotType::Ms;
+    s.boards.board.as_mut().unwrap().track = Some(assetcraft_storyboard::Track {
+        id: AssetId(song.to_string_lossy().into_owned()),
+        name: "song".into(),
+        bpm: assetcraft_storyboard::Bpm::DEFAULT,
+        duration: Ticks::from_secs(10).unwrap(),
+        beat_grid: Vec::new(),
+        song_sections: Vec::new(),
+        edit: None,
+        credit: None,
+    });
+    let export = |s: &mut Session, name: &str| -> PathBuf {
+        let path = dir.join(name);
+        let out = run(
+            s,
+            "storyboard.exportVideo",
+            json!({ "path": path.to_string_lossy(), "size": { "width": 160, "height": 96 }, "quality": 36, "wait": true }),
+        );
+        assert_eq!(out["status"]["stage"], "done", "{out}");
+        path
+    };
+    let plain = export(&mut s, "plain.mp4");
+    // The command: set, levels, refusals, one undo step.
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.voiceover", json!({ "asset": vo.to_string_lossy(), "musicDb": -40 }));
+    assert_eq!(r["changed"], true);
+    assert_eq!((r["voiceover"]["musicDb"].as_i64(), r["voiceover"]["voiceDb"].as_i64()), (Some(-40), Some(0)));
+    assert!(r["message"].as_str().unwrap().contains("narration.wav"));
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    assert_eq!(run(&mut s, "storyboard.voiceover", json!({ "musicDb": -40 }))["changed"], false);
+    for bad in [json!({ "musicDb": 3 }), json!({ "voiceDb": 40 }), json!({ "asset": "" }), json!({ "asset": 7 })] {
+        assert!(matches!(s.execute("storyboard.voiceover", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    let mixed = export(&mut s, "voiceover.mp4");
+    let music = rms_between(&plain, 2.2, 3.8);
+    assert!(rms_between(&mixed, 0.3, 1.2) > music * 3.0, "the narration is heard over a ducked song");
+    assert!((rms_between(&mixed, 2.2, 3.8) - music).abs() < music * 0.15, "the song comes back in the pause");
+    assert!(rms_between(&mixed, 4.8, 5.7) > music * 3.0);
+    // Remove: the plain song again; levels need a voiceover.
+    run(&mut s, "storyboard.voiceover", json!({ "asset": null }));
+    assert!(s.storyboard().unwrap().voiceover.is_none());
+    assert!(matches!(s.execute("storyboard.voiceover", &json!({ "voiceDb": -6 })), Err(CmdError::Unavailable(_))));
+    run(&mut s, "storyboard.undo", json!({}));
+    assert!(s.storyboard().unwrap().voiceover.is_some(), "undo brings it back");
+    let _ = std::fs::remove_dir_all(&dir);
+}

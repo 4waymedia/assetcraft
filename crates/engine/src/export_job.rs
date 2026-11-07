@@ -517,31 +517,35 @@ impl Job {
         let mut pcm = vec![0.0f32; frames * 2];
         if let Some(program) = &music {
             program.render(0.0, rate, &mut pcm, 2);
-            // Each section ducks to its own level: one pass per distinct level keeps it simple.
-            for v in &voices {
-                assetcraft_audio::mix::duck(
-                    &mut pcm,
-                    2,
-                    rate,
-                    &[(v.start, v.length)],
-                    assetcraft_audio::mix::db(f64::from(v.music_db)),
-                );
-            }
         }
+        // Decode every voice first (one that won't decode is reported, not fatal: the Cut still
+        // exports), duck the music under each — an inset over its whole section, a voiceover only
+        // where it speaks — then lay the voices over it.
+        let mut decoded = Vec::new();
         for v in &voices {
-            // A video whose sound won't decode is reported, not fatal: the Cut still exports.
             match assetcraft_audio::load(self.services.as_ref(), Path::new(&v.path)) {
-                Ok(sound) => assetcraft_audio::mix::add_voice(
-                    &mut pcm,
-                    2,
-                    rate,
-                    &sound,
-                    v.start,
-                    v.length,
-                    assetcraft_audio::mix::db(f64::from(v.voice_db)),
-                ),
+                Ok(sound) => decoded.push((v, sound)),
                 Err(e) => problems.push(format!("{}: no sound mixed in ({e})", v.path)),
             }
+        }
+        if music.is_some() {
+            for (v, sound) in &decoded {
+                let gain = assetcraft_audio::mix::db(f64::from(v.music_db));
+                let spans: Vec<(f64, f64)> = if v.speech {
+                    assetcraft_audio::mix::speech_spans(sound)
+                        .into_iter()
+                        .filter(|(a, _)| *a < v.length)
+                        .map(|(a, n)| (v.start + a, n.min(v.length - a)))
+                        .collect()
+                } else {
+                    vec![(v.start, v.length)]
+                };
+                assetcraft_audio::mix::duck(&mut pcm, 2, rate, &spans, gain);
+            }
+        }
+        for (v, sound) in &decoded {
+            let gain = assetcraft_audio::mix::db(f64::from(v.voice_db));
+            assetcraft_audio::mix::add_voice(&mut pcm, 2, rate, sound, v.start, v.length, gain);
         }
         assetcraft_video::encode_audio(&pcm, 2, rate, DEFAULT_AUDIO_BITRATE)
             .map(|a| (Some(a), problems))
@@ -582,9 +586,12 @@ pub(crate) struct Voice {
     pub(crate) length: f64,
     pub(crate) music_db: i8,
     pub(crate) voice_db: i8,
+    /// A voiceover: duck only while it speaks (an inset ducks its whole section).
+    pub(crate) speech: bool,
 }
 
-/// Every section whose inset is a video with "Mix audio in" and a rooted path (`has_root`, as
+/// The voiceover (SR4b, from the top, the length of the Cut) and every section whose inset is
+/// a video with "Mix audio in", each with a rooted path (`has_root`, as
 /// the track check in `audio_out`: on Windows a path like `/clips/a.mp4` has a root but is not
 /// "absolute").
 pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
@@ -604,7 +611,16 @@ pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
                 length: length.as_secs_f64(),
                 music_db: i.music_db,
                 voice_db: i.voice_db,
+                speech: false,
             })
         })
+        .chain(board.voiceover.iter().filter(|v| Path::new(&v.asset.0).has_root()).map(|v| Voice {
+            path: v.asset.0.clone(),
+            start: 0.0,
+            length: board.total().as_secs_f64(),
+            music_db: v.music_db,
+            voice_db: v.voice_db,
+            speech: true,
+        }))
         .collect()
 }

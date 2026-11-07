@@ -1374,3 +1374,44 @@ fn the_start_screens_inset_panel_presets_the_slots_of_the_new_board() {
     assert!(nav.session().storyboard().unwrap().scenes.iter().all(|sc| sc.inset.is_none()));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn dropping_an_organizer_file_on_the_strips_voice_row_sets_the_voiceover() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let env = env.canonicalize().unwrap_or(env);
+    assert!(nav.open_folder(&env));
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let mov = env.join("snow_clearing_flythrough.mov");
+    let from =
+        ctx.read_response(crate::strip_view::asset_cell_id(&mov)).map(|r| r.rect.center()).expect("the MOV's cell");
+    // The VOICE row: under the strip, the INSET row (36) and the AUDIO row (40), 4 px apart.
+    let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
+    let voice_y = strip_y + 75.0 + 4.0 + 36.0 + 4.0 + 40.0 + 4.0 + 12.0;
+    let to = Pos2::new(8.0 + 60.0, voice_y);
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        steps.push(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 8.0))]);
+    }
+    steps.push(vec![press(to, false)]);
+    steps.push(Vec::new());
+    for events in steps {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    let vo = nav.session().storyboard().unwrap().voiceover.clone().expect("dropped on the VOICE row");
+    assert!(vo.asset.0.ends_with("snow_clearing_flythrough.mov"));
+    assert_eq!((vo.music_db, vo.voice_db), (assetcraft_storyboard::DEFAULT_MUSIC_DB, 0));
+    nav.run("storyboard.undo", json!({}));
+    assert!(nav.session().storyboard().unwrap().voiceover.is_none(), "one undo step");
+}

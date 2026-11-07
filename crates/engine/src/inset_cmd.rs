@@ -353,3 +353,54 @@ pub(crate) fn apply_defaults(board: &mut Storyboard, p: &Value) -> Result<(), Cm
     }
     Ok(())
 }
+
+/// `storyboard.voiceover {asset?: path | null, musicDb?, voiceDb?}` (SR4b): set, change or
+/// remove (`asset: null`) the narration under the whole Cut. Its levels are an inset's: the
+/// song at `musicDb` while it speaks, the voice at `voiceDb`. One undo step; unchanged → none.
+pub(crate) fn sb_voiceover(s: &mut Session, p: &Value) -> CmdResult {
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let limits = Limits::default();
+    let mut vo = board.voiceover.clone();
+    match p.get("asset") {
+        None => {}
+        Some(Value::Null) => vo = None,
+        Some(v) => {
+            let a =
+                v.as_str().map(str::trim).filter(|a| !a.is_empty() && a.len() <= limits.max_string).ok_or_else(
+                    || CmdError::BadParams("`asset` must be a path, or null to remove the voiceover".into()),
+                )?;
+            let keep = vo.take();
+            let mut next = assetcraft_storyboard::Voiceover::new(AssetId(a.to_owned()));
+            if let Some(k) = keep {
+                next.music_db = k.music_db;
+                next.voice_db = k.voice_db;
+            }
+            vo = Some(next);
+        }
+    }
+    let music = level(p, "musicDb", assetcraft_storyboard::MUSIC_DB_RANGE)?;
+    let voice = level(p, "voiceDb", assetcraft_storyboard::VOICE_DB_RANGE)?;
+    if music.is_some() || voice.is_some() {
+        let v = vo.as_mut().ok_or_else(|| CmdError::Unavailable("add a voiceover first".into()))?;
+        if let Some(m) = music {
+            v.music_db = m;
+        }
+        if let Some(x) = voice {
+            v.voice_db = x;
+        }
+    }
+    let changed = board.voiceover != vo;
+    if changed {
+        board.voiceover = vo.clone();
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({
+        "changed": changed,
+        "voiceover": vo.as_ref().map(|v| json!({ "asset": v.asset.0, "musicDb": v.music_db, "voiceDb": v.voice_db })),
+        "message": match &vo {
+            Some(v) => format!("Voiceover: {} (the song ducks to {} dB while it speaks)", name_of(&v.asset), v.music_db),
+            None => "No voiceover".to_owned(),
+        },
+    }))
+}

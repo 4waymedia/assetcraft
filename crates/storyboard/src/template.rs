@@ -378,6 +378,7 @@ impl Storyboard {
                 inset.asset = None;
             }
         }
+        t.voiceover = None;
         t
     }
 
@@ -397,5 +398,6 @@ impl Storyboard {
             .iter()
             .flat_map(|c| c.asset_ids.iter())
             .chain(self.scenes.iter().filter_map(|s| s.inset.as_ref().and_then(|i| i.asset.as_ref())))
+            .chain(self.voiceover.iter().map(|v| &v.asset))
     }
 }

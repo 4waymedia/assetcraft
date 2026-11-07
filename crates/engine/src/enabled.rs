@@ -46,6 +46,7 @@ impl Session {
             | "storyboard.resize"
             | "storyboard.inset"
             | "storyboard.insetClear"
+            | "storyboard.voiceover"
             | "storyboard.pause"
             | "storyboard.seek"
             | "storyboard.saveAs"

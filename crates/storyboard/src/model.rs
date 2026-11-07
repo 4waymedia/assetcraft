@@ -394,6 +394,37 @@ pub struct Storyboard {
     /// `as_template` makes one. Left out of the file when `false`, so every older board loads.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub template: bool,
+    /// A narration under the whole Cut (SR4b, the mock-up's AUDIO TRACK "Voiceover"): it plays
+    /// from the start, and the song ducks while it speaks. Left out of the file when there is
+    /// none, so older boards load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voiceover: Option<Voiceover>,
+}
+
+/// A voiceover (SR4b): the file, and its two levels in dB (the ranges and defaults of an
+/// inset's, [`crate::MUSIC_DB_RANGE`] / [`crate::VOICE_DB_RANGE`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Voiceover {
+    /// The narration file.
+    pub asset: AssetId,
+    /// The song under the voice while it speaks.
+    #[serde(default = "voiceover_music_db")]
+    pub music_db: i8,
+    /// The voice itself.
+    #[serde(default)]
+    pub voice_db: i8,
+}
+
+fn voiceover_music_db() -> i8 {
+    crate::inset::DEFAULT_MUSIC_DB
+}
+
+impl Voiceover {
+    /// A voiceover of `asset` at the default levels.
+    pub fn new(asset: AssetId) -> Voiceover {
+        Voiceover { asset, music_db: crate::inset::DEFAULT_MUSIC_DB, voice_db: 0 }
+    }
 }
 
 impl Storyboard {
@@ -410,6 +441,7 @@ impl Storyboard {
             clips: Vec::new(),
             text_clips: Vec::new(),
             template: false,
+            voiceover: None,
         }
     }
 

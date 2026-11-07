@@ -142,6 +142,7 @@ impl Session {
                     length: v.length,
                     voice_gain: assetcraft_audio::mix::db(f64::from(v.voice_db)),
                     music_gain: assetcraft_audio::mix::db(f64::from(v.music_db)),
+                    duck: if v.speech { assetcraft_audio::mix::speech_spans(&d.audio) } else { Vec::new() },
                 });
             }
         }

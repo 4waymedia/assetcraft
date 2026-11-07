@@ -516,6 +516,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.voiceover",
+        "Voiceover",
+        "Storyboard",
+        None,
+        "{asset?: path | null, musicDb?: -40..=0, voiceDb?: -24..=12} (a narration under the whole Cut from the top; the song ducks to musicDb while it speaks; null removes it; one undo step)",
+        crate::inset_cmd::sb_voiceover
+    ),
+    cmd!(
+        EDIT,
         "storyboard.insetClear",
         "Clear Section Inset",
         "Storyboard",
