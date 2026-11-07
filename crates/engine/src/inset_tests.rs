@@ -35,7 +35,11 @@ fn an_inset_is_set_changed_and_cleared_in_one_undo_step_each() {
         (r["inset"]["kind"].as_str(), r["inset"]["corner"].as_str(), r["inset"]["size"].as_str()),
         (Some("video"), Some("bottomRight"), Some("medium"))
     );
-    assert_eq!(r["message"], format!("Inset on scene {}: host_section1.mp4", scene.0));
+    assert_eq!(
+        r["message"],
+        format!("Inset on scene {}: host_section1.mp4 (length unknown: the section keeps 5.0 s)", scene.0),
+        "a file the fake fs can't measure"
+    );
     assert_eq!(s.boards.undo_len(), undo + 1);
     let i = inset(&s, scene.0).unwrap();
     assert_eq!(i.kind, InsetKind::Video);
@@ -135,6 +139,43 @@ fn seconds_stretch_the_sections_shots_pro_rata_and_keep_its_title_card() {
         s.storyboard().unwrap().inset_span(scene).map(|c| c.duration.as_secs_f64()).sum::<f64>(),
         MIN_CLIP_SECS * n
     );
+}
+
+#[test]
+fn a_real_video_sizes_its_section_and_the_kind_follows_the_extension() {
+    use assetcraft_fs::RealFs;
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    s.execute("storyboard.new", &json!({"template": "tutorial", "steps": 2})).unwrap();
+    let board = s.storyboard().unwrap().clone();
+    let scene = board.inset_scenes().find(|sc| board.inset_span(sc.id).count() >= 2).unwrap().id;
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    let mov = lib.join("environments/snow_clearing_flythrough.mov");
+    // A 2 s MOV: the section becomes 2 s (two shots at the minimum), kind video.
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": mov.to_string_lossy()}));
+    assert_eq!(r["inset"]["kind"], "video");
+    assert!((r["assetSeconds"].as_f64().unwrap() - 2.0).abs() < 0.01, "{r}");
+    assert!((r["spanSeconds"].as_f64().unwrap() - 2.0).abs() < 0.01, "{r}");
+    assert!(r["message"].as_str().unwrap().contains("section now 2.0 s"), "{r}");
+    // A still: graphic, the section untouched.
+    let jpg = lib.join("environments/snow_clearing_plate.jpg");
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": jpg.to_string_lossy()}));
+    assert_eq!(r["inset"]["kind"], "graphic");
+    assert!(r["assetSeconds"].is_null());
+    assert!((r["spanSeconds"].as_f64().unwrap() - 2.0).abs() < 0.01, "kept");
+    // A video the container can't measure (AVI): kept, and the message says so; `fit: false`
+    // keeps the section for a measurable one too; an explicit `seconds` wins.
+    let avi = lib.join("environments/frozen_lake_pan.avi");
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": avi.to_string_lossy()}));
+    assert_eq!(r["inset"]["kind"], "video");
+    assert!(r["message"].as_str().unwrap().contains("length unknown"), "{r}");
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": mov.to_string_lossy(), "fit": false}));
+    assert!((r["spanSeconds"].as_f64().unwrap() - 2.0).abs() < 0.01);
+    assert!(r["message"].as_str().unwrap().ends_with("snow_clearing_flythrough.mov"), "{r}");
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": mov.to_string_lossy(), "seconds": 9}));
+    assert!((r["spanSeconds"].as_f64().unwrap() - 9.0).abs() < 0.01);
+    // A given kind is kept as given.
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene.0, "asset": jpg.to_string_lossy(), "kind": "video"}));
+    assert_eq!(r["inset"]["kind"], "video");
 }
 
 #[test]

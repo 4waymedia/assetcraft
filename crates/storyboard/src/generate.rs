@@ -366,6 +366,164 @@ pub fn track_from_cue(
     })
 }
 
+/// How a template's music runs under its sections (SR3; Paul, 2026-11-06: "the selected song
+/// needs to use the 'chorus' section as a repeating background loop… the chorus music between
+/// each title").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MusicMode {
+    /// The song from the top; it ends where it ends.
+    Whole,
+    /// Every chorus span of the cue map in order, joined with a one-beat crossfade, looped
+    /// to the Cut's length; no chorus → the highest-energy section.
+    #[default]
+    ChorusLoop,
+    /// The first chorus only, looped.
+    FirstChorus,
+}
+
+impl MusicMode {
+    /// The command parameter spelling.
+    pub fn id(self) -> &'static str {
+        match self {
+            MusicMode::Whole => "whole",
+            MusicMode::ChorusLoop => "chorus",
+            MusicMode::FirstChorus => "firstChorus",
+        }
+    }
+
+    /// From the command parameter spelling.
+    pub fn parse(id: &str) -> Option<MusicMode> {
+        match id {
+            "whole" => Some(MusicMode::Whole),
+            "chorus" => Some(MusicMode::ChorusLoop),
+            "firstChorus" => Some(MusicMode::FirstChorus),
+            _ => None,
+        }
+    }
+}
+
+/// Most pieces a loop is built from (a one-bar chorus under a six-hour Cut stops here; the
+/// music ends and the rest is silent).
+pub const LOOP_MAX_SEGMENTS: usize = 2048;
+/// The fade at the end of a loop, in seconds.
+pub const LOOP_FADE_SECS: f64 = 2.0;
+
+/// The loop source: every section labelled chorus (or the first, with `first`), snapped to
+/// whole bars on the downbeat grid; no chorus → the highest-energy section. Empty when the
+/// cue map has no sections at all.
+fn loop_spans(cue: &CueMap, first: bool) -> Vec<[u64; 2]> {
+    let sr = u64::from(cue.sample_rate.max(1));
+    let beat = ((60.0 / cue.bpm.max(1.0)) * sr as f64).round().max(1.0) as u64;
+    let bar = beat * u64::from(cue.beats_per_bar.max(1));
+    let grid: &[u64] = if cue.downbeats.is_empty() { &cue.beats } else { &cue.downbeats };
+    let snap = |[a, b]: [u64; 2]| -> Option<[u64; 2]> {
+        let start = grid.iter().copied().find(|g| *g >= a).unwrap_or(a);
+        let end = grid.iter().copied().rev().find(|g| *g <= b).unwrap_or(b);
+        (end > start && end - start >= bar.min(sr)).then_some([start, end])
+    };
+    let mut chorus: Vec<[u64; 2]> = cue
+        .sections
+        .iter()
+        .filter(|s| s.label.to_ascii_lowercase().contains("chorus"))
+        .filter_map(|s| snap([s.start, s.end]))
+        .collect();
+    if chorus.is_empty() {
+        chorus = cue
+            .sections
+            .iter()
+            .max_by(|a, b| a.energy.total_cmp(&b.energy))
+            .and_then(|s| snap([s.start, s.end]))
+            .into_iter()
+            .collect();
+    }
+    if first {
+        chorus.truncate(1);
+    }
+    chorus
+}
+
+/// A loop of the song's chorus (SR3) long enough for `total`: the spans from [`loop_spans`]
+/// played in order and repeated, each splice crossfaded over a beat, the last piece cut to
+/// length, a two-second fade at the end. `None` when the cue map gives nothing to loop.
+pub fn chorus_loop(cue: &CueMap, total: Ticks, first: bool) -> Option<Fit> {
+    let spans = loop_spans(cue, first);
+    if spans.is_empty() {
+        return None;
+    }
+    let sr = u64::from(cue.sample_rate.max(1));
+    let beat = ((60.0 / cue.bpm.max(1.0)) * sr as f64).round().max(1.0) as u64;
+    let want = cue.frames(total).max(1);
+    let mut segments: Vec<[u64; 2]> = Vec::new();
+    let mut have = 0u64;
+    'outer: while have < want {
+        for &[a, b] in &spans {
+            if have >= want || segments.len() >= LOOP_MAX_SEGMENTS {
+                break 'outer;
+            }
+            let left = want - have;
+            let len = (b - a).min(left);
+            // A tail shorter than a beat would starve the crossfade: give it to the previous
+            // piece instead (the song continues past the chorus for a moment).
+            if len < beat
+                && let Some(last) = segments.last_mut()
+                && last[1] + len <= cue.duration_frames
+            {
+                last[1] += len;
+                have += len;
+                break 'outer;
+            }
+            segments.push([a, a + len]);
+            have += len;
+        }
+    }
+    let length = have.min(want);
+    let fade = ((LOOP_FADE_SECS * sr as f64) as u64).min(length / 2).max(1);
+    let n = spans.len();
+    Some(Fit {
+        mode: FitMode::Fade,
+        length_frames: length,
+        segments,
+        crossfade_frames: beat,
+        fade_out: Some(crate::cuemap::FadeOut { start: length - fade, frames: fade }),
+        similarity: None,
+        reasons: vec![format!("Chorus loop: {n} span{} repeated", if n == 1 { "" } else { "s" })],
+        changes: "Chorus looped under the Cut".into(),
+    })
+}
+
+/// The track a template plays under a Cut `total` long ([`track_from_cue`] with the music
+/// mode): the whole song, or the chorus loop cut to `total` (the whole song when the cue map
+/// gives nothing to loop). The second value says what was done, for the message.
+pub fn track_under(cue: &CueMap, track_path: &str, total: Ticks, music: MusicMode) -> (Track, &'static str) {
+    let first = music == MusicMode::FirstChorus;
+    let fit = match music {
+        MusicMode::Whole => None,
+        MusicMode::ChorusLoop | MusicMode::FirstChorus => chorus_loop(cue, total, first),
+    };
+    let what = match (&fit, music) {
+        (Some(_), MusicMode::FirstChorus) => "the first chorus looped",
+        (Some(_), _) => "the chorus looped",
+        (None, MusicMode::Whole) => "the whole song",
+        (None, _) => "the whole song (nothing to loop)",
+    };
+    let tl = cue.timeline(fit.as_ref());
+    let track = Track {
+        id: AssetId(track_path.to_owned()),
+        name: cue.track.title.clone(),
+        bpm: Bpm::new(cue.bpm).unwrap_or(Bpm::DEFAULT),
+        duration: cue.ticks(tl.length),
+        beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
+        song_sections: tl
+            .sections
+            .iter()
+            .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
+            .collect(),
+        edit: edit_of(cue, fit.as_ref(), &tl),
+        credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
+    };
+    (track, what)
+}
+
 fn edit_of(cue: &CueMap, fit: Option<&Fit>, tl: &Timeline) -> Option<TrackEdit> {
     fit.map(|f| TrackEdit {
         sample_rate: cue.sample_rate,

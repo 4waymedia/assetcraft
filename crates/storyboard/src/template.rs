@@ -9,8 +9,18 @@
 //! through [`Storyboard::from_template`].
 //!
 //! Beats are first drafts (owner: Paul); durations are seconds, since a template has no song
-//! yet — Re-cut fits them to a track afterwards. Each bundled template has one repeating
-//! section (points, steps) whose count the user sets ([`bundled_with`], [`STEPS_RANGE`]).
+//! yet. Each bundled template has one repeating section (points, steps) whose count the user
+//! sets ([`bundled_with`], [`STEPS_RANGE`]).
+//!
+//! **Step sections (SR2, Paul 2026-11-06: "I set 10 steps, and for these templates, it should
+//! have a 'title' clip every 30 seconds… 10 titles, 1 intro, 1 outro clip, 12 title clips, and
+//! then the chorus music between each title"):** every repeating section opens with a title
+//! card ([`TITLE_SECS`]) and runs [`STEP_SECS`] in all by default ([`bundled_sized`] takes
+//! another length); its shots follow the "Varied" pattern — odd sections EST · MS · CU, even
+//! sections WS · CU · INS ([`STEP_PATTERN`]) — so the Cut moves between wide and close and a
+//! section's inset lane has shots to sit over. The intro and outro sections keep their own
+//! designed beats. With a song, the engine snaps the shots to the beat at the template's own
+//! length and attaches the whole song (the chorus loop under the sections is SR3).
 
 use crate::model::{AssetId, Clip, ClipId, Scene, SceneId, ShotType, Storyboard, Transition};
 use crate::motion::{Camera, Motion, MotionKind, MotionPreset};
@@ -41,25 +51,35 @@ pub const BUNDLED: [TemplateInfo; 3] = [
     TemplateInfo {
         id: "review",
         name: "Review",
-        description: "Hook · what it is · the points · verdict · end card (about 40 s with three points)",
+        description: "Hook · what it is · the points, a title card each · verdict · end card (about 2 min with three 30 s points)",
         steps_name: "points",
         steps: 3,
     },
     TemplateInfo {
         id: "tutorial",
         name: "Tutorial",
-        description: "Goal · setup · the steps with an insert shot each · result · recap (about 1 min with three steps)",
+        description: "Goal · setup · the steps, a title card each · result · recap (about 2 min with three 30 s steps)",
         steps_name: "steps",
         steps: 3,
     },
     TemplateInfo {
         id: "instructions",
         name: "5-minute instructions",
-        description: "Title · what you need · numbered steps with a close-up each · check · outro (about 5 min with six steps)",
+        description: "Title · what you need · numbered steps, a title card each · check · outro (about 5 min with nine 30 s steps)",
         steps_name: "steps",
-        steps: 6,
+        steps: 9,
     },
 ];
+
+/// How long a repeating section runs by default, title card included.
+pub const STEP_SECS: f64 = 30.0;
+/// Shortest and longest a repeating section can be made, in seconds.
+pub const STEP_SECS_RANGE: (u32, u32) = (10, 300);
+/// A step section's title card.
+pub const TITLE_SECS: f64 = 3.0;
+/// The "Varied" shot pattern: odd step sections take the first row, even ones the second.
+pub const STEP_PATTERN: [[ShotType; 3]; 2] =
+    [[ShotType::Est, ShotType::Ms, ShotType::Cu], [ShotType::Ws, ShotType::Cu, ShotType::Ins]];
 
 /// A bundled template by id, with its default number of sections.
 pub fn bundled(id: &str) -> Option<Storyboard> {
@@ -67,15 +87,35 @@ pub fn bundled(id: &str) -> Option<Storyboard> {
     bundled_with(id, info.steps)
 }
 
-/// A bundled template by id with `steps` repeating sections (clamped to [`STEPS_RANGE`]).
+/// A bundled template by id with `steps` repeating sections (clamped to [`STEPS_RANGE`]) of
+/// [`STEP_SECS`] each.
 pub fn bundled_with(id: &str, steps: usize) -> Option<Storyboard> {
+    bundled_sized(id, steps, STEP_SECS)
+}
+
+/// A bundled template by id with `steps` repeating sections of `step_secs` each (both clamped).
+pub fn bundled_sized(id: &str, steps: usize, step_secs: f64) -> Option<Storyboard> {
     let n = steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1);
+    let secs = step_secs.clamp(f64::from(STEP_SECS_RANGE.0), f64::from(STEP_SECS_RANGE.1));
     match id {
-        "review" => Some(review(n)),
-        "tutorial" => Some(tutorial(n)),
-        "instructions" => Some(instructions(n)),
+        "review" => Some(review(n, secs)),
+        "tutorial" => Some(tutorial(n, secs)),
+        "instructions" => Some(instructions(n, secs)),
         _ => None,
     }
+}
+
+/// One repeating section: a title card, then the pattern's three shots sharing the rest of
+/// `step_secs`. `n` is 1-based; `what` names the section ("Step", "Point"); `lines` describe
+/// the three shots in pattern order.
+fn step_section(what: &str, n: usize, step_secs: f64, lines: [&str; 3]) -> (String, Vec<Beat>) {
+    let row = STEP_PATTERN[(n + 1) % 2];
+    let each = ((step_secs - TITLE_SECS) / 3.0).max(1.0);
+    let mut beats = vec![beat(ShotType::Ttl, TITLE_SECS, format!("{what} {n}"))];
+    for (shot, line) in row.into_iter().zip(lines) {
+        beats.push(beat(shot, each, format!("{what} {n}: {line}")));
+    }
+    (format!("{what} {n}"), beats)
 }
 
 /// One clip of a template, in seconds.
@@ -138,7 +178,7 @@ fn build(name: &str, format: &str, theme: TextTheme, scenes: &[(String, Vec<Beat
 }
 
 /// Review: hook · what it is · `points` points · verdict · end card.
-pub fn review(points: usize) -> Storyboard {
+pub fn review(points: usize, step_secs: f64) -> Storyboard {
     let mut scenes: Vec<(String, Vec<Beat>)> = vec![
         (
             "Hook".into(),
@@ -156,11 +196,7 @@ pub fn review(points: usize) -> Storyboard {
         ),
     ];
     for n in 1..=points {
-        let shot = if n % 2 == 0 { ShotType::Cu } else { ShotType::Ms };
-        scenes.push((
-            format!("Point {n}"),
-            vec![titled(shot, 6.0, format!("Point {n}: what stands out"), format!("{n} · "))],
-        ));
+        scenes.push(step_section("Point", n, step_secs, ["what stands out", "in use", "the detail that decides it"]));
     }
     scenes.push((
         "Verdict".into(),
@@ -173,7 +209,7 @@ pub fn review(points: usize) -> Storyboard {
 }
 
 /// Tutorial: goal · setup · `steps` steps with an insert each · result · recap.
-pub fn tutorial(steps: usize) -> Storyboard {
+pub fn tutorial(steps: usize, step_secs: f64) -> Storyboard {
     let mut scenes: Vec<(String, Vec<Beat>)> = vec![
         (
             "Goal".into(),
@@ -191,13 +227,7 @@ pub fn tutorial(steps: usize) -> Storyboard {
         ),
     ];
     for n in 1..=steps {
-        scenes.push((
-            format!("Step {n}"),
-            vec![
-                titled(ShotType::Ms, 8.0, format!("Step {n}, start to finish"), format!("Step {n}")),
-                beat(ShotType::Ins, 4.0, format!("Step {n}, the detail")),
-            ],
-        ));
+        scenes.push(step_section("Step", n, step_secs, ["start to finish", "the hands", "the detail"]));
     }
     scenes.push((
         "Result".into(),
@@ -211,7 +241,7 @@ pub fn tutorial(steps: usize) -> Storyboard {
 
 /// 5-minute instructions: title · what you need · `steps` numbered steps with a close-up each ·
 /// check · outro.
-pub fn instructions(steps: usize) -> Storyboard {
+pub fn instructions(steps: usize, step_secs: f64) -> Storyboard {
     let mut scenes: Vec<(String, Vec<Beat>)> = vec![(
         "Title".into(),
         vec![
@@ -220,12 +250,11 @@ pub fn instructions(steps: usize) -> Storyboard {
         ],
     )];
     for n in 1..=steps {
-        scenes.push((
-            format!("Step {n}"),
-            vec![
-                titled(ShotType::Ms, 30.0, format!("Step {n}"), format!("Step {n}")),
-                beat(ShotType::Cu, 10.0, format!("Step {n}, close")),
-            ],
+        scenes.push(step_section(
+            "Step",
+            n,
+            step_secs,
+            ["the step, start to finish", "close on the work", "the result of the step"],
         ));
     }
     scenes.push((

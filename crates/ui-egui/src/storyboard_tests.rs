@@ -107,7 +107,7 @@ fn dragging_an_organizer_file_onto_a_strip_clip_places_it() {
     // First Content-panel cell: just inside the left panel, below the tabs and folder line.
     let from = Pos2::new(40.0, 150.0);
     // Clip #02 in the timeline: the strip starts 8 px in, clip #01 (title card) is 2.6 s at 44 px/s.
-    let strip_y = 860.0 - 24.0 - 150.0 / 2.0 - 12.0;
+    let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
     let to = Pos2::new(8.0 + 2.6 * 44.0 + 40.0, strip_y);
     let press = |pos, pressed| Event::PointerButton {
         pos,
@@ -1064,7 +1064,7 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
     nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
     frame(&ctx, &mut nav, Vec::new(), 0.0);
     // Tutorial with five steps, no song: the skeleton as long as it says.
-    nav.state.storyboard.start.choose_template(1, Some(5), None, None);
+    nav.state.storyboard.start.choose_template(1, Some(5), None, 30);
     frame(&ctx, &mut nav, Vec::new(), 0.1);
     crate::start_view::create_board(&mut nav);
     let board = nav.session().storyboard().cloned().expect("created");
@@ -1075,16 +1075,39 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
         5
     );
     assert!(!nav.state.storyboard.start.open);
-    // + New: Review with two points on the whole song → re-cut to 64 s with the song as the track.
+    // + New: Review with two 20 s points and the song → the whole song is the track, the
+    // template keeps its own length with every shot on the beat, and the Start screen's
+    // timeline shows the cuts and an inset slot per point (Paul, 2026-11-06).
     nav.state.storyboard.start.open = true;
-    nav.state.storyboard.start.choose_template(0, Some(2), Some(&cue_path.to_string_lossy()), None);
+    nav.state.storyboard.start.choose_template(0, Some(2), Some(&cue_path.to_string_lossy()), 20);
     frame(&ctx, &mut nav, Vec::new(), 0.2);
+    let preview = nav
+        .state
+        .storyboard
+        .start
+        .previews
+        .iter()
+        .find(|(k, _)| k.contains("template:review|2|20|"))
+        .and_then(|(_, v)| v.clone())
+        .expect("the timeline previewed the template");
+    assert!(preview["count"].as_u64().unwrap() >= 2 + 2 + 2 * 4, "{preview}");
+    let sections = preview["sections"].as_array().unwrap();
+    assert!(sections.iter().any(|sec| sec["title"] == "Point 2" && sec["shots"] == 3), "{sections:?}");
     crate::start_view::create_board(&mut nav);
     let board = nav.session().storyboard().cloned().expect("created");
     assert_eq!(board.name, "Song · Review");
     let track = board.track.as_ref().expect("the song");
     assert_eq!(track.name, "Song");
-    assert_eq!(board.total(), track.duration);
+    assert_eq!(track.duration, board.total(), "the chorus loops for the length of the Cut (SR3)");
+    assert!(track.edit.as_ref().is_some_and(|e| e.segments.len() >= 2), "{:?}", track.edit);
+    let own = assetcraft_storyboard::bundled_template_sized("review", 2, 20.0).unwrap();
+    let credits = nav.session().credits_on();
+    let expect = own.total().as_secs_f64() + if credits { 6.0 } else { 0.0 };
+    assert!(
+        (board.total().as_secs_f64() - expect).abs() < 0.01,
+        "the template's own length: {} vs {expect}",
+        board.total().as_secs_f64()
+    );
     assert_eq!(
         board.scenes.iter().filter(|s| s.song_section.as_deref().is_some_and(|n| n.starts_with("Point "))).count(),
         2
@@ -1107,7 +1130,7 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     frame(&ctx, &mut nav, Vec::new(), t);
     // Clip #01's right edge: the strip starts 8 px into the panel (inset 8.4 px), cards are
     // 1 px narrower each side, and the handle is the last 8 px of the card.
-    let strip_y = 860.0 - 24.0 - 150.0 / 2.0 - 12.0;
+    let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
     let left = 8.4 + 8.0;
     let edge = left + first as f32 * PX_PER_SEC - 1.0;
     let from = Pos2::new(edge - 3.0, strip_y);
@@ -1176,4 +1199,81 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     }
     assert_eq!(nav.session().storyboard().unwrap(), &board);
     assert!(nav.state.storyboard.resize_drag.is_none());
+}
+
+#[test]
+fn a_template_with_a_song_is_auto_filled_from_the_open_folder() {
+    let dir = cue_folder();
+    let cue_path = dir.join("song.cuemap.json");
+    let ctx = Context::default();
+    let (mut nav, files) = reaper_nav();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.run("storyboard.musicFolder", json!({ "path": dir.to_string_lossy() }));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    assert!(nav.state.storyboard.start.autofill, "on by default");
+    nav.state.storyboard.start.choose_template(1, Some(3), Some(&cue_path.to_string_lossy()), 30);
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned().expect("created");
+    assert!(board.track.is_some(), "the song is the track");
+    let (filled, fillable) = board.fill_progress();
+    assert!(fillable > 0 && filled == fillable, "filled {filled} of {fillable} from {} files", files.len());
+    assert_eq!(
+        board.clips[1].asset_ids.first().map(|a| a.0.clone()),
+        Some(files[0].to_string_lossy().into_owned()),
+        "in order"
+    );
+    // Off: the skeleton stays empty.
+    nav.state.storyboard.start.choose_template(1, Some(3), Some(&cue_path.to_string_lossy()), 30);
+    nav.state.storyboard.start.autofill = false;
+    crate::start_view::create_board(&mut nav);
+    assert_eq!(nav.session().storyboard().unwrap().fill_progress().0, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn dropping_an_organizer_file_on_a_strip_inset_slot_sets_the_sections_inset() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    // The environments folder has the 2 s MOV: dropping it sizes the section to 2 s.
+    let env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let env = env.canonicalize().unwrap_or(env);
+    assert!(nav.open_folder(&env));
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    // Find the MOV's cell in the Content panel by its id.
+    let mov = env.join("snow_clearing_flythrough.mov");
+    let cell = ctx.read_response(crate::strip_view::asset_cell_id(&mov)).map(|r| r.rect).expect("the MOV's cell");
+    let from = cell.center();
+    // The INSET row sits 4 px under the strip; section 1's slot spans its shots after the card.
+    let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
+    let inset_y = strip_y + 150.0 / 2.0 + 4.0 + 10.0;
+    let to = Pos2::new(8.0 + 2.6 * 44.0 + 40.0, inset_y);
+    let press = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        let p = from + (to - from) * (k as f32 / 8.0);
+        steps.push(vec![Event::PointerMoved(p)]);
+    }
+    steps.push(vec![press(to, false)]);
+    steps.push(Vec::new());
+    for events in steps {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    let board = nav.session().storyboard().unwrap();
+    let scene = board.scenes[0].id;
+    let inset = board.scenes[0].inset.as_ref().expect("dropped on section 1's slot");
+    assert!(inset.asset.as_ref().unwrap().0.ends_with("snow_clearing_flythrough.mov"));
+    assert_eq!(inset.kind, assetcraft_storyboard::InsetKind::Video);
+    let span: f64 = board.inset_span(scene).map(|c| c.duration.as_secs_f64()).sum();
+    assert!((span - 2.0).abs() < 0.01, "the section took the recording's 2 s: {span}");
+    assert!(board.clips[0].shot_type == assetcraft_storyboard::ShotType::Ttl, "the title card is left alone");
 }

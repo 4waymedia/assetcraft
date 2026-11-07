@@ -1,6 +1,6 @@
 # Storyboard mode: implementation plan
 
-_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize) and SR2a (inset model + commands) done; SR2b the Strip's INSET row next_
+_2026-10-15 · Stage 4 (Plan: Storyboard mode) · steps 1, 2, 4, 5, G1, TC1, A1, music playback, S1, SF1a/SF2/SF5, ST1–ST5, SR1 (resize), SR2a (inset model + commands) SR2a′ (30 s titled step sections, template cuts + INSET row on the Start timeline) SR3 (chorus loop) and SR2b (Strip INSET + AUDIO rows, drop, a video's length) done; SR2c the Inspector's INSET section + Viewer inset next_
 
 - **Scope:** AssetCraft's Storyboard mode, built in egui from the Claude Design handoff
   ([design/storyboard-mode-handoff.md](design/storyboard-mode-handoff.md)). Covers storyline
@@ -329,14 +329,99 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   stretches the section's shots pro rata to the recording, title cards kept, every shot ≥ 0.5 s;
   one undo step for file + stretch together; unchanged → `changed: false`, no step) and
   `storyboard.insetClear {scene, remove?}` (empty the slot, or drop the lane). Tests: storyboard
-  1, engine 3. **SR2b (next) — the Strip's INSET row** under the STORYBOARD row (one bar per
+  1, engine 3. **Paul, 2026-11-06, testing:** "when I pick a song, I still want the storyboard
+  to fill" → the Start screen's **Auto-fill shots from the open folder** checkbox now shows for
+  templates too and Create runs `storyboard.autofill` after `storyboard.new {template}` (only
+  when the folder has files); "the length option can still apply the same for templates as it
+  does for presets" → a template's LENGTH chips are a preset's: each fit with its clip count,
+  "can't build" when the fit is shorter than the template's shots at a beat each (titles keep
+  their seconds), chosen through `set_length` (playhead back, Cut preview stopped), the default
+  the shortest fit the template's own length fits in (else the whole song), and 3 · CREATE
+  shows "Song · Tutorial · 1:00" as it does for a preset. **Framing (Paul): "Templates are just
+  an extension of the presets… with two additional features: format for title → section, and
+  an inset lane for additional video/assets."** So every preset control belongs to a template
+  too; still to align: the timeline preview strip and the Cut pace / Transitions / Title cards /
+  Shape controls on the template path (one step: `storyboard.new {template}` takes `density`
+  and `shape` and runs the preview, logged as SR2e). **D-SR1 (Paul, 2026-11-06): "We could just
+  have the inset lane there at all times"** — the INSET row is always drawn (every section
+  with shots has a slot, empty or not), so no "Leave empty slots to fill later" setting and no
+  lane on / off; `Scene.inset: None` simply draws as an empty slot. **SR2a′ built 2026-11-06
+  (Paul, testing: "When I click on a template… I want to see the cuts in the storyboard, and
+  the inset section… it is empty"; "I set 10 steps, and for these templates, it should have a
+  'title' clip every 30 seconds… 10 titles, 1 intro, 1 outro clip, 12 title clips, and then the
+  chorus music between each title"; "We have shot types: cu, ws, ttl, ws, ins"; "I'm open to
+  suggestions"):** **D-SR2 — a template's length comes from its steps, not the song.** Every
+  repeating section is a **title card (`TITLE_SECS` 3 s) + three shots** sharing the rest of
+  `STEP_SECS` (30 s; `bundled_sized(id, steps, secs)`, 10–300 s), the shots on the **"Varied"
+  pattern** — odd sections EST · MS · CU, even sections WS · CU · INS (`STEP_PATTERN`, the
+  mock-up's Shot pattern; a section's inset has shots to sit over) — so 10 steps = 10 titles +
+  the intro's and the outro's = 12 title cards, ≈ 5:20 with the Tutorial's intro and outro.
+  The intro and outro sections keep their designed beats. With a song, `storyboard.new
+  {template, cueMap, stepSeconds?}` attaches the **whole song** as the track and snaps the
+  shots to its beat at the template's own length (`template_cmd::fit_to_cue`: `recut` to
+  `board.total()`, title cards kept); the song plays from the top and ends where it ends —
+  silence after (the export's `Program` pads) — until **SR3 loops the chorus between the
+  titles**. `storyboard.preview {cueMap, template, steps?, stepSeconds?, credits?}` builds the
+  same board, so the Start screen's timeline shows the cuts for a template (it showed "Can't
+  build at this length": the preview was pacing-only), and every preview now carries
+  `sections: [{scene, title, start, seconds, shots, inset?}]`; the timeline draws an **INSET
+  row** between STORYBOARD and AUDIO (D-SR1: always; a slot per section with shots, named by
+  its title, "drop b-roll, an interview or a host here"; `TIMELINE_H` + 22). The template
+  LENGTH chips became **STEP LENGTH** (20 s · 30 s · 45 s · 1:00, `STEP_CHOICES`,
+  `StartUi.step_secs`, `set_step_secs`) with the total they make ("10 steps · 42 clips ·
+  5:20"); the song-fit chips, `template_fit` and the 3 · CREATE song line for templates are
+  gone (one hour old). Bundled defaults: Review 3 points ≈ 2 min, Tutorial 3 steps ≈ 2 min,
+  Instructions **9** steps ≈ 5 min. Tests: storyboard (`tutorial` with 10 steps: a title card
+  opens each, the pattern, 30 s each, 12 cards; 45 s and the clamp), engine
+  (`a_template_with_a_cue_map_takes_the_song_as_its_track_and_snaps_to_its_beat`: whole song,
+  own length, every shot a whole number of beats, `stepSeconds` 20 and the refusal), ui-egui
+  (the Start screen's timeline previews the template with `sections`, Create keeps the
+  template's length with the whole song as the track). **SR3 chorus loop built 2026-11-06** (Paul: "Is it possible to show the loop in
+  the timeline?… the audio is not placing the 'chorus' audio between the 'title' → red clips"):
+  `generate::chorus_loop(cue, total, first)` → a `Fit` of every chorus span (label contains
+  "chorus"; else the highest-energy section; none → `None`), each snapped to whole bars on the
+  downbeat grid, played in order and repeated to the Cut's length, a one-beat crossfade at
+  every splice, the last piece cut to length (a tail under a beat goes to the previous piece),
+  a 2 s fade at the end (`LOOP_FADE_SECS`), at most `LOOP_MAX_SEGMENTS` 2048 pieces;
+  `MusicMode { Whole, ChorusLoop (default), FirstChorus }`; `track_under(cue, path, total,
+  music)` → the `Track` (as long as the Cut, the loop as its `TrackEdit`, beats in every
+  repeat — `CueMap::timeline` now maps points through every segment) and a word for the
+  message. Engine: `music?: chorus | firstChorus | whole` on `storyboard.new {template}` and
+  `storyboard.preview {template}` (`template_cmd::fit_to_cue` → `Fitted { report, music }`;
+  `fitted.music` in the result; the preview's `fitChanges` reads "n shots snapped to the beat
+  · music: the chorus looped"). Nothing downstream changed: Watch your Cut and the export
+  already play `TrackEdit` segments with crossfades (`audio::Program`), and the Start screen's
+  AUDIO lane already draws each piece with its section band and a splice mark — so the loop
+  shows as repeating CHORUS pieces under the steps; the line under STEP LENGTH says "Music:
+  the chorus looped". Ducking and the per-section Music / Voice sliders wait for SR2b/c (an
+  inset with audio). Tests: storyboard (`the_chorus_loops_under_a_cut_longer_than_the_song…`:
+  pieces, crossfade, fade, short Cut, sub-beat tail, whole, two choruses in order / first
+  only, no chorus → loudest, no sections → none), engine (default loop as long as the Cut,
+  `whole`, refusal), ui-egui (Create with the song → the loop). **SR2b built 2026-11-06** (Paul: "when the storyboard is created, we need to
+  have the audio track, and the inset track available"): the Strip's timeline grew two rows
+  under the strip (`strip_view::inset_row`, `audio_row`; `ROWS_H`) — **INSET**: a slot per
+  section with shots, spanning them, named by the section, blue once a file is set; an
+  Organizer drag dropped on it runs `storyboard.inset {scene, asset}`; **AUDIO**: the track
+  under the Cut in cut time — its section bands (the loop's one CHORUS band), each piece of the
+  edit with its waveform (`track.peaks`, shared with the Start screen), a splice mark "→ m:ss"
+  where the music jumps, the fade-out ramp; "No track" when there is none. **The section
+  takes its recording's length:** `probe::media_duration(services, path)` reads MP4 / MOV
+  `mvhd` through bounded `read_range`s (top-level boxes walked, `mdat` skipped by size, `moov`
+  wherever it is, ≤ 1 MiB; hostile sizes refused), and `storyboard.inset` with a new video
+  file and no `seconds` stretches the section to it (`fit`, on by default; `kind` read off the
+  extension; AVI / MKV lengths are "unknown" for now and the section keeps its length —
+  `assetSeconds` in the result). Tests: probe 2, engine 1 (`a_real_video_sizes_its_section…`),
+  ui-egui 1 (the MOV dragged from the Content panel onto section 1's slot → kind video, the
+  section 2 s, the card untouched). **SR2c (next) — the Inspector's INSET section** (kind,
+  slot, corner chips, S / M / L, Swap, Mix audio, Clear) and the Viewer / compositor corner
+  draw; the ducking rule with Music / Voice per section. under the STORYBOARD row (one bar per
   section with the file's name or "Drop b-roll, an interview or a host here"; a drop target for
   an Organizer drag — a video's length from its `mvhd` box stretches the section) and the
   SECTIONS row from the title cards. **SR2c** — the Inspector's INSET section (kind, slot, corner
   chips, S / M / L, Swap, Mix audio) and the Viewer / compositor corner draw (video: poster
   frame; graphic: full quality in the export). **SR2d** — the Start screen's INSET panel (`None ·
-  Graphic · Video`, Add to `every step · steps + review · first step only`, corner, size, "Leave
-  empty slots to fill later", "Mix the inset video's audio in") → `storyboard.new {inset}`;
+  Graphic · Video`, Add to `every step · steps + review · first step only`, corner, size, "Mix the inset
+  video's audio in") → `storyboard.new {inset}` (D-SR1: slots always exist);
   then, as their own steps, the AUDIO TRACK panel (`song · voiceover · song + voiceover · none`,
   cut on the beat, title cards on song sections, fade out under the credits), TITLE CARDS
   (opening · between steps · review · credits; 2 / 4 / 6 s), NUMBERING (Step 1 · Step one · name

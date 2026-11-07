@@ -4,7 +4,7 @@
 //!
 //! Draws only. The music list is `storyboard.tracks` (the music folder plus the folder open in
 //! the Organizer; `storyboard.musicFolder` sets the folder), each card's strip is
-//! `storyboard.preview`, and Create runs `storyboard.generate` (then `storyboard.autofill` when
+//! `storyboard.preview`, and Create runs `storyboard.generate` or `storyboard.new {template}` (then `storyboard.autofill` when
 //! asked) or `storyboard.new`. Shown whenever Storyboard mode has no board, and from the mode
 //! bar's **＋ New**.
 //!
@@ -55,7 +55,7 @@ pub(crate) struct StartUi {
     pub(crate) track: Option<String>,
     /// Chosen length (`None` = the whole track).
     length: Option<u32>,
-    autofill: bool,
+    pub(crate) autofill: bool,
     name: String,
     folder_text: String,
     /// `storyboard.tracks`, fetched when the screen first shows and after a folder change.
@@ -65,7 +65,7 @@ pub(crate) struct StartUi {
     /// Shape overrides on top of the style (cleared when a preset is picked).
     shape: Shape,
     /// `storyboard.preview` results by `cue|pacing|seconds|density|shape`.
-    previews: HashMap<String, Option<Value>>,
+    pub(crate) previews: HashMap<String, Option<Value>>,
     /// The timeline's waveform: `(audio path, track.peaks answer)` once ready or failed.
     pub(crate) waveform: Option<(String, Value)>,
     /// A scrub drag held on the timeline: where, in cut seconds.
@@ -80,6 +80,8 @@ pub(crate) struct StartUi {
     pub(crate) seen_analyse: (usize, u64),
     /// How many of the chosen template's repeating section (points, steps); `None` = its default.
     pub(crate) steps: Option<usize>,
+    /// How long each of them runs, title card included (SR2; `STEP_SECS` by default).
+    pub(crate) step_secs: u32,
 }
 
 impl Default for StartUi {
@@ -94,6 +96,7 @@ impl Default for StartUi {
             folder_text: String::new(),
             library: None,
             pace: PACE_PRESET,
+            step_secs: assetcraft_storyboard::STEP_SECS as u32,
             shape: Shape::default(),
             previews: HashMap::new(),
             waveform: None,
@@ -151,12 +154,12 @@ impl StartUi {
         index: usize,
         steps: Option<usize>,
         cue_map: Option<&str>,
-        seconds: Option<u32>,
+        step_secs: u32,
     ) {
         self.style = Style::Template(index);
         self.steps = steps;
         self.track = cue_map.map(str::to_owned);
-        self.length = seconds;
+        self.step_secs = step_secs;
     }
 
     /// The generator's `density` for the cut pace step.
@@ -297,6 +300,22 @@ pub(crate) fn set_length(nav: &mut Navigator, seconds: Option<u32>) {
     start.scrub = None;
 }
 
+/// Choose a step length for a template (SR2). The timeline shows a new cut, so the playhead
+/// goes back and a Cut preview stops, as [`set_length`].
+pub(crate) fn set_step_secs(nav: &mut Navigator, secs: u32) {
+    if nav.session.preview_mode() == Some(PreviewMode::Cut) {
+        nav.run("track.preview", json!({ "path": null }));
+    }
+    let start = &mut nav.state.storyboard.start;
+    start.step_secs = secs;
+    start.cursor = 0.0;
+    start.scrub = None;
+}
+
+fn mmss_f(secs: f64) -> String {
+    format!("{}:{:02}", (secs / 60.0) as u32, (secs % 60.0).round() as u32)
+}
+
 /// Choose the track whose cue map is `cue`. A preview of another song stops (Paul, 2026-10-17:
 /// "when the user clicks another song we need to stop the preview of the previous song"); a held
 /// scrub ends.
@@ -330,6 +349,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui) {
             let secs = nav.state.storyboard.start.length;
             preview(nav, cue, p, secs)
         }
+        (Style::Template(i), Some(cue)) => template_preview(nav, cue, i),
         _ => None,
     };
     let peaks = crate::start_timeline::peaks(nav, &audio);
@@ -499,11 +519,23 @@ fn template_cards(nav: &mut Navigator, ui: &mut Ui) {
                 let start = &mut nav.state.storyboard.start;
                 start.style = Style::Template(i);
                 start.steps = None;
-                // A template starts on the whole song; the length chips narrow it.
-                start.length = None;
             }
         }
     });
+}
+
+/// Step lengths offered, in seconds (Paul, 2026-11-06: "a 'title' clip every 30 seconds").
+pub(crate) const STEP_CHOICES: [u32; 4] = [20, 30, 45, 60];
+
+/// The chosen template at its steps and step length: its clip count and its length in all.
+fn template_length(index: usize, steps: Option<usize>, step_secs: u32, credits: bool) -> Option<(usize, f64)> {
+    let t = BUNDLED.get(index)?;
+    let mut board =
+        assetcraft_storyboard::bundled_template_sized(t.id, steps.unwrap_or(t.steps), f64::from(step_secs))?;
+    if credits {
+        board.append_credits(&assetcraft_storyboard::credits_template());
+    }
+    Some((board.clips.len(), board.total().as_secs_f64()))
 }
 
 /// How many points or steps the chosen template gets (Paul, 2026-11-06: "an easy way to set
@@ -521,9 +553,9 @@ fn steps_control(nav: &mut Navigator, ui: &mut Ui, index: usize, has_track: bool
             steps += 1;
         }
         ui.weak(if has_track {
-            "the song's length is shared out over them"
+            "a title card opens each; the shots sit on the song's beat"
         } else {
-            "about as long as the template says; add a song to fit it"
+            "a title card opens each; add a song for the beat and the music"
         });
     });
     nav.state.storyboard.start.steps = Some(steps.clamp(STEPS_RANGE.0, STEPS_RANGE.1));
@@ -671,6 +703,29 @@ fn preview(nav: &mut Navigator, cue: &str, pacing: Pacing, secs: Option<u32>) ->
     v
 }
 
+/// `storyboard.preview {template}` for the chosen template, steps, credits and length, cached
+/// as [`preview`] is (Paul, 2026-11-06: "When I click on a template… I want to see the cuts in
+/// the storyboard, and the inset section").
+fn template_preview(nav: &mut Navigator, cue: &str, index: usize) -> Option<Value> {
+    let t = BUNDLED.get(index)?;
+    let steps = nav.state.storyboard.start.steps.unwrap_or(t.steps);
+    let step_secs = nav.state.storyboard.start.step_secs;
+    let credits = nav.session.credits_on();
+    let key = format!("{cue}|template:{}|{steps}|{step_secs}|{credits}", t.id);
+    if let Some(v) = nav.state.storyboard.start.previews.get(&key) {
+        return v.clone();
+    }
+    let v = nav
+        .session
+        .execute(
+            "storyboard.preview",
+            &json!({ "cueMap": cue, "template": t.id, "steps": steps, "stepSeconds": step_secs, "credits": credits }),
+        )
+        .ok();
+    nav.state.storyboard.start.previews.insert(key, v.clone());
+    v
+}
+
 fn cards(nav: &mut Navigator, ui: &mut Ui) {
     let style = nav.state.storyboard.start.style;
     let Style::Pacing(pacing) = style else {
@@ -686,26 +741,37 @@ fn cards(nav: &mut Navigator, ui: &mut Ui) {
             ),
             _ => ("Blank storyboard", "1 title card · add a track later"),
         };
-        if let (Style::Template(_), Some(track)) = (style, selected_track(nav)) {
-            // The song's fit lengths, as chips (no preview: a template's clips are its own).
-            let track_secs = track["seconds"].as_f64().unwrap_or(0.0);
-            let lengths: Vec<Option<u32>> = track["lengths"]
-                .as_array()
-                .map(|a| a.iter().map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok())).collect())
-                .unwrap_or_else(|| vec![None]);
-            if !lengths.contains(&nav.state.storyboard.start.length) {
-                nav.state.storyboard.start.length = None;
-            }
+        if let Style::Template(i) = style {
+            // A template's length comes from its steps, not the song (SR2, Paul: "I set 10
+            // steps… a 'title' clip every 30 seconds… 12 title clips, and then the chorus
+            // music between each title"): STEP LENGTH chips, and the total they make.
+            let steps = nav.state.storyboard.start.steps;
+            let credits = nav.session.credits_on();
+            let chosen_secs = nav.state.storyboard.start.step_secs;
             ui.horizontal(|ui| {
-                section_label(ui, "LENGTH");
+                section_label(ui, "STEP LENGTH");
                 ui.add_space(6.0);
-                for secs in &lengths {
-                    let chosen = nav.state.storyboard.start.length == *secs;
-                    if ui.selectable_label(chosen, length_label(*secs, track_secs)).clicked() && !chosen {
-                        nav.state.storyboard.start.length = *secs;
+                for secs in STEP_CHOICES {
+                    let chosen = chosen_secs == secs;
+                    let label =
+                        if secs >= 60 { format!("{}:{:02}", secs / 60, secs % 60) } else { format!("{secs} s") };
+                    if ui.selectable_label(chosen, label).clicked() && !chosen {
+                        set_step_secs(nav, secs);
                     }
                 }
+                if let Some((clips, total)) = template_length(i, steps, chosen_secs, credits) {
+                    let n = steps.unwrap_or(BUNDLED.get(i).map_or(0, |t| t.steps));
+                    let what = BUNDLED.get(i).map_or("steps", |t| t.steps_name);
+                    ui.weak(format!("{n} {what} · {clips} clips · {}", mmss_f(total)));
+                }
             });
+            // What the song does under it (SR3): "Music: the chorus looped".
+            if let Some(cue) = nav.state.storyboard.start.track.clone()
+                && let Some(p) = template_preview(nav, &cue, i)
+                && let Some(c) = p["fitChanges"].as_str()
+            {
+                ui.label(RichText::new(c).small().color(ui.visuals().weak_text_color()));
+            }
             ui.add_space(4.0);
         }
         let (rect, _) = ui.allocate_exact_size(CARD, Sense::hover());
@@ -807,7 +873,9 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
                 .hint_text("Track · Style"),
         );
         ui.add_space(8.0);
-        if matches!(style, Style::Pacing(_)) {
+        // Pacings and templates both come out as empty shots; the open folder fills them
+        // (Paul, 2026-11-06: "when I pick a song, I still want the storyboard to fill").
+        if matches!(style, Style::Pacing(_) | Style::Template(_)) {
             let files = nav.session.items().iter().filter(|e| e.kind == assetcraft_fs::EntryKind::File).count();
             ui.checkbox(
                 &mut nav.state.storyboard.start.autofill,
@@ -865,6 +933,9 @@ pub(crate) fn create_board(nav: &mut Navigator) {
     let (style, track, length, autofill, density, shape) =
         (start.style, start.track.clone(), start.length, start.autofill, start.density(), start.shape);
     let credits = nav.session.credits_on();
+    // Auto-fill only when there is something to fill with: an empty Organizer isn't an error.
+    let files = nav.session.items().iter().filter(|e| e.kind == assetcraft_fs::EntryKind::File).count();
+    let autofill = autofill && files > 0;
     let ok = match style {
         Style::Pacing(p) => {
             let Some(cue) = track else { return };
@@ -887,16 +958,18 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             if let Some(steps) = nav.state.storyboard.start.steps {
                 params["steps"] = json!(steps);
             }
+            params["stepSeconds"] = json!(nav.state.storyboard.start.step_secs);
             if let Some(cue) = track {
                 params["cueMap"] = json!(cue);
-                if let Some(secs) = length {
-                    params["seconds"] = json!(secs);
-                }
             }
             if !name.is_empty() {
                 params["name"] = json!(name);
             }
-            nav.run("storyboard.new", params).is_some()
+            let made = nav.run("storyboard.new", params).is_some();
+            if made && autofill {
+                nav.run("storyboard.autofill", json!({}));
+            }
+            made
         }
         Style::Sample => nav.run("storyboard.new", json!({ "sample": true, "credits": credits })).is_some(),
         Style::Blank => {

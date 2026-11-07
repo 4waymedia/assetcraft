@@ -908,7 +908,7 @@ fn motion_refuses_out_of_range_and_round_trips() {
 
 #[test]
 fn the_bundled_templates_are_valid_boards_with_no_assets_and_the_promised_length() {
-    for (info, secs) in BUNDLED.iter().zip([40.0, 60.0, 300.0]) {
+    for (info, secs) in BUNDLED.iter().zip([120.0, 120.0, 300.0]) {
         let t = bundled_template(info.id).unwrap_or_else(|| panic!("{}", info.id));
         assert!(t.template && t.track.is_none() && t.asset_refs().next().is_none(), "{}", info.id);
         assert_eq!(t.name, info.name);
@@ -924,6 +924,28 @@ fn the_bundled_templates_are_valid_boards_with_no_assets_and_the_promised_length
         assert_eq!(back, t);
     }
     assert!(bundled_template("nope").is_none());
+    // Step sections (SR2): a title card every `STEP_SECS`, then the pattern's three shots.
+    let t = bundled_template_with("tutorial", 10).unwrap();
+    let steps: Vec<&Scene> =
+        t.scenes.iter().filter(|sc| sc.song_section.as_deref().is_some_and(|n| n.starts_with("Step "))).collect();
+    assert_eq!(steps.len(), 10);
+    for (i, sc) in steps.iter().enumerate() {
+        let clips: Vec<&Clip> = t.clips.iter().filter(|c| c.scene_id == sc.id).collect();
+        assert_eq!(clips[0].shot_type, ShotType::Ttl, "a title card opens step {}", i + 1);
+        assert_eq!(clips[0].description, format!("Step {}", i + 1));
+        let shots: Vec<ShotType> = clips[1..].iter().map(|c| c.shot_type).collect();
+        assert_eq!(shots, STEP_PATTERN[i % 2], "step {} follows the pattern", i + 1);
+        let total: f64 = clips.iter().map(|c| c.duration.as_secs_f64()).sum();
+        assert!((total - STEP_SECS).abs() < 0.01, "step {} is {total} s", i + 1);
+    }
+    assert_eq!(t.clips.iter().filter(|c| c.shot_type == ShotType::Ttl).count(), 12, "10 step titles + intro + outro");
+    // Another step length, clamped to the range.
+    let t = bundled_template_sized("instructions", 2, 45.0).unwrap();
+    let step: f64 = t.clips.iter().filter(|c| c.scene_id == t.scenes[1].id).map(|c| c.duration.as_secs_f64()).sum();
+    assert!((step - 45.0).abs() < 0.01);
+    let t = bundled_template_sized("review", 1, 1.0).unwrap();
+    let step: f64 = t.clips.iter().filter(|c| c.scene_id == t.scenes[2].id).map(|c| c.duration.as_secs_f64()).sum();
+    assert!((step - f64::from(STEP_SECS_RANGE.0)).abs() < 0.01);
     // The count of the repeating section is the user's: two points, eight steps, clamped.
     assert_eq!(bundled_template_with("review", 2).unwrap().scenes.len(), 2 + 2 + 1);
     assert_eq!(bundled_template_with("tutorial", 8).unwrap().scenes.len(), 2 + 8 + 1);
@@ -1024,4 +1046,67 @@ fn a_section_inset_spans_its_shots_not_its_title_card_and_older_boards_load() {
     assert!(
         InsetSize::Small.share() < InsetSize::Medium.share() && InsetSize::Medium.share() < InsetSize::Large.share()
     );
+}
+
+#[test]
+fn the_chorus_loops_under_a_cut_longer_than_the_song_and_the_track_carries_it() {
+    use cue::{BAR, BEAT, SR};
+    let m = cue::map();
+    // The chorus is bars 24–40 (32 s); a 100 s Cut needs it three times, the last piece cut.
+    let total = Ticks::from_secs(100).unwrap();
+    let fit = chorus_loop(&m, total, false).expect("a chorus to loop");
+    assert_eq!(fit.length_frames, 100 * SR);
+    assert_eq!(fit.segments.len(), 4, "32 + 32 + 32 + 4 s: {:?}", fit.segments);
+    assert_eq!(fit.segments[0], [24 * BAR, 40 * BAR]);
+    assert_eq!(fit.segments[1], [24 * BAR, 40 * BAR]);
+    assert_eq!(fit.segments[2], [24 * BAR, 40 * BAR]);
+    assert_eq!(fit.segments[3], [24 * BAR, 24 * BAR + 4 * SR]);
+    assert_eq!(fit.crossfade_frames, BEAT, "a beat at each splice");
+    let fade = fit.fade_out.unwrap();
+    assert_eq!((fade.start, fade.frames), (98 * SR, 2 * SR));
+    assert_eq!(fit.mode, FitMode::Fade);
+    // The track under a 100 s Cut: as long as the Cut, every piece labelled Chorus, beats in
+    // every repeat.
+    let (track, what) = track_under(&m, "/music/song.wav", total, MusicMode::ChorusLoop);
+    assert_eq!(what, "the chorus looped");
+    assert_eq!(track.duration, total);
+    assert!(track.song_sections.iter().all(|s| s.name == "Chorus"), "{:?}", track.song_sections);
+    assert_eq!(track.song_sections.len(), 1, "same-labelled neighbours merge into one Chorus band");
+    assert_eq!((track.song_sections[0].start, track.song_sections[0].end), (Ticks::ZERO, total));
+    assert_eq!(track.beat_grid.len(), 200, "two beats a second for 100 s");
+    let edit = track.edit.as_ref().unwrap();
+    assert_eq!(edit.segments, fit.segments);
+    assert_eq!(edit.length_frames, 100 * SR);
+    // Shorter than one chorus: one piece, cut.
+    let short = chorus_loop(&m, Ticks::from_secs(10).unwrap(), false).unwrap();
+    assert_eq!(short.segments, vec![[24 * BAR, 24 * BAR + 10 * SR]]);
+    // A tail shorter than a beat goes to the previous piece.
+    let odd = chorus_loop(&m, Ticks::from_secs_f64(32.25).unwrap(), false).unwrap();
+    assert_eq!(odd.segments, vec![[24 * BAR, 40 * BAR + SR / 4]]);
+    assert_eq!(odd.length_frames, 32 * SR + SR / 4);
+    // Whole: the song from the top, no edit, its own length.
+    let (whole, what) = track_under(&m, "/music/song.wav", total, MusicMode::Whole);
+    assert_eq!(what, "the whole song");
+    assert_eq!(whole.duration, Ticks::from_secs(128).unwrap());
+    assert!(whole.edit.is_none());
+    // Two choruses: both in order, then again; first only takes the first.
+    let mut two = m.clone();
+    two.sections[3].label = "Chorus".into(); // bars 40–56 too
+    let fit = chorus_loop(&two, Ticks::from_secs(70).unwrap(), false).unwrap();
+    assert_eq!(fit.segments, vec![[24 * BAR, 40 * BAR], [40 * BAR, 56 * BAR], [24 * BAR, 24 * BAR + 6 * SR]]);
+    let fit = chorus_loop(&two, Ticks::from_secs(70).unwrap(), true).unwrap();
+    assert_eq!(fit.segments, vec![[24 * BAR, 40 * BAR], [24 * BAR, 40 * BAR], [24 * BAR, 24 * BAR + 6 * SR]]);
+    // No chorus: the highest-energy section; no sections: nothing to loop → the whole song.
+    let mut none = m.clone();
+    for s in &mut none.sections {
+        s.label = s.label.replace("Chorus", "Build");
+    }
+    let fit = chorus_loop(&none, Ticks::from_secs(10).unwrap(), false).unwrap();
+    assert_eq!(fit.segments[0][0], 24 * BAR, "the Build at energy 1.0");
+    none.sections.clear();
+    assert!(chorus_loop(&none, Ticks::from_secs(10).unwrap(), false).is_none());
+    let (_, what) = track_under(&none, "/music/song.wav", total, MusicMode::ChorusLoop);
+    assert_eq!(what, "the whole song (nothing to loop)");
+    assert_eq!(MusicMode::parse("firstChorus"), Some(MusicMode::FirstChorus));
+    assert_eq!(MusicMode::default().id(), "chorus");
 }

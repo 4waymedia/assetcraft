@@ -18,6 +18,10 @@
 //!   under it, and reaching the end runs `storyboard.pause {at: total}`.
 //! - **Re-cut:** clip widths animate over 0.4 s to their new lengths, and the result shows as a
 //!   toast over the timeline for 3.8 s.
+//! - **INSET row (SR2b, D-SR1 always there):** under the strip, one slot per section with
+//!   shots, spanning them; drop an Organizer file on it → `storyboard.inset {scene, asset}` (a
+//!   video's own length sizes the section). **AUDIO row:** the track under the Cut — each piece
+//!   of its edit (the chorus loop, SR3) with its waveform, section bands and splice marks.
 //! - **Resize (SR1):** dragging a card's right edge sets that clip's length through
 //!   `storyboard.resize` when the drag ends (one undo step); with a track the edge snaps to
 //!   whole beats, Shift drags free in tenths of a second. The Inspector's Duration field runs
@@ -33,7 +37,7 @@ use crate::storyboard_view::{
 use crate::thumbnails::Cell;
 use assetcraft_engine::BoardView;
 use assetcraft_fs::EntryKind;
-use assetcraft_storyboard::{Clip, ClipId, ShotType, Storyboard, Ticks, next_empty};
+use assetcraft_storyboard::{Clip, ClipId, SceneId, ShotType, Storyboard, Ticks, next_empty};
 use assetcraft_thumbs::ThumbKey;
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
@@ -51,8 +55,13 @@ pub(crate) const PX_PER_SEC: f32 = 44.0;
 const STRIP_H: f32 = 150.0;
 const RULER_H: f32 = 20.0;
 const MARKER_H: f32 = 18.0;
+/// The INSET and AUDIO rows under the strip (SR2b; Paul, 2026-11-06: "when the storyboard is
+/// created, we need to have the audio track, and the inset track available").
+const INSET_H: f32 = 20.0;
+const AUDIO_H: f32 = 40.0;
+pub(crate) const ROWS_H: f32 = INSET_H + AUDIO_H + 8.0;
 const CONTROLS_H: f32 = 30.0;
-const TIMELINE_H: f32 = RULER_H + MARKER_H + STRIP_H + 24.0;
+const TIMELINE_H: f32 = RULER_H + MARKER_H + STRIP_H + ROWS_H + 24.0;
 const NEXT_FILL: Color32 = Color32::from_rgb(0x1f, 0x33, 0x50);
 /// Picture-to-music sync: drift beyond this snaps the picture to the music; less is slewed away
 /// at this fraction per repaint (≈ 60 ms to close a 20 ms gap at 60 Hz, invisible).
@@ -719,6 +728,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let mut select: Option<ClipId> = None;
     let mut scrub: Option<(f64, crate::timebar::Scrub)> = None;
     let mut drop: Option<(ClipId, String)> = None;
+    let mut inset_drop: Option<(SceneId, String)> = None;
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let mut resize: Option<ResizeDrag> = nav.state.storyboard.resize_drag;
     let mut resized: Option<ResizeDrag> = None;
@@ -729,7 +739,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
         .auto_shrink([false, false])
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
-            let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H), Sense::hover());
+            let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H + ROWS_H), Sense::hover());
             let left = area.left() + 8.0;
             let to_secs = |x: f32| (((x - left) / PX_PER_SEC).max(0.0) as f64).min(total.max(0.0) as f64);
             // Ruler and scene-marker row: click or drag to move the playhead (finding B3).
@@ -752,6 +762,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             let marker_y = area.top() + RULER_H + 2.0;
             let mut prev_scene = None;
             let spans = clip_spans(board, left, Some(&ctx), resize);
+            inset_drop = inset_row(ui, board, &spans, strip_top + STRIP_H + 4.0, left);
+            audio_row(nav, ui, board, strip_top + STRIP_H + 4.0 + INSET_H + 4.0, left, width);
             for ((id, x, w), (n, clip)) in spans.into_iter().zip(board.clips.iter().enumerate()) {
                 if prev_scene != Some(clip.scene_id) && clip.text_kind().is_some() {
                     let title = board.scene_title(clip.scene_id).unwrap_or_default();
@@ -832,12 +844,200 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     if let Some(d) = resized {
         commit_resize(nav, d);
     }
+    if let Some((scene, asset)) = inset_drop {
+        nav.run("storyboard.inset", json!({ "scene": scene.0, "asset": asset }));
+    }
     if let Some((clip, to)) = switch {
         crate::text_view::switch_kind(nav, &clip, to);
     } else if let Some((clip, asset)) = drop {
         nav.run("storyboard.place", json!({ "asset": asset, "clip": clip.0 }));
     } else if let Some(id) = select {
         nav.run("storyboard.select", json!({ "clip": id.0, "extend": shift }));
+    }
+}
+
+/// The INSET row (SR2b): a slot per section with shots, spanning them, named by the section;
+/// a drop target for an Organizer file. Returns a drop to run.
+fn inset_row(
+    ui: &mut Ui,
+    board: &Storyboard,
+    spans: &[(ClipId, f32, f32)],
+    top: f32,
+    left: f32,
+) -> Option<(SceneId, String)> {
+    let painter = ui.painter().clone();
+    let _ = left;
+    let mut out = None;
+    for scene in board.inset_scenes() {
+        let shots: Vec<(f32, f32)> = spans
+            .iter()
+            .zip(&board.clips)
+            .filter(|(_, c)| c.scene_id == scene.id && c.shot_type != ShotType::Ttl)
+            .map(|((_, x, w), _)| (*x, *w))
+            .collect();
+        let (Some(&(x0, _)), Some(&(x1, w1))) = (shots.first(), shots.last()) else { continue };
+        let rect = Rect::from_min_max(pos2(x0 + 1.0, top + 2.0), pos2(x1 + w1 - 1.0, top + INSET_H - 2.0));
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let set = scene.inset.as_ref().and_then(|i| i.asset.as_ref());
+        let response = ui.interact(rect, egui::Id::new(("sb-inset", scene.id.0)), Sense::click());
+        let hovering = response.dnd_hover_payload::<DragAsset>().is_some();
+        let (fill, stroke) = match set {
+            Some(_) => (Color32::from_rgb(0x2b, 0x3f, 0x5a), Color32::from_rgb(0x5b, 0x8f, 0xc9)),
+            None => (Color32::from_gray(0x22), Color32::from_gray(0x4a)),
+        };
+        painter.rect_filled(rect, 2, fill);
+        painter.rect_stroke(
+            rect,
+            2,
+            Stroke::new(if hovering { 2.0 } else { 1.0 }, if hovering { SELECT } else { stroke }),
+            StrokeKind::Inside,
+        );
+        let title = board.scene_title(scene.id).unwrap_or_default();
+        let text = match set {
+            Some(a) => Path::new(&a.0).file_name().map_or(a.0.clone(), |f| f.to_string_lossy().into_owned()),
+            None if rect.width() > 220.0 => format!("{title} · drop b-roll, an interview or a host here"),
+            None if rect.width() > 70.0 => "Inset · empty".to_owned(),
+            None => String::new(),
+        };
+        if !text.is_empty() {
+            painter.with_clip_rect(rect).text(
+                pos2(rect.left() + 4.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                FontId::proportional(9.0),
+                Color32::from_gray(if set.is_some() { 0xd0 } else { 0x80 }),
+            );
+        }
+        let tip = match set {
+            Some(a) => format!(
+                "Inset on {title}: {}
+Drop another file to replace it",
+                a.0
+            ),
+            None => format!(
+                "Inset slot for {title}: drop a video (its length sizes the section) or a graphic from the Organizer"
+            ),
+        };
+        if let Some(asset) = response.on_hover_text(tip).dnd_release_payload::<DragAsset>() {
+            out = Some((scene.id, asset.0.clone()));
+        }
+    }
+    out
+}
+
+/// The AUDIO row (SR2b): the track's pieces under the Cut in cut time — the whole song, or
+/// the edit's segments (a chorus loop) butted together — with the waveform, the section bands
+/// and a splice mark where the music jumps.
+fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, left: f32, width: f32) {
+    let painter = ui.painter().clone();
+    let rect = Rect::from_min_size(pos2(left, top), vec2(width - 16.0, AUDIO_H));
+    painter.rect_filled(rect, 2, Color32::from_gray(0x1b));
+    let Some(track) = &board.track else {
+        painter.text(
+            pos2(left + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            "No track · pick a song on the Start screen or in the Tracks view",
+            FontId::proportional(9.0),
+            Color32::from_gray(0x77),
+        );
+        return;
+    };
+    let x_of = |t: f64| left + t as f32 * PX_PER_SEC;
+    // Section bands (output time).
+    for sec in &track.song_sections {
+        let r = Rect::from_min_max(
+            pos2(x_of(sec.start.as_secs_f64()), rect.top()),
+            pos2(x_of(sec.end.as_secs_f64()) - 1.0, rect.bottom()),
+        );
+        if r.width() <= 0.0 || !ui.is_rect_visible(r) {
+            continue;
+        }
+        let (bg, fg) = crate::start_tracks::section_tint(&sec.name);
+        painter.rect_filled(r, 1, bg);
+        if r.width() > 40.0 {
+            painter.with_clip_rect(r).text(
+                r.left_top() + vec2(4.0, 2.0),
+                Align2::LEFT_TOP,
+                sec.name.to_uppercase(),
+                FontId::proportional(9.0),
+                fg,
+            );
+        }
+    }
+    // Pieces: source ranges in seconds at their cut offsets.
+    let pieces: Vec<(f64, f64, f64)> = match &track.edit {
+        Some(e) if e.sample_rate > 0 && !e.segments.is_empty() => {
+            let sr = f64::from(e.sample_rate);
+            let mut off = 0.0;
+            e.segments
+                .iter()
+                .map(|[a, b]| {
+                    let (a, b) = (*a as f64 / sr, *b as f64 / sr);
+                    let p = (a, b, off);
+                    off += (b - a).max(0.0);
+                    p
+                })
+                .collect()
+        }
+        _ => vec![(0.0, track.duration.as_secs_f64(), 0.0)],
+    };
+    let peaks = crate::start_timeline::peaks(nav, &track.id.0);
+    if peaks.is_none() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(120));
+    }
+    let samples: Vec<(f64, f64)> = peaks
+        .as_ref()
+        .and_then(|p| p["peaks"].as_array())
+        .map(|a| a.iter().map(|p| (p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0))).collect())
+        .unwrap_or_default();
+    let wave_secs = peaks.as_ref().and_then(|p| p["seconds"].as_f64()).filter(|s| *s > 0.0).unwrap_or(0.0);
+    let loudest = samples.iter().fold(0.0f64, |m, (lo, hi)| m.max(-lo).max(*hi)).max(1e-3);
+    let (mid, half) = (rect.center().y + 3.0, rect.height() * 0.38 / loudest as f32);
+    let wave = Color32::from_rgb(0x5b, 0x8f, 0xc9);
+    let splice = Color32::from_rgb(0xe0, 0xa0, 0x40);
+    let visible = ui.clip_rect();
+    for &(a, b, off) in &pieces {
+        let (x0, x1) = (x_of(off), x_of(off + (b - a)));
+        if !samples.is_empty() && wave_secs > 0.0 {
+            let n = samples.len();
+            let mut x = x0.max(visible.left()).floor();
+            while x < x1.min(visible.right()) {
+                let (t0, t1) = (a + f64::from((x - x0) / PX_PER_SEC), a + f64::from((x + 1.0 - x0) / PX_PER_SEC));
+                if t0 < wave_secs {
+                    let i0 = ((t0 / wave_secs * n as f64) as usize).min(n - 1);
+                    let i1 = ((t1 / wave_secs * n as f64).ceil() as usize).clamp(i0 + 1, n);
+                    let (lo, hi) =
+                        samples[i0..i1].iter().fold((0.0f64, 0.0f64), |(lo, hi), (p, q)| (lo.min(*p), hi.max(*q)));
+                    painter.line_segment(
+                        [pos2(x + 0.5, mid - hi as f32 * half), pos2(x + 0.5, mid - lo as f32 * half + 1.0)],
+                        Stroke::new(1.0, wave),
+                    );
+                }
+                x += 1.0;
+            }
+        }
+        if off > 0.0 {
+            painter.line_segment([pos2(x0, rect.top()), pos2(x0, rect.bottom())], Stroke::new(1.0, splice));
+            painter.text(
+                pos2(x0 + 3.0, rect.bottom() - 1.0),
+                Align2::LEFT_BOTTOM,
+                format!("→ {}", crate::start_tracks::mmss(a)),
+                FontId::monospace(8.0),
+                splice,
+            );
+        }
+    }
+    if let Some(e) = &track.edit
+        && e.sample_rate > 0
+        && let Some([s, n]) = e.fade_out
+    {
+        let sr = f64::from(e.sample_rate);
+        painter.line_segment(
+            [pos2(x_of(s as f64 / sr), rect.top() + 2.0), pos2(x_of((s + n) as f64 / sr), rect.bottom() - 2.0)],
+            Stroke::new(1.5, Color32::from_gray(0xcc)),
+        );
     }
 }
 

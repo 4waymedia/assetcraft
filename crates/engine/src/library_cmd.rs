@@ -16,7 +16,7 @@ use crate::generate_cmd::{
 };
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
-use assetcraft_storyboard::{GenerateOptions, Pacing, generate};
+use assetcraft_storyboard::{GenerateOptions, Pacing, ShotType, generate};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -216,22 +216,47 @@ pub(crate) fn sb_tracks(s: &mut Session, _: &Value) -> CmdResult {
 /// untouched.
 pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
     let path = cue_map_param(p)?;
-    let pacing = pacing_param(p, Pacing::Trailer)?;
-    let seconds = seconds_param(p)?;
-    let density = density_param(p, 1.0)?;
-    let shape = shape_param(p, assetcraft_storyboard::Shape::default())?;
     let cue = read_cue(s, &path)?;
-    let opts = GenerateOptions {
-        name: cue.track.title.clone(),
-        track_path: track_path(s, &path, &cue).to_string_lossy().into_owned(),
-        pacing,
-        seconds,
-        fit_mode: None,
-        density,
-        shape,
+    // A template (Paul, 2026-11-06: "When I click on a template… I want to see the cuts in the
+    // storyboard, and the inset section"): the board `storyboard.new {template}` would make —
+    // the steps, the credits clip, the song as the track, re-cut to the length.
+    let (board, clips_n, title_cards, scenes_n, length, fit_changes) = match p.get("template") {
+        Some(Value::String(which)) => {
+            let mut board = crate::template_cmd::board_from_template(
+                s,
+                which,
+                crate::template_cmd::steps_param(p)?,
+                crate::template_cmd::step_secs_param(p)?,
+            )?;
+            crate::template_cmd::append_credits_if(s, p, &mut board);
+            let fitted = crate::template_cmd::fit_to_cue(s, p, &mut board, true)?;
+            let titles = board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl).count();
+            let changes = Some(match fitted.report.resized {
+                0 => format!("Music: {}", fitted.music),
+                n => format!("{n} shots snapped to the beat · music: {}", fitted.music),
+            });
+            (board.clone(), board.clips.len(), titles, board.scenes.len(), board.total(), changes)
+        }
+        Some(Value::Null) | None => {
+            let pacing = pacing_param(p, Pacing::Trailer)?;
+            let seconds = seconds_param(p)?;
+            let density = density_param(p, 1.0)?;
+            let shape = shape_param(p, assetcraft_storyboard::Shape::default())?;
+            let opts = GenerateOptions {
+                name: cue.track.title.clone(),
+                track_path: track_path(s, &path, &cue).to_string_lossy().into_owned(),
+                pacing,
+                seconds,
+                fit_mode: None,
+                density,
+                shape,
+            };
+            let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+            (board, report.clips, report.title_cards, report.scenes, report.length, report.fit_changes)
+        }
+        Some(_) => return Err(CmdError::BadParams("`template` must be a bundled id or a file path".into())),
     };
-    let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
-    let avg = if report.clips > 0 { report.length.as_secs_f64() / report.clips as f64 } else { 0.0 };
+    let avg = if clips_n > 0 { length.as_secs_f64() / clips_n as f64 } else { 0.0 };
     let r2 = |v: f64| (v * 100.0).round() / 100.0;
     let scene_index: std::collections::HashMap<_, usize> =
         board.scenes.iter().enumerate().map(|(i, sc)| (sc.id, i)).collect();
@@ -258,16 +283,57 @@ pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
     let edit = edit_json(board.track.as_ref().and_then(|t| t.edit.as_ref()), board_seconds(&board), track_seconds);
     Ok(json!({
         "clips": clips,
-        "count": report.clips,
-        "titleCards": report.title_cards,
-        "scenes": report.scenes,
-        "length": report.length.timecode(),
+        "count": clips_n,
+        "titleCards": title_cards,
+        "scenes": scenes_n,
+        "sections": sections_json(&board),
+        "length": length.timecode(),
         "avgSeconds": (avg * 10.0).round() / 10.0,
         "avgBeats": (avg * cue.bpm / 60.0 * 10.0).round() / 10.0,
-        "fitChanges": report.fit_changes,
+        "fitChanges": fit_changes,
         "trackSeconds": r2(track_seconds),
         "edit": edit,
     }))
+}
+
+/// The sections an inset lane runs over (SR2, D-SR1: the lane is always there): one per scene
+/// with shots — its title (the scene's title card, else its song section), where its shots
+/// start and how long they run, in cut seconds, and whether an inset is set.
+pub(crate) fn sections_json(board: &assetcraft_storyboard::Storyboard) -> Vec<Value> {
+    let r2 = |v: f64| (v * 100.0).round() / 100.0;
+    let starts = board.starts();
+    board
+        .scenes
+        .iter()
+        .enumerate()
+        .filter_map(|(i, scene)| {
+            let shots: Vec<(usize, &assetcraft_storyboard::Clip)> = board
+                .clips
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.scene_id == scene.id && c.shot_type != ShotType::Ttl)
+                .collect();
+            let (&(first, _), _) = (shots.first()?, shots.last()?);
+            let start = starts.get(first).map_or(0.0, |t| t.as_secs_f64());
+            let seconds: f64 = shots.iter().map(|(_, c)| c.duration.as_secs_f64()).sum();
+            let title = board
+                .clips
+                .iter()
+                .find(|c| c.scene_id == scene.id && c.shot_type == ShotType::Ttl)
+                .map(|c| c.description.lines().next().unwrap_or("").to_owned())
+                .filter(|t| !t.is_empty())
+                .or_else(|| scene.song_section.clone())
+                .unwrap_or_else(|| format!("Section {}", i + 1));
+            Some(json!({
+                "scene": i,
+                "title": title,
+                "start": r2(start),
+                "seconds": r2(seconds),
+                "shots": shots.len(),
+                "inset": scene.inset.as_ref().map(crate::inset_cmd::inset_json),
+            }))
+        })
+        .collect()
 }
 
 fn board_seconds(board: &assetcraft_storyboard::Storyboard) -> f64 {

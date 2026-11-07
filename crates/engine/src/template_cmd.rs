@@ -23,9 +23,7 @@
 use crate::document_cmd::{SUFFIX, document_name, write_atomic};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
-use assetcraft_storyboard::{
-    BUNDLED, CREDITS_NAME, Limits, STEPS_RANGE, Storyboard, bundled_template_with, credits_template,
-};
+use assetcraft_storyboard::{BUNDLED, CREDITS_NAME, Limits, STEPS_RANGE, Storyboard, credits_template};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -77,14 +75,21 @@ pub(crate) fn sb_templates(s: &mut Session, _p: &Value) -> CmdResult {
 
 /// A board from a bundled id (with `steps` repeating sections, else its default) or a template
 /// file.
-pub(crate) fn board_from_template(s: &Session, which: &str, steps: Option<usize>) -> Result<Storyboard, CmdError> {
+pub(crate) fn board_from_template(
+    s: &Session,
+    which: &str,
+    steps: Option<usize>,
+    step_secs: Option<f64>,
+) -> Result<Storyboard, CmdError> {
     let which = which.trim();
     if let Some(info) = BUNDLED.iter().find(|t| t.id == which) {
         let n = steps.unwrap_or(info.steps);
         if !(STEPS_RANGE.0..=STEPS_RANGE.1).contains(&n) {
             return Err(CmdError::BadParams(format!("`steps` must be {}..={}", STEPS_RANGE.0, STEPS_RANGE.1)));
         }
-        let bundled = bundled_template_with(which, n).ok_or_else(|| CmdError::BadParams("unknown template".into()))?;
+        let secs = step_secs.unwrap_or(assetcraft_storyboard::STEP_SECS);
+        let bundled = assetcraft_storyboard::bundled_template_sized(which, n, secs)
+            .ok_or_else(|| CmdError::BadParams("unknown template".into()))?;
         return Ok(Storyboard::from_template(&bundled, bundled.name.as_str()));
     }
     let path = Path::new(which);
@@ -162,6 +167,76 @@ pub(crate) fn append_credits_if(s: &Session, p: &Value, board: &mut Storyboard) 
         board.append_credits(&s.credits_template())
     } else {
         0
+    }
+}
+
+/// What a template's song was made into: the re-cut and the music under it.
+pub(crate) struct Fitted {
+    pub(crate) report: assetcraft_storyboard::RecutReport,
+    /// "the chorus looped", "the whole song", …
+    pub(crate) music: &'static str,
+}
+
+/// A template board with the song in `p` (`cueMap`, `music?`): the shots are snapped to the
+/// song's beat at the template's own length (title cards kept) — the length comes from the
+/// steps, not the song — and the song goes under the Cut as `music` says (SR3; Paul,
+/// 2026-11-06: "a 'title' clip every 30 seconds… and then the chorus music between each
+/// title"): the chorus loop by default, cut to the Cut's length with a fade; `whole` plays the
+/// song from the top. The name is prefixed with the song's title when `rename`. Used by
+/// `storyboard.new {template}` and `storyboard.preview {template}`.
+pub(crate) fn fit_to_cue(s: &Session, p: &Value, board: &mut Storyboard, rename: bool) -> Result<Fitted, CmdError> {
+    let path = crate::generate_cmd::cue_map_param(p)?;
+    let music = music_param(p)?;
+    let cue = crate::generate_cmd::read_cue(s, &path)?;
+    let track_path = crate::generate_cmd::track_path(s, &path, &cue);
+    let bpm = assetcraft_storyboard::Bpm::new(cue.bpm).unwrap_or(assetcraft_storyboard::Bpm::DEFAULT);
+    let own = board.total();
+    let report =
+        assetcraft_storyboard::recut(board, bpm, own, assetcraft_storyboard::RecutOptions { keep_title_cards: true });
+    for (clip, d) in board.clips.iter_mut().zip(&report.durations) {
+        clip.duration = *d;
+    }
+    let (track, what) = assetcraft_storyboard::track_under(&cue, &track_path.to_string_lossy(), board.total(), music);
+    if rename || board.name == "Untitled storyboard" {
+        board.name = format!("{} · {}", cue.track.title, board.name);
+    }
+    board.track = Some(track);
+    Ok(Fitted { report, music: what })
+}
+
+/// `music` as the way a template's song runs under it (`chorus` by default).
+pub(crate) fn music_param(p: &Value) -> Result<assetcraft_storyboard::MusicMode, CmdError> {
+    match p.get("music") {
+        None | Some(Value::Null) => Ok(assetcraft_storyboard::MusicMode::default()),
+        Some(v) => v
+            .as_str()
+            .and_then(assetcraft_storyboard::MusicMode::parse)
+            .ok_or_else(|| CmdError::BadParams("`music` must be chorus, firstChorus or whole".into())),
+    }
+}
+
+/// `stepSeconds` as a repeating section's length (`STEP_SECS_RANGE`).
+pub(crate) fn step_secs_param(p: &Value) -> Result<Option<f64>, CmdError> {
+    let (lo, hi) = assetcraft_storyboard::STEP_SECS_RANGE;
+    match p.get("stepSeconds") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_f64()
+            .filter(|s| s.is_finite() && *s >= f64::from(lo) && *s <= f64::from(hi))
+            .map(Some)
+            .ok_or_else(|| CmdError::BadParams(format!("`stepSeconds` must be {lo}..={hi}"))),
+    }
+}
+
+/// `steps` as the template's points / steps count.
+pub(crate) fn steps_param(p: &Value) -> Result<Option<usize>, CmdError> {
+    match p.get("steps") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => Ok(Some(
+            v.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| CmdError::BadParams("`steps` must be a whole number".into()))?,
+        )),
     }
 }
 

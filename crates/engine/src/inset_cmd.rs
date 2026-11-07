@@ -66,10 +66,16 @@ fn section(board: &Storyboard, id: SceneId) -> Result<usize, CmdError> {
     Ok(index)
 }
 
-/// `storyboard.inset {scene, asset?, kind?, corner?, size?, mixAudio?, swap?, seconds?}`:
+/// Video extensions an inset treats as a video (its length can size the section).
+const VIDEO_EXT: [&str; 7] = ["mp4", "m4v", "mov", "mkv", "webm", "avi", "3gp"];
+
+/// `storyboard.inset {scene, asset?, kind?, corner?, size?, mixAudio?, swap?, seconds?, fit?}`:
 /// set or change a section's inset. Omitted fields keep their value (an empty slot is made
 /// first when the section has none); `asset: null` empties the slot; `seconds` stretches the
-/// section's shots (pro rata, title cards kept) to the recording's length.
+/// section's shots (pro rata, title cards kept) to the recording's length; without `seconds`,
+/// a new video file sizes the section to its own length when the container says it (`fit`,
+/// on by default; MP4 / MOV today) — "the section takes its recording's length". `kind` is
+/// read off the extension when not given.
 pub(crate) fn sb_inset(s: &mut Session, p: &Value) -> CmdResult {
     let id = scene_id(p.get("scene").unwrap_or(&Value::Null))?;
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
@@ -106,7 +112,28 @@ pub(crate) fn sb_inset(s: &mut Session, p: &Value) -> CmdResult {
     if let Some(b) = flag(p, "swap")? {
         inset.swap = b;
     }
+    // A new file: its kind from the extension unless given, and a video's length when asked.
+    let new_file = matches!(p.get("asset"), Some(Value::String(_)));
+    if new_file && p.get("kind").is_none() {
+        inset.kind = match inset.asset.as_ref().map(|a| is_video(&a.0)) {
+            Some(true) => InsetKind::Video,
+            _ => InsetKind::Graphic,
+        };
+    }
+    let fit = flag(p, "fit")?.unwrap_or(true);
+    let mut asset_secs: Option<f64> = None;
     let stretched = match p.get("seconds") {
+        None | Some(Value::Null) if new_file && fit && inset.kind == InsetKind::Video => {
+            let secs = inset
+                .asset
+                .as_ref()
+                .and_then(|a| assetcraft_probe::media_duration(s.services().as_ref(), std::path::Path::new(&a.0)));
+            asset_secs = secs;
+            match secs {
+                Some(v) if v >= crate::MIN_CLIP_SECS => Some(stretch_section(&mut board, id, v, &limits)?),
+                _ => None,
+            }
+        }
         None | Some(Value::Null) => None,
         Some(v) => {
             let secs = v
@@ -129,9 +156,13 @@ pub(crate) fn sb_inset(s: &mut Session, p: &Value) -> CmdResult {
         "changed": changed,
         "inset": inset_json(&inset),
         "spanSeconds": span,
+        "assetSeconds": asset_secs,
         "total": board.total().timecode(),
         "message": match (&inset.asset, stretched) {
             (Some(a), Some(_)) => format!("Inset on scene {}: {} · section now {span:.1} s", id.0, name_of(a)),
+            (Some(a), None) if new_file && fit && inset.kind == InsetKind::Video => {
+                format!("Inset on scene {}: {} (length unknown: the section keeps {span:.1} s)", id.0, name_of(a))
+            }
             (Some(a), None) => format!("Inset on scene {}: {}", id.0, name_of(a)),
             (None, _) => format!("Empty inset slot on scene {}", id.0),
         },
@@ -228,6 +259,14 @@ fn stretch_section(board: &mut Storyboard, scene: SceneId, secs: f64, limits: &L
         return Err(CmdError::BadParams("the Cut would be longer than the limit (6 hours)".into()));
     }
     Ok(want.as_secs_f64())
+}
+
+/// A video by its extension.
+fn is_video(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| VIDEO_EXT.contains(&e.as_str()))
 }
 
 fn name_of(a: &AssetId) -> String {

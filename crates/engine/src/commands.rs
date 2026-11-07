@@ -222,7 +222,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, cueMap?, seconds?, fitMode?, credits?: bool} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — with `cueMap` the song becomes its track and the clips are re-cut to fit); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path, steps?: 1..=12, stepSeconds?: 10..=300, cueMap?, music?: chorus | firstChorus | whole, credits?: bool} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — every repeating section a title card + three shots of `stepSeconds` (30); with `cueMap` the song becomes its track as `music` says — the chorus looped under the Cut (default), the first chorus only, or the whole song — and the shots snap to its beat at the template's own length); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(
@@ -420,7 +420,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Preview Storyboard",
         "Storyboard",
         None,
-        "{cueMap, pacing?, seconds?, density?, shape?} → {clips: [{shot, start, seconds, scene, text?, in, out}], count, titleCards, scenes, length, avgSeconds, avgBeats, trackSeconds, edit: {segments: [[start, end]], fadeOut?}} (what storyboard.generate would build; times in seconds, edit in track time; changes nothing)",
+        "{cueMap, pacing?, seconds?, density?, shape?} or {cueMap, template, steps?, stepSeconds?, credits?, music?: chorus | firstChorus | whole} → {clips: [{shot, start, seconds, scene, text?, in, out}], count, titleCards, scenes, sections: [{scene, title, start, seconds, shots, inset?}], length, avgSeconds, avgBeats, trackSeconds, edit: {segments: [[start, end]], fadeOut?}} (what storyboard.generate or storyboard.new {template} would build; times in seconds, edit in track time; changes nothing)",
         crate::library_cmd::sb_preview
     ),
     cmd!(
@@ -511,7 +511,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Section Inset",
         "Storyboard",
         None,
-        "{scene: number, asset?: path | null, kind?: video | graphic, corner?: topLeft | topRight | bottomLeft | bottomRight, size?: small | medium | large, mixAudio?: bool, swap?: bool, seconds?: number} (a section's inset lane over its shots; omitted fields keep their value; `seconds` stretches the section's shots to the recording; one undo step)",
+        "{scene: number, asset?: path | null, kind?: video | graphic (else by extension), corner?: topLeft | topRight | bottomLeft | bottomRight, size?: small | medium | large, mixAudio?: bool, swap?: bool, seconds?: number, fit?: bool} (a section's inset lane over its shots; omitted fields keep their value; `seconds` stretches the section's shots to the recording, else a new video's own length does (`fit`, default; MP4 / MOV); one undo step)",
         crate::inset_cmd::sb_inset
     ),
     cmd!(

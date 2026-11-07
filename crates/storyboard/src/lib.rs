@@ -40,8 +40,8 @@ pub use analyse::{ANALYZER, AnalyseError, FIT_TARGETS, TrackFacts, cue_map};
 pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
 pub use generate::{
-    DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, Pacing, fit_for, generate, track_edit,
-    track_from_cue,
+    DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,
+    Pacing, chorus_loop, fit_for, generate, track_edit, track_from_cue, track_under,
 };
 pub use inset::{Corner, Inset, InsetKind, InsetSize};
 pub use model::{
@@ -56,8 +56,9 @@ pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
 pub use template::{
-    BUNDLED, CREDITS_NAME, STEPS_RANGE, TemplateInfo, bundled as bundled_template,
-    bundled_with as bundled_template_with, credits as credits_template,
+    BUNDLED, CREDITS_NAME, STEP_PATTERN, STEP_SECS, STEP_SECS_RANGE, STEPS_RANGE, TITLE_SECS, TemplateInfo,
+    bundled as bundled_template, bundled_sized as bundled_template_sized, bundled_with as bundled_template_with,
+    credits as credits_template,
 };
 pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,

@@ -45,7 +45,9 @@ fn new_from_a_bundled_template_gives_its_skeleton_with_no_assets() {
         five.scenes.iter().filter(|sc| sc.song_section.as_deref().is_some_and(|n| n.starts_with("Step "))).count(),
         5
     );
-    assert!(five.clips.iter().any(|c| c.overlay.as_deref() == Some("Step 5")));
+    assert!(
+        five.clips.iter().any(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl && c.description == "Step 5")
+    );
     run(&mut s, "storyboard.new", json!({ "template": "instructions", "steps": 1 }));
     assert_eq!(s.storyboard().unwrap().scenes.len(), 3, "title · one step · check");
     assert!(matches!(

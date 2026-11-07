@@ -316,6 +316,13 @@ impl CueMap {
         Ticks(u64::try_from(t).unwrap_or(u64::MAX))
     }
 
+    /// Ticks → source frames at this cue map's rate (rounded).
+    pub fn frames(&self, t: Ticks) -> u64 {
+        let sr = u128::from(self.sample_rate.max(1));
+        let f = (u128::from(t.0) * sr + u128::from(TICKS_PER_SECOND) / 2) / u128::from(TICKS_PER_SECOND);
+        u64::try_from(f).unwrap_or(u64::MAX)
+    }
+
     /// The output timeline for a fit (or the whole track when `fit` is `None`).
     pub fn timeline(&self, fit: Option<&Fit>) -> Timeline {
         let whole = [[0, self.duration_frames]];
@@ -334,8 +341,15 @@ impl CueMap {
         let map = |src: u64| -> Option<u64> {
             segments.iter().zip(&offsets).find(|(s, _)| src >= s[0] && src < s[1]).map(|(s, o)| o + (src - s[0]))
         };
+        // Every segment maps its own points, so a source range played twice (a chorus loop,
+        // SR3) carries its beats both times.
         let pts = |v: &[u64]| -> Vec<u64> {
-            let mut out: Vec<u64> = v.iter().filter_map(|f| map(*f)).filter(|f| *f < length).collect();
+            let mut out: Vec<u64> = Vec::new();
+            for (s, o) in segments.iter().zip(&offsets) {
+                out.extend(
+                    v.iter().filter(|f| **f >= s[0] && **f < s[1]).map(|f| o + (f - s[0])).filter(|f| *f < length),
+                );
+            }
             out.sort_unstable();
             out.dedup();
             out

@@ -191,17 +191,12 @@ pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
     let mut board = match p.get("template") {
-        Some(Value::String(which)) => {
-            let steps = match p.get("steps") {
-                None | Some(Value::Null) => None,
-                Some(v) => Some(
-                    v.as_u64()
-                        .and_then(|n| usize::try_from(n).ok())
-                        .ok_or_else(|| CmdError::BadParams("`steps` must be a whole number".into()))?,
-                ),
-            };
-            crate::template_cmd::board_from_template(s, which, steps)?
-        }
+        Some(Value::String(which)) => crate::template_cmd::board_from_template(
+            s,
+            which,
+            crate::template_cmd::steps_param(p)?,
+            crate::template_cmd::step_secs_param(p)?,
+        )?,
         Some(Value::Null) | None if from_sample => sample(),
         Some(Value::Null) | None => manual_start(),
         Some(_) => return Err(CmdError::BadParams("`template` must be a bundled id or a file path".into())),
@@ -213,31 +208,16 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
         }
         board.name = name.to_owned();
     }
-    // A template with a track (Start › New › Template, ST3b): the song's tempo, length and
-    // sections become the board's track and Re-cut fits the template's clips to it in whole
-    // beats, title cards kept.
-    // The credits clip goes on before the re-cut, so with a song it sits inside the song's
-    // length (title cards keep their seconds; the shots share the rest).
+    // A template with a track (Start › New › Template, ST3b / SR2): the whole song becomes the
+    // board's track and the shots snap to its beat at the template's own length, title cards
+    // kept (`storyboard.preview {template}` builds the same board). The credits clip goes on
+    // before the snap so it is on the beat too.
     crate::template_cmd::append_credits_if(s, p, &mut board);
-    let mut fitted = None;
-    if p.get("template").is_some() && p.get("cueMap").is_some() {
-        let path = crate::generate_cmd::cue_map_param(p)?;
-        let seconds = crate::generate_cmd::seconds_param(p)?;
-        let mode = crate::generate_cmd::fit_mode_param(p)?;
-        let cue = crate::generate_cmd::read_cue(s, &path)?;
-        let track_path = crate::generate_cmd::track_path(s, &path, &cue);
-        let track = assetcraft_storyboard::track_from_cue(&cue, &track_path.to_string_lossy(), seconds, mode)
-            .map_err(|e| CmdError::Unavailable(e.to_string()))?;
-        let report = recut(&board, track.bpm, track.duration, RecutOptions { keep_title_cards: true });
-        for (clip, d) in board.clips.iter_mut().zip(&report.durations) {
-            clip.duration = *d;
-        }
-        if board.name == "Untitled storyboard" || p.get("name").is_none() {
-            board.name = format!("{} · {}", cue.track.title, board.name);
-        }
-        board.track = Some(track);
-        fitted = Some(report);
-    }
+    let fitted = if p.get("template").is_some() && p.get("cueMap").is_some() {
+        Some(crate::template_cmd::fit_to_cue(s, p, &mut board, p.get("name").is_none())?)
+    } else {
+        None
+    };
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board).or_else(|| board.clips.first().map(|c| c.id));
     s.boards.generated = None;
@@ -249,10 +229,10 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     crate::document_cmd::mark_saved(s, None);
     s.audio_stop();
     let mut out = state(s);
-    if let (Some(report), Value::Object(map)) = (fitted, &mut out) {
+    if let (Some(f), Value::Object(map)) = (fitted, &mut out) {
         map.insert(
             "fitted".into(),
-            json!({ "resized": report.resized, "totalBeats": report.total_beats, "fits": report.fits() }),
+            json!({ "resized": f.report.resized, "totalBeats": f.report.total_beats, "fits": f.report.fits(), "music": f.music }),
         );
     }
     Ok(out)

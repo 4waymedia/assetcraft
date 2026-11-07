@@ -9,8 +9,10 @@
 //! [`Status::Damaged`], never a panic.
 
 mod dims;
+mod duration;
 mod format;
 
+pub use duration::media_duration;
 pub use format::{Category, Format};
 
 use assetcraft_fs::{EntryKind, FsError, Services};

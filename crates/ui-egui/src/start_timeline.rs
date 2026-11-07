@@ -6,6 +6,10 @@
 //! - **Storyboard:** what Create would build now (`storyboard.preview` for the chosen track,
 //!   preset, cut pace, shape and length): clips back to back by shot type, title cards and text
 //!   overlays marked, fades and flashes at clip edges, § at each scene.
+//! - **Inset (SR2, D-SR1 "have the inset lane there at all times"):** one slot per section
+//!   with shots (`preview.sections`), spanning the section's shots after its title card, named
+//!   by the section's title; "Drop b-roll, an interview or a host here" until one is set
+//!   (the Strip's INSET row takes the drop, SR2b).
 //! - **Audio:** the music the cut plays: the kept parts of the track (`edit.segments`) butted
 //!   together, each with its waveform (`track.peaks`), section bands and ◆ drops; a splice mark
 //!   where the music jumps (crossfaded), the fade-out as a ramp. At full length this is the whole
@@ -26,9 +30,10 @@ use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, StrokeKind, U
 use serde_json::{Value, json};
 
 /// Panel height.
-pub(crate) const TIMELINE_H: f32 = 178.0;
+pub(crate) const TIMELINE_H: f32 = 178.0 + INSET_H + 4.0;
 const RULER_H: f32 = 16.0;
 const BOARD_H: f32 = 46.0;
+const INSET_H: f32 = 18.0;
 const AUDIO_H: f32 = 56.0;
 const LABEL_W: f32 = 74.0;
 const WAVE: Color32 = Color32::from_rgb(0x5b, 0x8f, 0xc9);
@@ -148,14 +153,15 @@ pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Action> {
         ui.label(RichText::new(what).monospace().small());
     });
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, RULER_H + BOARD_H + AUDIO_H + 16.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(width, RULER_H + BOARD_H + INSET_H + AUDIO_H + 20.0), Sense::hover());
     let lane_x = rect.left() + LABEL_W;
     let lane_w = (rect.width() - LABEL_W - 8.0).max(10.0);
     let pps = lane_w / cut_len as f32;
     let x_of = |t: f64| lane_x + (t.clamp(0.0, cut_len) as f32) * pps;
     let ruler = Rect::from_min_size(rect.min, vec2(rect.width(), RULER_H));
     let board = Rect::from_min_size(pos2(lane_x, ruler.bottom() + 10.0), vec2(lane_w, BOARD_H));
-    let audio = Rect::from_min_size(pos2(lane_x, board.bottom() + 6.0), vec2(lane_w, AUDIO_H));
+    let inset = Rect::from_min_size(pos2(lane_x, board.bottom() + 4.0), vec2(lane_w, INSET_H));
+    let audio = Rect::from_min_size(pos2(lane_x, inset.bottom() + 6.0), vec2(lane_w, AUDIO_H));
     let painter = ui.painter_at(rect);
     let label = |r: Rect, text: &str| {
         painter.text(
@@ -167,7 +173,44 @@ pub(crate) fn show(ui: &mut Ui, lanes: Option<Lanes<'_>>) -> Option<Action> {
         );
     };
     label(board, "STORYBOARD");
+    label(inset, "INSET");
     label(audio, "AUDIO");
+    // Inset lane: a slot per section with shots, always there (D-SR1).
+    painter.rect_filled(inset, 2, Color32::from_gray(0x1b));
+    for sec in l.preview.and_then(|p| p["sections"].as_array()).into_iter().flatten() {
+        let (a, n) = (sec["start"].as_f64().unwrap_or(0.0), sec["seconds"].as_f64().unwrap_or(0.0));
+        if n <= 0.0 {
+            continue;
+        }
+        let r =
+            Rect::from_min_max(pos2(x_of(a) + 1.0, inset.top() + 2.0), pos2(x_of(a + n) - 1.0, inset.bottom() - 2.0));
+        let set = sec["inset"]["asset"].as_str();
+        let (fill, stroke) = match set {
+            Some(_) => (Color32::from_rgb(0x2b, 0x3f, 0x5a), Color32::from_rgb(0x5b, 0x8f, 0xc9)),
+            None => (Color32::from_gray(0x22), Color32::from_gray(0x4a)),
+        };
+        painter.rect_filled(r, 2, fill);
+        painter.rect_stroke(r, 2, Stroke::new(1.0, stroke), StrokeKind::Inside);
+        let text = match set {
+            Some(path) => {
+                std::path::Path::new(path).file_name().map_or(path.to_owned(), |f| f.to_string_lossy().into_owned())
+            }
+            None if r.width() > 170.0 => {
+                format!("{} · drop b-roll, an interview or a host here", sec["title"].as_str().unwrap_or(""))
+            }
+            None if r.width() > 60.0 => "Inset · empty".to_owned(),
+            None => String::new(),
+        };
+        if !text.is_empty() {
+            painter.text(
+                pos2(r.left() + 4.0, r.center().y),
+                Align2::LEFT_CENTER,
+                text,
+                FontId::proportional(9.0),
+                Color32::from_gray(if set.is_some() { 0xd0 } else { 0x80 }),
+            );
+        }
+    }
     // Ruler (cut time).
     crate::timebar::paint_ruler(&painter, ruler, pps, cut_len, x_of, Color32::from_gray(0x8a));
     // Audio lane: each kept piece of the track, butted together.
