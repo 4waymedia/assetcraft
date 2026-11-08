@@ -33,6 +33,7 @@ pub mod sample;
 pub mod shape;
 pub mod template;
 pub mod text;
+pub mod theme;
 pub mod time;
 pub mod validate;
 
@@ -64,6 +65,7 @@ pub use text::{
     AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,
     set_text_style,
 };
+pub use theme::{BUNDLED_FONTS, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast, parse_color};
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};
 pub use validate::{BoardError, FORMAT_VERSION, Limits};
 

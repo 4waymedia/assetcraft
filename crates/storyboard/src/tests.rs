@@ -1202,3 +1202,67 @@ fn structured_music_puts_the_intro_under_the_opening_a_chorus_on_every_section_t
     let fit = structured_fit(&m, &plain.music_spans()).unwrap();
     assert_eq!(fit.segments, vec![[24 * BAR, 24 * BAR + 10 * SR]]);
 }
+
+#[test]
+fn built_in_themes_paint_exactly_todays_looks_and_round_trip_as_files() {
+    for t in TextTheme::ALL {
+        let theme = Theme::builtin(t);
+        assert_eq!(theme.look(), t.look(), "{}", t.id());
+        let (back, warnings) =
+            Theme::parse(theme.to_json().as_bytes(), true).unwrap_or_else(|e| panic!("{}: {e}", t.id()));
+        assert_eq!(back, theme);
+        assert!(warnings.is_empty(), "{}: {warnings:?}", t.id());
+        assert!(back.title_in().is_some());
+    }
+    assert_eq!(Theme::builtins().len(), 4);
+}
+
+#[test]
+fn theme_files_are_checked_as_hostile_input() {
+    let good = r##"{
+        "version": 1, "id": "noir-gold", "name": "Noir Gold", "tags": ["dark", "1920s"],
+        "credit": {"author": "Paul", "license": "own"},
+        "color": {"background": "#0B0B0D", "surface": "#17171B", "text": "#F2EFE8", "muted": "#8A857A", "accent": "#C9A227"},
+        "type": {"display": {"family": "Cinzel", "weight": 700, "tracking": 0.12, "uppercase": true},
+                 "body": {"family": "Inter"}, "scale": {"card": 0.14, "overlay": 0.06}},
+        "background": {"kind": "gradient", "stops": ["#0B0B0D", "#1C1408"], "angle": 90, "grain": 0.08, "vignette": 0.35},
+        "plate": {"color": "#0B0B0D", "alpha": 180},
+        "space": {"margin": 0.07},
+        "motion": {"titleIn": "fade"}
+    }"##;
+    let (theme, warnings) = Theme::parse(good.as_bytes(), false).unwrap();
+    assert_eq!(theme.id, "noir-gold");
+    assert_eq!(warnings.len(), 1, "Cinzel isn't bundled: {warnings:?}");
+    assert!(warnings[0].contains("Cinzel"));
+    let look = theme.look();
+    assert_eq!((look.background, look.text, look.card_size, look.uppercase), (0x0B0B0D, 0xF2EFE8, 0.14, true));
+    assert_eq!(look.plate, Some((0x0B0B0D, 180)));
+    assert_eq!(theme.space.padding, 0.02, "defaults fill in");
+    // Each broken field is refused with a reason.
+    let swap = |from: &str, to: &str| good.replacen(from, to, 1);
+    for (bad, why) in [
+        (swap("\"version\": 1", "\"version\": 2"), "version"),
+        (swap("noir-gold", "Noir Gold"), "id"),
+        (swap("\"#0B0B0D\", \"surface\"", "\"black\", \"surface\""), "colour"),
+        (swap("\"card\": 0.14", "\"card\": 0.9"), "size"),
+        (swap("\"tracking\": 0.12", "\"tracking\": 2"), "tracking"),
+        (swap("\"weight\": 700", "\"weight\": 1200"), "weight"),
+        (swap("\"grain\": 0.08", "\"grain\": 3"), "grain"),
+        (swap("\"stops\": [\"#0B0B0D\", \"#1C1408\"]", "\"stops\": [\"#0B0B0D\"]"), "gradient stops"),
+        (swap("\"titleIn\": \"fade\"", "\"titleIn\": \"explode\""), "motion"),
+        (swap("\"motion\"", "\"imagery\": {}, \"motion\""), "unknown field"),
+        (swap("\"name\": \"Noir Gold\"", "\"name\": \"  \""), "empty name"),
+        ("{".to_owned(), "not JSON"),
+    ] {
+        assert!(Theme::parse(bad.as_bytes(), false).is_err(), "{why}");
+    }
+    assert!(Theme::parse(&vec![b' '; MAX_THEME_BYTES + 1], false).is_err(), "too large");
+    // Low contrast: a warning for the user's own, refused for a shipped theme.
+    let grey = swap("\"text\": \"#F2EFE8\"", "\"text\": \"#202022\"");
+    let (_, w) = Theme::parse(grey.as_bytes(), false).unwrap();
+    assert!(w.iter().any(|w| w.contains("contrast")), "{w:?}");
+    assert!(Theme::parse(grey.as_bytes(), true).is_err());
+    assert!((contrast(0xffffff, 0x000000) - 21.0).abs() < 0.01);
+    assert_eq!(parse_color("#c9a227"), Some(0xC9A227));
+    assert_eq!(parse_color("c9a227"), None);
+}

@@ -67,6 +67,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.insetClear",
     // The Strip's VOICE row drives it (SR4b).
     "storyboard.voiceover",
+    // The Inspector's theme picker lists them (themes step 1b).
+    "storyboard.themes",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

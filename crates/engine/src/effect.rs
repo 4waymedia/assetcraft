@@ -188,6 +188,7 @@ mod tests {
                 "storyboard.preview",
                 "storyboard.recent",
                 "storyboard.templates",
+                "storyboard.themes",
                 "storyboard.state",
                 "storyboard.tracks",
                 "track.analyze",

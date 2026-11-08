@@ -253,6 +253,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::template_cmd::sb_templates
     ),
     cmd!(
+        READ,
+        "storyboard.themes",
+        "Themes",
+        "Storyboard",
+        None,
+        "{} → {themes: [{id, name, tags, source: builtin|user, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?}], problems: [{path, reason}], folder} (the built-in Bold, Minimal, Cinematic, Paper, then <working>/Themes/*.theme.json)",
+        crate::theme_cmd::sb_themes
+    ),
+    cmd!(
         SAVE,
         "storyboard.saveTemplate",
         "Save as Template",

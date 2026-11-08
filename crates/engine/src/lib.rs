@@ -30,6 +30,7 @@ pub mod sort;
 pub mod storyboard;
 pub mod template_cmd;
 mod text_cmd;
+pub mod theme_cmd;
 mod track_cmd;
 mod watching;
 mod waveform;
@@ -723,6 +724,8 @@ mod template_tests;
 mod tests;
 #[cfg(test)]
 mod text_tests;
+#[cfg(test)]
+mod theme_tests;
 #[cfg(test)]
 mod track_tests;
 #[cfg(test)]
