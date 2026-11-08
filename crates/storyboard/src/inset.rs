@@ -107,6 +107,10 @@ pub struct Inset {
     /// The inset's own sound, in dB ([`VOICE_DB_RANGE`]).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub voice_db: i8,
+    /// What belongs in the slot, in the user's words ("B-roll: close on the hands"), shown on
+    /// the INSET row; a planning note, not drawn in the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// The music under a voice, in dB, by default: low enough to talk over, still there.
@@ -138,6 +142,7 @@ impl Inset {
             swap: false,
             music_db: DEFAULT_MUSIC_DB,
             voice_db: 0,
+            note: None,
         }
     }
 

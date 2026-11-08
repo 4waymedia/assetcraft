@@ -148,6 +148,9 @@ impl Storyboard {
                 if let Some(a) = &i.asset {
                     text("inset asset", &a.0, l)?;
                 }
+                if let Some(n) = &i.note {
+                    text("inset note", n, l)?;
+                }
                 let (m, v) = (crate::inset::MUSIC_DB_RANGE, crate::inset::VOICE_DB_RANGE);
                 if !(m.0..=m.1).contains(&i.music_db) || !(v.0..=v.1).contains(&i.voice_db) {
                     return Err(BoardError::Limit(format!(

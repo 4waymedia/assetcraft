@@ -511,7 +511,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Section Inset",
         "Storyboard",
         None,
-        "{scene: number, asset?: path | null, kind?: video | graphic (else by extension), corner?: topLeft | topRight | bottomLeft | bottomRight, size?: small | medium | large, mixAudio?: bool, swap?: bool, musicDb?: -40..=0, voiceDb?: -24..=12, seconds?: number, fit?: bool} (a section's inset lane over its shots; omitted fields keep their value; `seconds` stretches the section's shots to the recording, else a new video's own length does (`fit`, default; MP4 / MOV); one undo step)",
+        "{scene: number, asset?: path | null, kind?: video | graphic (else by extension), corner?: topLeft | topRight | bottomLeft | bottomRight, size?: small | medium | large, mixAudio?: bool, swap?: bool, musicDb?: -40..=0, voiceDb?: -24..=12, note?: text | null, seconds?: number, fit?: bool} (a section's inset lane over its shots; omitted fields keep their value; `seconds` stretches the section's shots to the recording, else a new video's own length does (`fit`, default; MP4 / MOV); one undo step)",
         crate::inset_cmd::sb_inset
     ),
     cmd!(

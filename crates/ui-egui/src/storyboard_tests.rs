@@ -1454,3 +1454,35 @@ fn the_start_screens_audio_track_panel_picks_song_voiceover_both_or_none() {
     frame(&ctx, &mut nav, Vec::new(), 0.2);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn typing_a_note_in_the_inspectors_inset_section_saves_it_on_enter() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let scene = nav.session().storyboard().unwrap().scenes[0].id.0;
+    nav.run("storyboard.select", json!({ "clip": 2 }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    ctx.memory_mut(|m| m.request_focus(egui::Id::new(("sb-inset-note", scene)).with("edit")));
+    for events in [
+        Vec::new(),
+        vec![Event::Text("Interview: Sam on setup".into())],
+        vec![Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        Vec::new(),
+    ] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    let note = nav.session().storyboard().unwrap().scenes[0].inset.as_ref().and_then(|i| i.note.clone());
+    assert_eq!(note.as_deref(), Some("Interview: Sam on setup"));
+    nav.run("storyboard.undo", json!({}));
+    assert!(nav.session().storyboard().unwrap().scenes[0].inset.is_none(), "one undo step");
+}

@@ -503,8 +503,16 @@ Order: SF1a → SF1b → SF2 → SF4 → SF3 → SF5. Save/Open first because Se
   sound later in the Strip). For a voiceover the file comes from **Choose…** (a file dialog:
   wav, mp3, m4a, aac, flac, ogg, mp4, mov) or **Use Organizer selection**; with no file the
   board is made without one and the Strip's VOICE row takes it later. `storyboard.new` takes
-  `voiceover: path`. Tests: engine 1, ui-egui 1 (all four choices + "no file yet"). **Next** —
-  the remaining mock-up panels, each its own step: TITLE CARDS (opening · between · review ·
+  `voiceover: path`. Tests: engine 1, ui-egui 1 (all four choices + "no file yet"). **Slot note built 2026-11-07** (Paul: "on the storyboard inset, is there a way to change the
+  text? I see the description, but can't change it"): `Inset.note: Option<String>` — what
+  belongs in the slot in the user's words ("B-roll: close on the hands"); a planning note, not
+  drawn in the picture; kept by templates (it says what the slot is for), validated as text.
+  `storyboard.inset {note: text | null}` (trimmed; empty or null clears; one undo step). The
+  INSET row shows it in place of the drop hint (and beside the file's name once filled); edit it
+  in the Inspector's INSET section or the slot's menu (`inset_view::note_field`: Enter or
+  clicking away saves). The section's name on the slot is its title card's text — select the red
+  card to change it. Tests: engine 1, ui-egui 1 (typed in the Inspector, saved on Enter, one undo
+  step). **Next** — the remaining mock-up panels, each its own step: TITLE CARDS (opening · between · review ·
   credits; 2 / 4 / 6 s), NUMBERING (Step 1 · Step one · name them later), SHOT PATTERN (varied ·
   wide to close · close-ups; clips per step), and the STRUCTURE strip (click a part to jump to
   its options). under the STORYBOARD row (one bar per

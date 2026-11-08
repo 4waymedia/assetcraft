@@ -290,3 +290,42 @@ fn new_takes_a_voiceover_from_the_start_screen() {
         ));
     }
 }
+
+#[test]
+fn a_slot_takes_a_note_that_survives_the_file_and_templates() {
+    let mut s = session();
+    let scene = s.storyboard().unwrap().inset_scenes().next().unwrap().id.0;
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.inset", json!({"scene": scene, "note": "  B-roll: close on the hands  "}));
+    assert_eq!(r["inset"]["note"], "B-roll: close on the hands", "trimmed");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    // A file doesn't replace the note; the same note is no change.
+    run(&mut s, "storyboard.inset", json!({"scene": scene, "asset": "/clips/hands.mp4"}));
+    assert_eq!(inset(&s, scene).unwrap().note.as_deref(), Some("B-roll: close on the hands"));
+    assert_eq!(
+        run(&mut s, "storyboard.inset", json!({"scene": scene, "note": "B-roll: close on the hands"}))["changed"],
+        false
+    );
+    // In the file; a template keeps it (it says what the slot is for) and drops the file.
+    let board = s.storyboard().unwrap().clone();
+    let back = assetcraft_storyboard::Storyboard::from_json(board.to_json().unwrap().as_bytes()).unwrap();
+    assert_eq!(back, board);
+    let t = board.as_template("Mine");
+    let slot = t.scenes.iter().find(|sc| sc.id.0 == scene).unwrap().inset.clone().unwrap();
+    assert!(slot.is_empty());
+    assert_eq!(slot.note.as_deref(), Some("B-roll: close on the hands"));
+    // Cleared by null or an empty string; refusals.
+    run(&mut s, "storyboard.inset", json!({"scene": scene, "note": ""}));
+    assert!(inset(&s, scene).unwrap().note.is_none());
+    run(&mut s, "storyboard.inset", json!({"scene": scene, "note": "x"}));
+    run(&mut s, "storyboard.inset", json!({"scene": scene, "note": null}));
+    assert!(inset(&s, scene).unwrap().note.is_none());
+    for bad in [json!(7), json!("x".repeat(100_000))] {
+        assert!(matches!(
+            s.execute("storyboard.inset", &json!({"scene": scene, "note": bad})),
+            Err(CmdError::BadParams(_))
+        ));
+    }
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(inset(&s, scene).unwrap().note.as_deref(), Some("x"), "one undo step");
+}

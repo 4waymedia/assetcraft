@@ -44,6 +44,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyb
         edit = Some(json!({ "scene": scene.0, "asset": p.to_string_lossy() }));
     }
     let i = inset.clone().unwrap_or_else(|| assetcraft_storyboard::Inset::slot(InsetKind::Video));
+    if let Some(note) = note_field(ui, scene.0, i.note.as_deref()) {
+        edit = Some(json!({ "scene": scene.0, "note": note }));
+    }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Kind");
@@ -114,6 +117,29 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyb
         nav.run("storyboard.inset", params);
     }
     ui.add_space(6.0);
+}
+
+/// The slot's note (what belongs there, in the user's words): a one-line field whose text lives
+/// in egui temp memory while it has focus, committed on Enter or when focus leaves — one
+/// `storyboard.inset {note}`, one undo step. Returns `Some(new)` (`None` inside = cleared).
+pub(crate) fn note_field(ui: &mut Ui, scene: u32, current: Option<&str>) -> Option<Option<String>> {
+    let id = egui::Id::new(("sb-inset-note", scene));
+    let mut text: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.unwrap_or("").to_owned());
+    let r = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(id.with("edit"))
+            .hint_text("Note: what goes here (e.g. B-roll: close on the hands)")
+            .desired_width(f32::INFINITY),
+    );
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+        return None;
+    }
+    ui.data_mut(|d| d.remove::<String>(id));
+    let done = r.lost_focus();
+    let next = text.trim().to_owned();
+    let before = current.unwrap_or("").trim();
+    (done && next != before).then(|| (!next.is_empty()).then_some(next))
 }
 
 /// A dB slider that commits once (SR4): the value follows the drag in egui's temp memory and

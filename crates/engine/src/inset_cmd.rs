@@ -131,6 +131,18 @@ pub(crate) fn sb_inset(s: &mut Session, p: &Value) -> CmdResult {
     if let Some(v) = level(p, "voiceDb", assetcraft_storyboard::VOICE_DB_RANGE)? {
         inset.voice_db = v;
     }
+    match p.get("note") {
+        None => {}
+        Some(Value::Null) => inset.note = None,
+        Some(Value::String(n)) => {
+            let n = n.trim();
+            if n.len() > limits.max_string {
+                return Err(CmdError::BadParams("`note` is too long".into()));
+            }
+            inset.note = (!n.is_empty()).then(|| n.to_owned());
+        }
+        Some(_) => return Err(CmdError::BadParams("`note` must be text, or null to clear it".into())),
+    }
     // A new file: its kind from the extension unless given, and a video's length when asked.
     let new_file = matches!(p.get("asset"), Some(Value::String(_)));
     if new_file && p.get("kind").is_none() {
@@ -308,6 +320,7 @@ pub(crate) fn inset_json(i: &Inset) -> Value {
         "swap": i.swap,
         "musicDb": i.music_db,
         "voiceDb": i.voice_db,
+        "note": i.note,
     })
 }
 

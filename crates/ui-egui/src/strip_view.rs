@@ -1013,7 +1013,15 @@ fn inset_row(
                 ),
                 Path::new(&a.0).file_name().map_or(a.0.clone(), |f| f.to_string_lossy().into_owned()),
             ),
-            None => (title.to_owned(), "Drop b-roll, an interview, a host or a graphic here".to_owned()),
+            None => (
+                title.to_owned(),
+                inset.note.clone().unwrap_or_else(|| "Drop b-roll, an interview, a host or a graphic here".to_owned()),
+            ),
+        };
+        // A filled slot keeps its note beside the file's name.
+        let line2 = match (set, &inset.note) {
+            (Some(_), Some(n)) => format!("{line2} — {n}"),
+            _ => line2,
         };
         let clip = painter.with_clip_rect(rect);
         if rect.width() > 24.0 {
@@ -1056,6 +1064,9 @@ fn inset_row(
                 None => {
                     ui.weak("Empty slot");
                 }
+            }
+            if let Some(note) = crate::inset_view::note_field(ui, scene_id, inset.note.as_deref()) {
+                out.push(("storyboard.inset", json!({ "scene": scene_id, "note": note })));
             }
             let label = if set.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
             if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
