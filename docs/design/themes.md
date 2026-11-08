@@ -145,8 +145,9 @@ with one (pin + line + label). Anything fancier: EffectCraft (TH6).
 |------|------------------------------------------------------------------------------------------------|---------------------------|---------|
 | T0′  | This spec, revised for TH5–TH9 and §4b                                                          | Claude                    | done    |
 | 1a   | `crates/storyboard/src/theme.rs`: `Theme` model + hostile-input loader (rules above, `space` added); the 4 looks as built-in themes equal to today's `Look`s; `Theme::look()`; `storyboard.themes {}` lists built-ins + `Themes/*.theme.json` with load problems | Claude | building |
+| 1c   | Timed text (Paul, 2026-11-08: "theme, transition in, duration, effect, transition out, position"): `TextStyle` gains `durationMs` (up from the clip's start, in + out included; none = the whole clip), `effect` (None · Slow push · Drift up · Pulse, while up) and `exit` (Cut · Fade out · Sink · Zoom out · Erase); `TextStyle::frame_at` runs in → effect → out → hidden; `storyboard.text.style {duration, effect, exit}`; the Inspector's TEXT rows in that order with a preview of the whole run | Claude | built 2026-11-08 |
 | 1b   | Title cards and overlays take any theme id (built-in or file); the Inspector's theme picker lists them; 4 more shipped themes (TH7) | Claude | — |
-| 2    | Moves: in + out, Slide · Pop · Wipe · Stagger, beat-snapped (TH8); the Start screen's TITLE CARDS panel | Claude | — |
+| 2    | Moves: Slide · Pop · Wipe · Stagger for in and out (the out lane exists since 1c), beat-snapped durations (TH8), the theme's `motion` gains `titleOut`, `titleEffect`; the Start screen's TITLE CARDS panel | Claude | — |
 | 3    | Transitions drawn in the Viewer and the export (SF5-3b) + Dip · Slide · Push · Zoom · Whip-blur | Claude | — |
 | 4    | Title + subtitle; background choice                                                             | Claude | — |
 | 5    | Title sound (theme `sound`; CC0 picks, F2)                                                      | Claude, Paul picks sounds | — |

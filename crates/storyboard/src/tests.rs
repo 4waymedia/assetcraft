@@ -1266,3 +1266,72 @@ fn theme_files_are_checked_as_hostile_input() {
     assert_eq!(parse_color("#c9a227"), Some(0xC9A227));
     assert_eq!(parse_color("c9a227"), None);
 }
+
+/// Paul, 2026-11-08: "the step/instruction might want to set a display time for the text… a
+/// variable for duration and then the effect type for end."
+#[test]
+fn text_timing_runs_in_effect_out_then_hides() {
+    let style = TextStyle {
+        animation: TextAnimation::Fade,
+        duration_ms: Some(4000),
+        exit: TextExit::Fade,
+        ..TextStyle::default()
+    };
+    let clip = 10.0;
+    assert_eq!(style.shown_secs(clip), 4.0);
+    assert!(style.frame_at(0.1, clip).alpha < 0.6, "fading in");
+    assert_eq!(style.frame_at(2.0, clip), AnimFrame::REST, "up");
+    let out = style.frame_at(3.75, clip);
+    assert!(out.alpha > 0.0 && out.alpha < 1.0, "fading out: {out:?}");
+    assert!(style.frame_at(4.0, clip).is_hidden() && style.frame_at(9.0, clip).is_hidden(), "gone after");
+    assert_eq!(style.frame_at(f64::INFINITY, clip), AnimFrame::REST, "stills show it at rest");
+    // A duration past the clip counts as the clip.
+    assert_eq!(style.shown_secs(2.5), 2.5);
+    // No duration, no out: the text stays to the end (the old behaviour).
+    let plain = TextStyle { animation: TextAnimation::Fade, ..TextStyle::default() };
+    assert_eq!(plain.frame_at(9.99, clip), AnimFrame::REST);
+    assert_eq!(plain.frame_at(clip, clip), AnimFrame::REST);
+    // No duration but an out: it leaves as the clip ends.
+    let ends = TextStyle { exit: TextExit::Erase, ..TextStyle::default() };
+    assert!(ends.frame_at(9.6, clip).reveal < 1.0 && ends.frame_at(9.6, clip).reveal > 0.0);
+    // A duration shorter than in + out: the in finishes, the out gets what is left.
+    let tight = TextStyle {
+        animation: TextAnimation::Typewriter,
+        duration_ms: Some(1500),
+        exit: TextExit::Erase,
+        ..TextStyle::default()
+    };
+    assert!(tight.frame_at(1.19, clip).reveal > 0.9, "typing on");
+    assert!(tight.frame_at(1.4, clip).reveal < 0.5, "erasing");
+    // Effects move the text while it is up.
+    let push = TextStyle { effect: TextEffect::Push, duration_ms: Some(5000), ..TextStyle::default() };
+    assert!(push.frame_at(4.0, clip).scale > push.frame_at(1.0, clip).scale);
+    let drift = TextStyle { effect: TextEffect::Drift, ..TextStyle::default() };
+    assert!(drift.frame_at(8.0, clip).offset_y < 0.0);
+    for e in TextEffect::ALL {
+        assert_eq!(TextEffect::from_id(e.id()), Some(e));
+    }
+    for e in TextExit::ALL {
+        assert_eq!(TextExit::from_id(e.id()), Some(e));
+    }
+}
+
+#[test]
+fn text_timing_edits_round_trip_and_old_boards_load() {
+    let mut board = sample();
+    let id = board.clips[0].id;
+    assert!(set_text_timing(&mut board, id, Some(Some(3000)), Some(TextEffect::Pulse), Some(TextExit::Sink)).unwrap());
+    assert!(!set_text_timing(&mut board, id, Some(Some(3000)), None, None).unwrap(), "no change");
+    // Clamped to the allowed range.
+    set_text_timing(&mut board, id, Some(Some(10)), None, None).unwrap();
+    assert_eq!(board.clips[0].text_style.duration_ms, Some(MIN_TEXT_MS));
+    set_text_timing(&mut board, id, Some(Some(3000)), None, None).unwrap();
+    let json = board.to_json().unwrap();
+    assert!(json.contains("\"durationMs\": 3000") && json.contains("\"exit\": \"sink\""), "{json}");
+    assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
+    // Back to "until the clip ends".
+    assert!(set_text_timing(&mut board, id, Some(None), Some(TextEffect::None), Some(TextExit::None)).unwrap());
+    assert!(!board.to_json().unwrap().contains("durationMs"));
+    let shot = board.clips[1].id;
+    assert_eq!(set_text_timing(&mut board, shot, Some(Some(2000)), None, None), Err(TextError::NoText(shot)));
+}

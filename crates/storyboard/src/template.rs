@@ -167,6 +167,7 @@ fn build(name: &str, format: &str, theme: TextTheme, scenes: &[(String, Vec<Beat
                 theme,
                 animation: if b.shot == ShotType::Ttl { TextAnimation::Fade } else { TextAnimation::Rise },
                 position: TextPosition::LowerThirdLeft,
+                ..TextStyle::default()
             };
             if let Some(preset) = b.motion {
                 let kind = if b.shot == ShotType::Ttl { None } else { Some(MotionKind::PanZoom) };
@@ -297,8 +298,12 @@ pub fn credits() -> Storyboard {
     });
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(6).unwrap_or(Ticks::ZERO));
     card.description = "{title}\n{music}\nMade with AssetCraft".into();
-    card.text_style =
-        TextStyle { theme: TextTheme::Minimal, animation: TextAnimation::Fade, position: TextPosition::Center };
+    card.text_style = TextStyle {
+        theme: TextTheme::Minimal,
+        animation: TextAnimation::Fade,
+        position: TextPosition::Center,
+        ..TextStyle::default()
+    };
     card.transition_in = Transition::FadeIn;
     card.transition_out = Transition::FadeOut;
     board.clips.push(card);

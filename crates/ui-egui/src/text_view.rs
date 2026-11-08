@@ -7,7 +7,10 @@
 
 use crate::Navigator;
 use crate::storyboard_view::rgb;
-use assetcraft_storyboard::{AnimFrame, Clip, TextAnimation, TextKind, TextPosition, TextTheme};
+use assetcraft_storyboard::{
+    AnimFrame, Clip, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextStyle,
+    TextTheme,
+};
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
@@ -20,10 +23,14 @@ const CHIP_H: f32 = 14.0;
 /// at rest). A Card fills the frame with its theme's background first; an Overlay paints only
 /// the text, over whatever is already there. Clips without text paint nothing.
 pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f64) {
+    paint_text_frame(painter, frame, clip, clip.text_style.frame_at(elapsed, clip.duration.as_secs_f64()));
+}
+
+/// [`paint_text`] at a given animation frame (the Inspector's preview runs its own clock).
+fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame) {
     let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
     let style = clip.text_style;
     let look = style.theme.look();
-    let anim = style.animation.frame(elapsed);
     let painter = painter.with_clip_rect(frame.intersect(painter.clip_rect()));
     if kind == TextKind::Card {
         // Over a background asset the theme colour becomes a scrim, so the image shows through.
@@ -31,7 +38,8 @@ pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f
             if clip.background().is_some() { rgb(look.background).gamma_multiply(0.35) } else { rgb(look.background) };
         painter.rect_filled(frame, 0, fill);
     }
-    if words.trim().is_empty() {
+    // Past its duration (and its out) the words are gone; a Card keeps its background.
+    if words.trim().is_empty() || anim.is_hidden() {
         return;
     }
     let size = match kind {
@@ -185,11 +193,34 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             }
         });
         ui.end_row();
-        ui.label("Animation");
+        ui.label("In").on_hover_text("How the text arrives");
         egui::ComboBox::from_id_salt(("sb-anim", id)).selected_text(style.animation.name()).show_ui(ui, |ui| {
             for a in TextAnimation::ALL {
                 if ui.selectable_label(style.animation == a, a.name()).clicked() && style.animation != a {
                     style_edit = Some(json!({ "clip": id, "animation": a.id() }));
+                }
+            }
+        });
+        ui.end_row();
+        ui.label("Duration").on_hover_text("How long the text stays up from the clip's start, its in and out included");
+        if let Some(d) = duration_row(ui, clip) {
+            style_edit = Some(json!({ "clip": id, "duration": d }));
+        }
+        ui.end_row();
+        ui.label("Effect").on_hover_text("What the text does while it is up");
+        egui::ComboBox::from_id_salt(("sb-effect", id)).selected_text(style.effect.name()).show_ui(ui, |ui| {
+            for e in TextEffect::ALL {
+                if ui.selectable_label(style.effect == e, e.name()).clicked() && style.effect != e {
+                    style_edit = Some(json!({ "clip": id, "effect": e.id() }));
+                }
+            }
+        });
+        ui.end_row();
+        ui.label("Out").on_hover_text("How the text leaves at the end of its duration");
+        egui::ComboBox::from_id_salt(("sb-exit", id)).selected_text(style.exit.name()).show_ui(ui, |ui| {
+            for e in TextExit::ALL {
+                if ui.selectable_label(style.exit == e, e.name()).clicked() && style.exit != e {
+                    style_edit = Some(json!({ "clip": id, "exit": e.id() }));
                 }
             }
         });
@@ -227,14 +258,73 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             Color32::from_gray(0x6a),
         );
     }
-    let intro = style.animation.seconds();
-    let cycle = intro + 1.0;
-    let elapsed = if intro > 0.0 { ui.input(|i| i.time) % cycle } else { f64::INFINITY };
-    paint_text(painter, frame, clip, elapsed);
-    // Repaint every frame only during the intro; during the hold, wake once for the next replay.
-    if elapsed < intro {
-        ui.ctx().request_repaint();
-    } else if elapsed.is_finite() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((cycle - elapsed).max(0.01)));
+    let clip_secs = clip.duration.as_secs_f64();
+    let timed = style.duration_ms.is_some() || style.exit != TextExit::None || style.effect != TextEffect::None;
+    if !timed {
+        // Replays the in, then holds for a second.
+        let intro = style.animation.seconds();
+        let cycle = intro + 1.0;
+        let elapsed = if intro > 0.0 { ui.input(|i| i.time) % cycle } else { f64::INFINITY };
+        paint_text(painter, frame, clip, elapsed);
+        // Repaint every frame only during the in; during the hold, wake once for the next replay.
+        if elapsed < intro {
+            ui.ctx().request_repaint();
+        } else if elapsed.is_finite() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((cycle - elapsed).max(0.01)));
+        }
+        return;
     }
+    // In, effect, out, a beat of nothing, again. A long duration is shortened to 5 s here so
+    // the out comes round; the caption says the real numbers.
+    let shown = style.shown_secs(clip_secs);
+    let p = shown.clamp(0.5, PREVIEW_MAX_SECS);
+    let preview = TextStyle { duration_ms: Some((p * 1000.0) as u32), ..style };
+    let elapsed = ui.input(|i| i.time) % (p + PREVIEW_GAP_SECS);
+    paint_text_frame(painter, frame, clip, preview.frame_at(elapsed, p));
+    ui.ctx().request_repaint();
+    let caption = if style.duration_ms.is_some() && shown < clip_secs {
+        format!("Up {shown:.1} s of the clip's {clip_secs:.1} s, then gone")
+    } else {
+        format!("Up for the whole clip ({clip_secs:.1} s)")
+    };
+    ui.weak(caption);
 }
+
+/// The preview's longest run, in seconds, and the pause before it replays.
+const PREVIEW_MAX_SECS: f64 = 5.0;
+const PREVIEW_GAP_SECS: f64 = 0.6;
+
+/// The Duration row: "Whole clip", or seconds. A drag commits once, when it ends (one undo
+/// step); a typed value commits when it lands. Returns the `duration` param (0 = whole clip).
+fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<f64> {
+    let clip_secs = clip.duration.as_secs_f64();
+    let current = clip.text_style.duration_ms.map(|ms| f64::from(ms) / 1000.0);
+    let max = clip_secs.clamp(MIN_SECS, f64::from(MAX_TEXT_MS) / 1000.0);
+    let mut out = None;
+    ui.horizontal(|ui| {
+        let mut whole = current.is_none();
+        if ui.checkbox(&mut whole, "Whole clip").on_hover_text("Up until the clip ends").changed() {
+            // Unticked: start from three seconds (or the clip, if shorter).
+            out = Some(if whole { 0.0 } else { (max.min(3.0) * 10.0).round() / 10.0 });
+        }
+        if let Some(secs) = current {
+            let key = egui::Id::new(("sb-text-duration", clip.id.0));
+            let mut v: f64 = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(secs);
+            let r =
+                ui.add(egui::DragValue::new(&mut v).range(MIN_SECS..=max).speed(0.05).fixed_decimals(1).suffix(" s"));
+            if r.dragged() {
+                ui.data_mut(|d| d.insert_temp(key, v));
+            } else {
+                ui.data_mut(|d| d.remove::<f64>(key));
+                let v = (v * 10.0).round() / 10.0;
+                if (r.drag_stopped() || r.changed()) && (v - secs).abs() > 1e-6 {
+                    out = Some(v);
+                }
+            }
+        }
+    });
+    out
+}
+
+/// Shortest duration, in seconds.
+const MIN_SECS: f64 = MIN_TEXT_MS as f64 / 1000.0;

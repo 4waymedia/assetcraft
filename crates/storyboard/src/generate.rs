@@ -135,7 +135,7 @@ impl Pacing {
             Pacing::Family => (TextTheme::Paper, TextAnimation::Fade),
             Pacing::Hero => (TextTheme::Bold, TextAnimation::Zoom),
         };
-        TextStyle { theme, animation, position: TextPosition::LowerThirdLeft }
+        TextStyle { theme, animation, position: TextPosition::LowerThirdLeft, ..TextStyle::default() }
     }
 
     fn params(self) -> Params {

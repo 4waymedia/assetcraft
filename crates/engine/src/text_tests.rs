@@ -1,6 +1,6 @@
 use super::*;
 use assetcraft_fs::FakeFs;
-use assetcraft_storyboard::{ClipId, ShotType, TextAnimation, TextKind, TextTheme};
+use assetcraft_storyboard::{ClipId, ShotType, TextAnimation, TextEffect, TextExit, TextKind, TextTheme};
 use serde_json::json;
 
 fn session() -> Session {
@@ -85,6 +85,12 @@ fn text_commands_refuse_bad_params_without_an_undo_step() {
         ("storyboard.text.style", json!({"clip": 1, "theme": "neon"})),
         ("storyboard.text.style", json!({"clip": 1, "animation": 3})),
         ("storyboard.text.style", json!({"clip": 2, "theme": "paper"})),
+        ("storyboard.text.style", json!({"clip": 1, "duration": 0.2})),
+        ("storyboard.text.style", json!({"clip": 1, "duration": 900})),
+        ("storyboard.text.style", json!({"clip": 1, "duration": "long"})),
+        ("storyboard.text.style", json!({"clip": 1, "exit": "explode"})),
+        ("storyboard.text.style", json!({"clip": 1, "effect": "shake"})),
+        ("storyboard.text.style", json!({"clip": 2, "duration": 3})),
     ];
     for (id, p) in bad {
         assert!(matches!(s.execute(id, &p), Err(CmdError::BadParams(_))), "{id} {p}");
@@ -140,4 +146,27 @@ fn text_set_edits_what_a_card_or_overlay_shows_and_the_shot_note() {
     assert_eq!(s.boards.undo_len(), undo);
     s.execute("storyboard.undo", &json!({})).unwrap();
     assert_eq!(s.storyboard().unwrap().clip(ClipId(shot)).unwrap().overlay.as_deref(), Some("The real goal"));
+}
+
+/// Paul, 2026-11-08: "theme, transition in, duration, effect, transition out, position".
+#[test]
+fn style_sets_how_long_the_text_stays_up_and_how_it_leaves() {
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "duration": 4.5, "effect": "push", "exit": "fade"}));
+    assert_eq!(
+        (r["duration"].as_f64(), r["effect"].as_str(), r["exit"].as_str(), r["changed"].as_bool()),
+        (Some(4.5), Some("push"), Some("fade"), Some(true))
+    );
+    let st = first(&s).text_style;
+    assert_eq!((st.duration_ms, st.effect, st.exit), (Some(4500), TextEffect::Push, TextExit::Fade));
+    assert_eq!(s.boards.undo_len(), undo + 1, "one undo step for all three");
+    let saved = &run(&mut s, "storyboard.state", json!({}))["board"]["clips"][0]["textStyle"];
+    assert_eq!((saved["durationMs"].as_u64(), saved["exit"].as_str()), (Some(4500), Some("fade")));
+    // 0 = until the clip ends.
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "duration": 0}));
+    assert!(r["duration"].is_null());
+    assert_eq!(first(&s).text_style.duration_ms, None);
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(first(&s).text_style.duration_ms, Some(4500));
 }

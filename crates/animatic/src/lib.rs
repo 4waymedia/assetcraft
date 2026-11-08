@@ -339,7 +339,7 @@ impl Compositor {
         let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
         let style = clip.text_style;
         let look = style.theme.look();
-        let anim = style.animation.frame(elapsed);
+        let anim = style.frame_at(elapsed, clip.duration.as_secs_f64());
         if kind == TextKind::Card {
             let bg = rgb(look.background);
             if clip.background().is_some() {
@@ -348,7 +348,8 @@ impl Compositor {
                 draw::fill(out, bg);
             }
         }
-        if words.trim().is_empty() {
+        // Past its duration (and its out) the words are gone; a Card keeps its background.
+        if words.trim().is_empty() || anim.is_hidden() {
             return;
         }
         let (w, h) = (self.width as f32, self.height as f32);

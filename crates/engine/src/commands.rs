@@ -502,7 +502,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Text Clip Style",
         "Storyboard",
         None,
-        "{clip: number, theme?: bold|minimal|cinematic|paper, animation?: none|fade|rise|zoom|typewriter, position?: lowerThirdLeft|lowerThirdRight|center|top|bottom}",
+        "{clip: number, theme?: bold|minimal|cinematic|paper, animation?: none|fade|rise|zoom|typewriter (the in), duration?: seconds 0.5–600 (how long the text stays up from the clip's start, in and out included; 0 = until the clip ends), effect?: none|push|drift|pulse (while it is up), exit?: none|fade|sink|zoom|erase (the out), position?: lowerThirdLeft|lowerThirdRight|center|top|bottom} (one undo step)",
         crate::text_cmd::sb_text_style
     ),
     cmd!(

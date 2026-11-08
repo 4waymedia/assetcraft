@@ -62,8 +62,8 @@ pub use template::{
     credits as credits_template,
 };
 pub use text::{
-    AnimFrame, KindChange, Look, TextAnimation, TextError, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind,
-    set_text_style,
+    AnimFrame, KindChange, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextError, TextExit, TextKind,
+    TextPosition, TextStyle, TextTheme, set_text_kind, set_text_style, set_text_timing,
 };
 pub use theme::{BUNDLED_FONTS, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast, parse_color};
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};

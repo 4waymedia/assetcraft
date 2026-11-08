@@ -201,6 +201,13 @@ pub struct AnimFrame {
 impl AnimFrame {
     /// At rest: fully shown.
     pub const REST: AnimFrame = AnimFrame { alpha: 1.0, offset_y: 0.0, scale: 1.0, reveal: 1.0 };
+    /// Gone: after the text's out.
+    pub const HIDDEN: AnimFrame = AnimFrame { alpha: 0.0, offset_y: 0.0, scale: 1.0, reveal: 0.0 };
+
+    /// Whether nothing of the text shows.
+    pub fn is_hidden(&self) -> bool {
+        self.alpha <= 0.0 || self.reveal <= 0.0
+    }
 
     /// How many of `chars` characters to draw (at least one once anything shows).
     pub fn visible_chars(&self, chars: usize) -> usize {
@@ -272,6 +279,143 @@ impl TextAnimation {
         }
     }
 }
+
+/// What the text does while it is up, between its in and its out (Paul, 2026-11-08: "theme,
+/// transition in, duration, effect, transition out, position").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextEffect {
+    /// Holds still.
+    #[default]
+    None,
+    /// Grows slowly (100 % to 108 %) for as long as it is up.
+    Push,
+    /// Floats slowly upward.
+    Drift,
+    /// Breathes: a gentle swell every 1.6 s.
+    Pulse,
+}
+
+impl TextEffect {
+    /// Every effect, in menu order.
+    pub const ALL: [TextEffect; 4] = [TextEffect::None, TextEffect::Push, TextEffect::Drift, TextEffect::Pulse];
+
+    /// Id used in commands and documents.
+    pub fn id(self) -> &'static str {
+        match self {
+            TextEffect::None => "none",
+            TextEffect::Push => "push",
+            TextEffect::Drift => "drift",
+            TextEffect::Pulse => "pulse",
+        }
+    }
+
+    /// Display name.
+    pub fn name(self) -> &'static str {
+        match self {
+            TextEffect::None => "None",
+            TextEffect::Push => "Slow push",
+            TextEffect::Drift => "Drift up",
+            TextEffect::Pulse => "Pulse",
+        }
+    }
+
+    /// Parse an id.
+    pub fn from_id(id: &str) -> Option<TextEffect> {
+        TextEffect::ALL.into_iter().find(|e| e.id() == id)
+    }
+
+    /// Apply the effect to `f`, `elapsed` seconds into a text that is up for `shown` seconds.
+    fn apply(self, f: AnimFrame, elapsed: f64, shown: f64) -> AnimFrame {
+        let t = if shown > 0.0 { (elapsed / shown).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        match self {
+            TextEffect::None => f,
+            TextEffect::Push => AnimFrame { scale: f.scale * (1.0 + 0.08 * t), ..f },
+            TextEffect::Drift => AnimFrame { offset_y: f.offset_y - 0.03 * t, ..f },
+            TextEffect::Pulse => {
+                let phase = (elapsed.max(0.0) * std::f64::consts::TAU / 1.6).sin() as f32;
+                AnimFrame { scale: f.scale * (1.0 + 0.025 * phase), ..f }
+            }
+        }
+    }
+}
+
+/// How the text leaves at the end of its duration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextExit {
+    /// Gone in one frame (a cut).
+    #[default]
+    None,
+    /// Fades out.
+    Fade,
+    /// Fades out while sinking (Rise, reversed).
+    Sink,
+    /// Fades out while shrinking.
+    Zoom,
+    /// Un-types, last character first (Typewriter, reversed).
+    Erase,
+}
+
+impl TextExit {
+    /// Every exit, in menu order.
+    pub const ALL: [TextExit; 5] = [TextExit::None, TextExit::Fade, TextExit::Sink, TextExit::Zoom, TextExit::Erase];
+
+    /// Id used in commands and documents.
+    pub fn id(self) -> &'static str {
+        match self {
+            TextExit::None => "none",
+            TextExit::Fade => "fade",
+            TextExit::Sink => "sink",
+            TextExit::Zoom => "zoom",
+            TextExit::Erase => "erase",
+        }
+    }
+
+    /// Display name.
+    pub fn name(self) -> &'static str {
+        match self {
+            TextExit::None => "Cut",
+            TextExit::Fade => "Fade out",
+            TextExit::Sink => "Sink",
+            TextExit::Zoom => "Zoom out",
+            TextExit::Erase => "Erase",
+        }
+    }
+
+    /// Parse an id.
+    pub fn from_id(id: &str) -> Option<TextExit> {
+        TextExit::ALL.into_iter().find(|e| e.id() == id)
+    }
+
+    /// Length of the exit in seconds.
+    pub fn seconds(self) -> f64 {
+        match self {
+            TextExit::None => 0.0,
+            TextExit::Fade | TextExit::Sink => 0.5,
+            TextExit::Zoom => 0.4,
+            TextExit::Erase => 0.8,
+        }
+    }
+
+    /// The frame `x` (0–1) of the way through the exit.
+    fn frame(self, x: f32) -> AnimFrame {
+        let x = x.clamp(0.0, 1.0);
+        let e = x * x;
+        match self {
+            TextExit::None => AnimFrame::REST,
+            TextExit::Fade => AnimFrame { alpha: 1.0 - e, ..AnimFrame::REST },
+            TextExit::Sink => AnimFrame { alpha: 1.0 - e, offset_y: 0.06 * e, ..AnimFrame::REST },
+            TextExit::Zoom => AnimFrame { alpha: 1.0 - e, scale: 1.0 - 0.25 * e, ..AnimFrame::REST },
+            TextExit::Erase => AnimFrame { reveal: 1.0 - x, ..AnimFrame::REST },
+        }
+    }
+}
+
+/// Shortest text duration, in milliseconds.
+pub const MIN_TEXT_MS: u32 = 500;
+/// Longest text duration, in milliseconds (ten minutes; a clip is clamped to its own length).
+pub const MAX_TEXT_MS: u32 = 600_000;
 
 /// Where an Overlay sits in the frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -353,12 +497,58 @@ pub struct TextStyle {
     /// Overlay position (a Card centres its text).
     #[serde(default)]
     pub position: TextPosition,
+    /// How long the text stays up from the clip's start, in milliseconds, its in and out
+    /// included; `None` = until the clip ends. Longer than the clip counts as the clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u32>,
+    /// What it does while it is up.
+    #[serde(default, skip_serializing_if = "is_default_effect")]
+    pub effect: TextEffect,
+    /// How it leaves.
+    #[serde(default, skip_serializing_if = "is_default_exit")]
+    pub exit: TextExit,
+}
+
+fn is_default_effect(e: &TextEffect) -> bool {
+    *e == TextEffect::None
+}
+fn is_default_exit(e: &TextExit) -> bool {
+    *e == TextExit::None
 }
 
 impl TextStyle {
     /// Whether this is the default style (left out of saved documents).
     pub fn is_default(&self) -> bool {
         *self == TextStyle::default()
+    }
+
+    /// Seconds the text is up in a clip `clip_secs` long: its duration, or the clip.
+    pub fn shown_secs(&self, clip_secs: f64) -> f64 {
+        let clip = if clip_secs.is_finite() { clip_secs.max(0.0) } else { 0.0 };
+        self.duration_ms.map_or(clip, |ms| (f64::from(ms) / 1000.0).min(clip))
+    }
+
+    /// The whole life of the text, `elapsed` seconds into a clip `clip_secs` long: the in, the
+    /// effect while it is up, the out at the end of its duration, then nothing
+    /// ([`AnimFrame::HIDDEN`]). A non-finite `elapsed` is at rest (thumbnails, stills). The out
+    /// never starts before the in has finished, so a short duration shortens the out.
+    pub fn frame_at(&self, elapsed: f64, clip_secs: f64) -> AnimFrame {
+        if !elapsed.is_finite() {
+            return AnimFrame::REST;
+        }
+        let shown = self.shown_secs(clip_secs);
+        if elapsed >= shown && (self.duration_ms.is_some() || self.exit != TextExit::None) {
+            return AnimFrame::HIDDEN;
+        }
+        let intro = self.animation.seconds().min(shown);
+        let out_len = self.exit.seconds().min((shown - intro).max(0.0));
+        let out_start = shown - out_len;
+        let base = if out_len > 0.0 && elapsed >= out_start {
+            self.exit.frame(((elapsed - out_start) / out_len) as f32)
+        } else {
+            self.animation.frame(elapsed)
+        };
+        self.effect.apply(base, elapsed, shown)
     }
 }
 
@@ -443,5 +633,28 @@ pub fn set_text_style(
     s.theme = theme.unwrap_or(s.theme);
     s.animation = animation.unwrap_or(s.animation);
     s.position = position.unwrap_or(s.position);
+    Ok(clip.text_style != before)
+}
+
+/// Clip `id`'s text timing: `duration` (`Some(None)` = until the clip ends), `effect`, `exit`.
+/// `None` leaves that part as it is. Returns whether anything changed.
+pub fn set_text_timing(
+    board: &mut Storyboard,
+    id: ClipId,
+    duration: Option<Option<u32>>,
+    effect: Option<TextEffect>,
+    exit: Option<TextExit>,
+) -> Result<bool, TextError> {
+    let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
+    if clip.text_kind().is_none() {
+        return Err(TextError::NoText(id));
+    }
+    let before = clip.text_style;
+    let s = &mut clip.text_style;
+    if let Some(d) = duration {
+        s.duration_ms = d.map(|ms| ms.clamp(MIN_TEXT_MS, MAX_TEXT_MS));
+    }
+    s.effect = effect.unwrap_or(s.effect);
+    s.exit = exit.unwrap_or(s.exit);
     Ok(clip.text_style != before)
 }

@@ -6,7 +6,10 @@
 
 use crate::storyboard::{clip_id, no_board};
 use crate::{CmdError, CmdResult, Session};
-use assetcraft_storyboard::{TextAnimation, TextKind, TextPosition, TextTheme, set_text_kind, set_text_style};
+use assetcraft_storyboard::{
+    MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme, set_text_kind,
+    set_text_style, set_text_timing,
+};
 use serde_json::{Value, json};
 
 /// `storyboard.text.kind {clip, kind: card|overlay}`.
@@ -62,12 +65,25 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     let theme = parse(p, "theme", TextTheme::from_id, "bold|minimal|cinematic|paper")?;
     let animation = parse(p, "animation", TextAnimation::from_id, "none|fade|rise|zoom|typewriter")?;
     let position = parse(p, "position", TextPosition::from_id, "lowerThirdLeft|lowerThirdRight|center|top|bottom")?;
-    if theme.is_none() && animation.is_none() && position.is_none() {
-        return Err(CmdError::BadParams("give at least one of `theme`, `animation`, `position`".into()));
+    let effect = parse(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;
+    let exit = parse(p, "exit", TextExit::from_id, "none|fade|sink|zoom|erase")?;
+    let duration = text_duration(p)?;
+    if theme.is_none()
+        && animation.is_none()
+        && position.is_none()
+        && effect.is_none()
+        && exit.is_none()
+        && duration.is_none()
+    {
+        return Err(CmdError::BadParams(
+            "give at least one of `theme`, `animation`, `duration`, `effect`, `exit`, `position`".into(),
+        ));
     }
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
-    let changed =
-        set_text_style(&mut board, id, theme, animation, position).map_err(|e| CmdError::BadParams(e.to_string()))?;
+    let bad = |e: assetcraft_storyboard::TextError| CmdError::BadParams(e.to_string());
+    let styled = set_text_style(&mut board, id, theme, animation, position).map_err(bad)?;
+    let timed = set_text_timing(&mut board, id, duration, effect, exit).map_err(bad)?;
+    let changed = styled || timed;
     let style = board.clip(id).map(|c| c.text_style).unwrap_or_default();
     if changed {
         s.boards.checkpoint();
@@ -79,7 +95,26 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         "theme": style.theme.id(),
         "animation": style.animation.id(),
         "position": style.position.id(),
+        "duration": style.duration_ms.map(|ms| f64::from(ms) / 1000.0),
+        "effect": style.effect.id(),
+        "exit": style.exit.id(),
     }))
+}
+
+/// `duration`: seconds the text stays up (0.5–600), or `0` for until the clip ends.
+fn text_duration(p: &Value) -> Result<Option<Option<u32>>, CmdError> {
+    let Some(v) = p.get("duration").filter(|v| !v.is_null()) else { return Ok(None) };
+    let secs = v.as_f64().filter(|s| s.is_finite()).ok_or_else(|| {
+        CmdError::BadParams("`duration` must be seconds (0.5–600), or 0 for until the clip ends".into())
+    })?;
+    if secs == 0.0 {
+        return Ok(Some(None));
+    }
+    let ms = (secs * 1000.0).round();
+    if ms < f64::from(MIN_TEXT_MS) || ms > f64::from(MAX_TEXT_MS) {
+        return Err(CmdError::BadParams(format!("`duration` {secs} s is outside 0.5–600 s (0 = until the clip ends)")));
+    }
+    Ok(Some(Some(ms as u32)))
 }
 
 fn parse<T>(p: &Value, key: &str, from_id: fn(&str) -> Option<T>, ids: &str) -> Result<Option<T>, CmdError> {

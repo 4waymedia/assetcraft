@@ -1606,3 +1606,40 @@ fn the_inset_slot_menu_stays_open_while_typing_its_note() {
     let note = nav.session().storyboard().unwrap().scenes[0].inset.as_ref().and_then(|i| i.note.clone());
     assert_eq!(note.as_deref(), Some("B-roll: the hands"));
 }
+
+/// Paul, 2026-11-08: "theme, transition in, duration, effect, transition out, position". The
+/// Inspector draws a timed title — the preview plays in, effect, out and the gap — and the
+/// text style the rows show is the one the command set.
+#[test]
+fn the_inspector_previews_a_timed_title_through_its_out() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let card = nav
+        .session()
+        .storyboard()
+        .unwrap()
+        .clips
+        .iter()
+        .find(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl)
+        .unwrap()
+        .id
+        .0;
+    nav.run("storyboard.select", json!({ "clip": card }));
+    let r = nav
+        .run(
+            "storyboard.text.style",
+            json!({ "clip": card, "animation": "rise", "duration": 2.0, "effect": "pulse", "exit": "sink" }),
+        )
+        .expect("styled");
+    assert_eq!(r["exit"], "sink");
+    // Across a whole preview cycle (2 s up + 0.6 s gap), frame by frame.
+    let mut t = 0.0;
+    while t < 3.0 {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.1;
+    }
+    let st = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style;
+    assert_eq!((st.duration_ms, st.exit), (Some(2000), assetcraft_storyboard::TextExit::Sink));
+}
