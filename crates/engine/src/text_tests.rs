@@ -1,6 +1,6 @@
 use super::*;
 use assetcraft_fs::FakeFs;
-use assetcraft_storyboard::{ShotType, TextAnimation, TextKind, TextTheme};
+use assetcraft_storyboard::{ClipId, ShotType, TextAnimation, TextKind, TextTheme};
 use serde_json::json;
 
 fn session() -> Session {
@@ -99,4 +99,45 @@ fn text_commands_refuse_bad_params_without_an_undo_step() {
         empty.execute("storyboard.text.kind", &json!({"clip": 1, "kind": "card"})),
         Err(CmdError::Unavailable(_))
     ));
+}
+
+#[test]
+fn text_set_edits_what_a_card_or_overlay_shows_and_the_shot_note() {
+    let mut s = session();
+    let board = s.storyboard().unwrap().clone();
+    let card = board.clips.iter().find(|c| c.shot_type == ShotType::Ttl).unwrap().id.0;
+    let shot = board.clips.iter().find(|c| c.shot_type != ShotType::Ttl && c.overlay.is_none()).unwrap().id.0;
+    let undo = s.boards.undo_len();
+    // A card: its text is its description; two lines kept, each trimmed.
+    let r = s.execute("storyboard.text.set", &json!({"clip": card, "text": "  Step 1 \n Wire the switch "})).unwrap();
+    assert_eq!(r["text"], "Step 1\nWire the switch");
+    assert_eq!(s.storyboard().unwrap().clip(ClipId(card)).unwrap().description, "Step 1\nWire the switch");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    // A plain shot: text adds an overlay; description is the shot note; "" removes the overlay.
+    s.execute("storyboard.text.set", &json!({"clip": shot, "text": "The goal", "description": "Wide of the bench"}))
+        .unwrap();
+    let c = s.storyboard().unwrap().clip(ClipId(shot)).unwrap().clone();
+    assert_eq!((c.overlay.as_deref(), c.description.as_str()), (Some("The goal"), "Wide of the bench"));
+    assert_eq!(c.text_kind(), Some(TextKind::Overlay));
+    assert_eq!(s.boards.undo_len(), undo + 2, "both fields in one step");
+    s.execute("storyboard.text.set", &json!({"clip": shot, "text": "The real goal"})).unwrap();
+    assert_eq!(s.storyboard().unwrap().clip(ClipId(shot)).unwrap().overlay.as_deref(), Some("The real goal"));
+    s.execute("storyboard.text.set", &json!({"clip": shot, "text": ""})).unwrap();
+    assert!(s.storyboard().unwrap().clip(ClipId(shot)).unwrap().overlay.is_none());
+    // Unchanged: no step. Refusals: no step.
+    let undo = s.boards.undo_len();
+    let r = s.execute("storyboard.text.set", &json!({"clip": shot, "description": "Wide of the bench"})).unwrap();
+    assert_eq!(r["changed"], false);
+    for bad in [
+        json!({"clip": shot}),
+        json!({"clip": shot, "text": 3}),
+        json!({"clip": shot, "text": "x".repeat(600)}),
+        json!({"clip": shot, "text": "bell\u{7}"}),
+        json!({"clip": 999, "text": "x"}),
+    ] {
+        assert!(matches!(s.execute("storyboard.text.set", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    assert_eq!(s.boards.undo_len(), undo);
+    s.execute("storyboard.undo", &json!({})).unwrap();
+    assert_eq!(s.storyboard().unwrap().clip(ClipId(shot)).unwrap().overlay.as_deref(), Some("The real goal"));
 }

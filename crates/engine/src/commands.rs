@@ -489,6 +489,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.text.set",
+        "Clip Text",
+        "Storyboard",
+        None,
+        "{clip: number, text?: string, description?: string} (the words on screen — a title card's text, an overlay's text; on a plain shot `text` adds an overlay, `\"\"` on an overlay removes it — and the shot note; line breaks kept; one undo step)",
+        crate::text_cmd::sb_text_set
+    ),
+    cmd!(
+        EDIT,
         "storyboard.text.style",
         "Text Clip Style",
         "Storyboard",

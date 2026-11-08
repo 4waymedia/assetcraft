@@ -101,3 +101,65 @@ fn plural(n: usize) -> &'static str {
 fn board_background(s: &Session, id: assetcraft_storyboard::ClipId) -> bool {
     s.storyboard().and_then(|b| b.clip(id)).is_some_and(|c| c.background().is_some())
 }
+
+/// Longest clip text accepted, in characters (a card holds a few lines, not a page).
+pub const MAX_CLIP_TEXT: usize = 500;
+
+/// `storyboard.text.set {clip, text?, description?}`: what a clip shows and what it is.
+/// `text` is the words on screen — a title card's text, an overlay's text; on a plain shot it
+/// adds an overlay (`""` on an overlay removes it). `description` is the shot note; on a title
+/// card it is the same thing as `text`. Line breaks are kept (two-line titles); each line is
+/// trimmed. One undo step; unchanged → none.
+pub(crate) fn sb_text_set(s: &mut Session, p: &Value) -> CmdResult {
+    let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
+    let field = |name: &str| -> Result<Option<String>, CmdError> {
+        match p.get(name) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(t)) => {
+                let t: String = t.lines().map(str::trim).collect::<Vec<_>>().join("\n").trim().to_owned();
+                if t.chars().count() > MAX_CLIP_TEXT || t.chars().any(|c| c.is_control() && c != '\n') {
+                    return Err(CmdError::BadParams(format!(
+                        "`{name}` must be at most {MAX_CLIP_TEXT} characters, without control characters"
+                    )));
+                }
+                Ok(Some(t))
+            }
+            Some(_) => Err(CmdError::BadParams(format!("`{name}` must be text"))),
+        }
+    };
+    let (text, description) = (field("text")?, field("description")?);
+    if text.is_none() && description.is_none() {
+        return Err(CmdError::BadParams("give `text` or `description`".into()));
+    }
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let index = board.index_of(id).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", id.0)))?;
+    let clip = &mut board.clips[index];
+    let before = clip.clone();
+    let card = clip.shot_type == assetcraft_storyboard::ShotType::Ttl;
+    if let Some(t) = text {
+        if card {
+            clip.description = t;
+        } else if t.is_empty() {
+            clip.overlay = None;
+        } else {
+            clip.overlay = Some(t);
+        }
+    }
+    if let Some(d) = description {
+        clip.description = d;
+    }
+    let changed = *clip != before;
+    let shown = clip.text().unwrap_or("").to_owned();
+    let desc = clip.description.clone();
+    if changed {
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({
+        "clip": id.0,
+        "changed": changed,
+        "text": shown,
+        "description": desc,
+        "message": format!("Clip #{:02}: {}", index + 1, if shown.is_empty() { desc.as_str() } else { shown.as_str() }),
+    }))
+}

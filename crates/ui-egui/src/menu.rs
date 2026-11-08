@@ -69,6 +69,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.voiceover",
     // The Inspector's theme picker lists them (themes step 1b).
     "storyboard.themes",
+    // The Inspector's text and description fields drive it.
+    "storyboard.text.set",
     "storyboard.undo",
     "storyboard.redo",
     "storyboard.state",

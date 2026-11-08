@@ -579,6 +579,35 @@ fn show_section(
         .filter(|i| i.asset.is_some() && clip.shot_type != ShotType::Ttl);
     let Some(inset) = inset else {
         show_clip(nav, ui, frame, clip, index, elapsed);
+        // An empty slot with a note: a dashed box where the inset will go, with the note — a
+        // planning aid in the Viewer only, never in the export.
+        if let Some(slot) = board
+            .scenes
+            .iter()
+            .find(|s| s.id == clip.scene_id)
+            .and_then(|s| s.inset.as_ref())
+            .filter(|i| i.asset.is_none() && i.note.is_some() && clip.shot_type != ShotType::Ttl)
+        {
+            let r = inset_corner(frame, slot.corner, slot.size);
+            let p = ui.painter();
+            let dash = Color32::from_gray(0xb0);
+            for (a, b) in [
+                (r.left_top(), r.right_top()),
+                (r.right_top(), r.right_bottom()),
+                (r.right_bottom(), r.left_bottom()),
+                (r.left_bottom(), r.left_top()),
+            ] {
+                p.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, dash), 6.0, 4.0));
+            }
+            p.rect_filled(r, 0, Color32::from_black_alpha(90));
+            p.with_clip_rect(r).text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                slot.note.as_deref().unwrap_or(""),
+                FontId::proportional((r.height() * 0.12).clamp(9.0, 14.0)),
+                Color32::from_gray(0xe0),
+            );
+        }
         return;
     };
     let corner = inset_corner(frame, inset.corner, inset.size);
@@ -1020,7 +1049,8 @@ fn inset_row(
         };
         // A filled slot keeps its note beside the file's name.
         let line2 = match (set, &inset.note) {
-            (Some(_), Some(n)) => format!("{line2} — {n}"),
+            // The note first: a long file name would otherwise hide it.
+            (Some(_), Some(n)) => format!("{n} — {line2}"),
             _ => line2,
         };
         let clip = painter.with_clip_rect(rect);
@@ -1065,7 +1095,7 @@ fn inset_row(
                     ui.weak("Empty slot");
                 }
             }
-            if let Some(note) = crate::inset_view::note_field(ui, scene_id, inset.note.as_deref()) {
+            if let Some(note) = crate::inset_view::note_field(ui, "menu", scene_id, inset.note.as_deref()) {
                 out.push(("storyboard.inset", json!({ "scene": scene_id, "note": note })));
             }
             let label = if set.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
@@ -1131,9 +1161,14 @@ fn inset_row(
                 }
             }
         };
-        egui::Popup::menu(&response).id(egui::Id::new(("sb-inset-menu", scene_id))).show(|ui| options(ui, &mut out));
+        egui::Popup::menu(&response)
+            .id(egui::Id::new(("sb-inset-menu", scene_id)))
+            // A click inside (the note field, a slider) must not close it.
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| options(ui, &mut out));
         egui::Popup::context_menu(&response)
             .id(egui::Id::new(("sb-inset-ctx", scene_id)))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| options(ui, &mut out));
     }
     out
@@ -1196,31 +1231,34 @@ fn voice_row(
         out.push(("storyboard.voiceover", json!({ "asset": asset.0.clone() })));
     }
     let focused = crate::storyboard_view::focused_file(nav);
-    egui::Popup::menu(&response).id(egui::Id::new("sb-voiceover-menu")).show(|ui| {
-        ui.set_min_width(220.0);
-        ui.label(RichText::new("VOICEOVER").small().strong());
-        let label = if vo.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
-        if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
-            && let Some(p) = &focused
-        {
-            out.push(("storyboard.voiceover", json!({ "asset": p.to_string_lossy() })));
-            ui.close();
-        }
-        if let Some(v) = vo {
-            let (m, r) = (assetcraft_storyboard::MUSIC_DB_RANGE, assetcraft_storyboard::VOICE_DB_RANGE);
-            if let Some(db) = crate::inset_view::level_slider(ui, ("vo-music", 0), "Music", v.music_db, m) {
-                out.push(("storyboard.voiceover", json!({ "musicDb": db })));
-            }
-            if let Some(db) = crate::inset_view::level_slider(ui, ("vo-voice", 0), "Voice", v.voice_db, r) {
-                out.push(("storyboard.voiceover", json!({ "voiceDb": db })));
-            }
-            ui.separator();
-            if ui.button("Remove the voiceover").clicked() {
-                out.push(("storyboard.voiceover", json!({ "asset": null })));
+    egui::Popup::menu(&response)
+        .id(egui::Id::new("sb-voiceover-menu"))
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(RichText::new("VOICEOVER").small().strong());
+            let label = if vo.is_some() { "Replace with Organizer selection" } else { "Use Organizer selection" };
+            if ui.add_enabled(focused.is_some(), egui::Button::new(label)).clicked()
+                && let Some(p) = &focused
+            {
+                out.push(("storyboard.voiceover", json!({ "asset": p.to_string_lossy() })));
                 ui.close();
             }
-        }
-    });
+            if let Some(v) = vo {
+                let (m, r) = (assetcraft_storyboard::MUSIC_DB_RANGE, assetcraft_storyboard::VOICE_DB_RANGE);
+                if let Some(db) = crate::inset_view::level_slider(ui, ("vo-music", 0), "Music", v.music_db, m) {
+                    out.push(("storyboard.voiceover", json!({ "musicDb": db })));
+                }
+                if let Some(db) = crate::inset_view::level_slider(ui, ("vo-voice", 0), "Voice", v.voice_db, r) {
+                    out.push(("storyboard.voiceover", json!({ "voiceDb": db })));
+                }
+                ui.separator();
+                if ui.button("Remove the voiceover").clicked() {
+                    out.push(("storyboard.voiceover", json!({ "asset": null })));
+                    ui.close();
+                }
+            }
+        });
     out
 }
 

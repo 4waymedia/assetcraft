@@ -403,17 +403,28 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
             ui.weak(format!("Scene: {title}"));
         }
         ui.add_space(6.0);
-        field(ui, "Description", if clip.description.is_empty() { "—" } else { &clip.description });
+        if clip.shot_type == assetcraft_storyboard::ShotType::Ttl {
+            // A title card's description is its text: edited in TEXT below.
+            field(ui, "Description", "The card's text (TEXT below)");
+        } else {
+            ui.label(RichText::new("Description").size(10.0).color(ui.visuals().weak_text_color()));
+            let id = egui::Id::new(("sb-clip-desc", clip.id.0));
+            if let Some(d) =
+                crate::inset_view::commit_field(ui, id, &clip.description, false, "What the shot is (Enter saves)")
+            {
+                nav.run("storyboard.text.set", serde_json::json!({ "clip": clip.id.0, "description": d }));
+            }
+            ui.add_space(4.0);
+        }
         crate::strip_view::duration_field(nav, ui, &board, &clip);
         field(ui, "Transitions", &format!("{:?} in · {:?} out", clip.transition_in, clip.transition_out));
         if clip.sync_to_downbeat {
             ui.label(RichText::new("◆ Start locked to downbeat").color(AI_TEXT));
         }
         ui.add_space(6.0);
-        if clip.text_kind().is_some() {
-            crate::text_view::inspector_section(nav, ui, &clip);
-            ui.add_space(6.0);
-        }
+        // TEXT for every clip: a plain shot gets a field to put text over it.
+        crate::text_view::inspector_section(nav, ui, &clip);
+        ui.add_space(6.0);
         section(ui, if clip.shot_type.accepts_assets() { "SHOT" } else { "BACKGROUND" });
         if !clip.shot_type.accepts_assets() {
             // A title card: an optional background asset under the words (finding B5).

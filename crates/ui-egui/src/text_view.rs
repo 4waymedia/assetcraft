@@ -137,9 +137,30 @@ pub(crate) fn switch_kind(nav: &mut Navigator, clip: &Clip, to: TextKind) {
 /// The Inspector's TEXT section: Card | Overlay, theme, animation, position, and a preview
 /// that replays the intro.
 pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
-    let Some(kind) = clip.text_kind() else { return };
+    let Some(kind) = clip.text_kind() else {
+        // A plain shot: one field puts text over it (it becomes an Overlay).
+        crate::storyboard_view::section(ui, "TEXT");
+        let id = egui::Id::new(("sb-clip-text", clip.id.0));
+        if let Some(t) = crate::inset_view::commit_field(ui, id, "", true, "Add text over this shot…")
+            && !t.is_empty()
+        {
+            nav.run("storyboard.text.set", json!({ "clip": clip.id.0, "text": t }));
+        }
+        return;
+    };
     let style = clip.text_style;
     crate::storyboard_view::section(ui, "TEXT");
+    // The words on screen (Paul, 2026-11-08: "I am unable to change the text: 'The goal'").
+    // Enter for a new line (two-line titles); Ctrl+Enter or clicking away saves.
+    let id = egui::Id::new(("sb-clip-text", clip.id.0));
+    let hint = match kind {
+        TextKind::Card => "Title text (Ctrl+Enter saves)",
+        TextKind::Overlay => "Text over the shot; empty removes it (Ctrl+Enter saves)",
+    };
+    if let Some(t) = crate::inset_view::commit_field(ui, id, clip.text().unwrap_or(""), true, hint) {
+        nav.run("storyboard.text.set", json!({ "clip": clip.id.0, "text": t }));
+    }
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Type");
         for k in TextKind::ALL {

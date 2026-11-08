@@ -1465,7 +1465,7 @@ fn typing_a_note_in_the_inspectors_inset_section_saves_it_on_enter() {
     nav.run("storyboard.select", json!({ "clip": 2 }));
     let mut t = 0.0;
     frame(&ctx, &mut nav, Vec::new(), t);
-    ctx.memory_mut(|m| m.request_focus(egui::Id::new(("sb-inset-note", scene)).with("edit")));
+    ctx.memory_mut(|m| m.request_focus(egui::Id::new(("sb-inset-note", "inspector", scene)).with("edit")));
     for events in [
         Vec::new(),
         vec![Event::Text("Interview: Sam on setup".into())],
@@ -1485,4 +1485,124 @@ fn typing_a_note_in_the_inspectors_inset_section_saves_it_on_enter() {
     assert_eq!(note.as_deref(), Some("Interview: Sam on setup"));
     nav.run("storyboard.undo", json!({}));
     assert!(nav.session().storyboard().unwrap().scenes[0].inset.is_none(), "one undo step");
+}
+
+#[test]
+fn the_inspector_edits_a_clips_on_screen_text_and_its_description() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let shot = nav
+        .session()
+        .storyboard()
+        .unwrap()
+        .clips
+        .iter()
+        .find(|c| c.shot_type != assetcraft_storyboard::ShotType::Ttl && c.overlay.is_none())
+        .unwrap()
+        .id
+        .0;
+    nav.run("storyboard.select", json!({ "clip": shot }));
+    let key = |key: egui::Key, command: bool| Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: if command { Modifiers::COMMAND } else { Modifiers::NONE },
+    };
+    let mut t = 0.0;
+    let mut step = |nav: &mut Navigator, events: Vec<Event>| {
+        t += 0.05;
+        frame(&ctx, nav, events, t);
+    };
+    step(&mut nav, Vec::new());
+    // TEXT on a plain shot: type, Ctrl+Enter → an overlay with that text.
+    ctx.memory_mut(|m| m.request_focus(egui::Id::new(("sb-clip-text", shot)).with("edit")));
+    step(&mut nav, Vec::new());
+    step(&mut nav, vec![Event::Text("The goal".into())]);
+    step(&mut nav, vec![key(egui::Key::Enter, true)]);
+    step(&mut nav, Vec::new());
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(shot)).unwrap().clone();
+    assert_eq!(clip.overlay.as_deref(), Some("The goal"));
+    // Description: a single line, Enter saves.
+    ctx.memory_mut(|m| m.request_focus(egui::Id::new(("sb-clip-desc", shot)).with("edit")));
+    step(&mut nav, Vec::new());
+    step(&mut nav, vec![Event::Text(" (wide)".into())]);
+    step(&mut nav, vec![key(egui::Key::Enter, false)]);
+    step(&mut nav, Vec::new());
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(shot)).unwrap().clone();
+    assert!(clip.description.ends_with("(wide)"), "{:?}", clip.description);
+    // Each was one undo step.
+    nav.run("storyboard.undo", json!({}));
+    nav.run("storyboard.undo", json!({}));
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(shot)).unwrap().clone();
+    assert!(clip.overlay.is_none() && !clip.description.ends_with("(wide)"));
+}
+
+#[test]
+fn the_inset_slot_menu_stays_open_while_typing_its_note() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let scene = nav.session().storyboard().unwrap().scenes[0].id.0;
+    let mut t = 0.0;
+    let mut step = |nav: &mut Navigator, events: Vec<Event>| {
+        t += 0.05;
+        frame(&ctx, nav, events, t);
+    };
+    step(&mut nav, Vec::new());
+    // A click across three frames: move, press, release (one frame would be no click to egui).
+    let click = |nav: &mut Navigator, step: &mut dyn FnMut(&mut Navigator, Vec<Event>), pos: Pos2| {
+        step(nav, vec![Event::PointerMoved(pos)]);
+        step(
+            nav,
+            vec![Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        step(
+            nav,
+            vec![Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+    };
+    let slot = ctx.read_response(egui::Id::new(("sb-inset", scene))).map(|r| r.rect.center()).expect("the slot");
+    click(&mut nav, &mut step, slot);
+    // A popup's first frame is a sizing pass: let it settle before reading where the field is.
+    step(&mut nav, Vec::new());
+    step(&mut nav, Vec::new());
+    step(&mut nav, Vec::new());
+    let field = ctx
+        .read_response(egui::Id::new(("sb-inset-note", "menu", scene)).with("edit"))
+        .map(|r| r.rect.center())
+        .expect("the menu's note field");
+    click(&mut nav, &mut step, field);
+    step(&mut nav, Vec::new());
+    assert!(
+        ctx.read_response(egui::Id::new(("sb-inset-note", "menu", scene)).with("edit")).is_some(),
+        "still open after the click"
+    );
+    step(&mut nav, vec![Event::Text("B-roll: the hands".into())]);
+    step(
+        &mut nav,
+        vec![Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+    );
+    step(&mut nav, Vec::new());
+    let note = nav.session().storyboard().unwrap().scenes[0].inset.as_ref().and_then(|i| i.note.clone());
+    assert_eq!(note.as_deref(), Some("B-roll: the hands"));
 }

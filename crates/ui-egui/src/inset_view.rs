@@ -44,7 +44,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyb
         edit = Some(json!({ "scene": scene.0, "asset": p.to_string_lossy() }));
     }
     let i = inset.clone().unwrap_or_else(|| assetcraft_storyboard::Inset::slot(InsetKind::Video));
-    if let Some(note) = note_field(ui, scene.0, i.note.as_deref()) {
+    if let Some(note) = note_field(ui, "inspector", scene.0, i.note.as_deref()) {
         edit = Some(json!({ "scene": scene.0, "note": note }));
     }
     ui.add_space(4.0);
@@ -119,27 +119,47 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, board: &Storyb
     ui.add_space(6.0);
 }
 
-/// The slot's note (what belongs there, in the user's words): a one-line field whose text lives
-/// in egui temp memory while it has focus, committed on Enter or when focus leaves — one
-/// `storyboard.inset {note}`, one undo step. Returns `Some(new)` (`None` inside = cleared).
-pub(crate) fn note_field(ui: &mut Ui, scene: u32, current: Option<&str>) -> Option<Option<String>> {
-    let id = egui::Id::new(("sb-inset-note", scene));
-    let mut text: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.unwrap_or("").to_owned());
-    let r = ui.add(
+/// A text field that commits once: its text lives in egui temp memory while it has focus, and
+/// comes back when focus leaves (Enter on a single line, a click away, Tab) if it changed — so
+/// one edit is one command, one undo step. `multiline`: Enter makes a new line and Ctrl+Enter
+/// or a click away saves. Returns the trimmed new text.
+pub(crate) fn commit_field(ui: &mut Ui, id: egui::Id, current: &str, multiline: bool, hint: &str) -> Option<String> {
+    let mut text: String = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_owned());
+    // Read Ctrl+Enter before the field: a multi-line field consumes Enter.
+    let focused = ui.memory(|m| m.has_focus(id.with("edit")));
+    let ctrl_enter =
+        multiline && focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+    let edit = if multiline {
+        egui::TextEdit::multiline(&mut text).desired_rows(2)
+    } else {
         egui::TextEdit::singleline(&mut text)
-            .id(id.with("edit"))
-            .hint_text("Note: what goes here (e.g. B-roll: close on the hands)")
-            .desired_width(f32::INFINITY),
-    );
-    if r.has_focus() {
+    };
+    let r = ui.add(edit.id(id.with("edit")).hint_text(hint).desired_width(f32::INFINITY));
+    if r.has_focus() && !ctrl_enter {
         ui.data_mut(|d| d.insert_temp(id, text));
         return None;
     }
+    if ctrl_enter {
+        r.surrender_focus();
+    }
     ui.data_mut(|d| d.remove::<String>(id));
-    let done = r.lost_focus();
     let next = text.trim().to_owned();
-    let before = current.unwrap_or("").trim();
-    (done && next != before).then(|| (!next.is_empty()).then_some(next))
+    ((r.lost_focus() || ctrl_enter) && next != current.trim()).then_some(next)
+}
+
+/// The slot's note (what belongs there, in the user's words): a [`commit_field`]. Returns
+/// `Some(new)` (`None` inside = cleared).
+/// `place` keeps the Inspector's field and the slot menu's apart: one widget id per place, or
+/// egui sees one field in two layers (focus jumps, the menu closes).
+pub(crate) fn note_field(ui: &mut Ui, place: &str, scene: u32, current: Option<&str>) -> Option<Option<String>> {
+    commit_field(
+        ui,
+        egui::Id::new(("sb-inset-note", place, scene)),
+        current.unwrap_or(""),
+        false,
+        "Note: what goes here (e.g. B-roll: close on the hands)",
+    )
+    .map(|n| (!n.is_empty()).then_some(n))
 }
 
 /// A dB slider that commits once (SR4): the value follows the drag in egui's temp memory and
