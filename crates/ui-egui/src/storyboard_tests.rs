@@ -242,8 +242,12 @@ fn recut_shows_a_toast_not_a_status_message() {
 }
 
 /// A folder with one cue map (32 bars at 120 BPM) for generation tests.
+/// A fresh music folder for one test. Tests run in parallel and each deletes its folder when
+/// done, so every call gets its own (a counter, not `line!()`, which is always this line).
 fn cue_folder() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ac-cue-{}-{}", std::process::id(), line!()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("ac-cue-{}-{n}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let (sr, bar) = (48_000u64, 96_000u64);
     let sec = |a: u64, b: u64, l: &str, e: f32| json!({"start": a * bar, "end": b * bar, "label": l, "energy": e});
