@@ -1214,7 +1214,7 @@ fn built_in_themes_paint_exactly_todays_looks_and_round_trip_as_files() {
         assert!(warnings.is_empty(), "{}: {warnings:?}", t.id());
         assert!(back.title_in().is_some());
     }
-    assert_eq!(Theme::builtins().len(), 4);
+    assert_eq!(Theme::builtins().len(), 8);
 }
 
 #[test]
@@ -1334,4 +1334,85 @@ fn text_timing_edits_round_trip_and_old_boards_load() {
     assert!(!board.to_json().unwrap().contains("durationMs"));
     let shot = board.clips[1].id;
     assert_eq!(set_text_timing(&mut board, shot, Some(Some(2000)), None, None), Err(TextError::NoText(shot)));
+}
+
+/// Themes step 1b-i (Paul, 2026-11-10: "build it" — the spec's §4 #5, #6, #8, #13).
+#[test]
+fn the_four_new_themes_save_by_their_spec_ids_and_read_on_their_background() {
+    let mut board = sample();
+    let id = board.clips[0].id;
+    for (t, want) in [
+        (TextTheme::NoirGold, "noir-gold"),
+        (TextTheme::NeonNight, "neon-night"),
+        (TextTheme::FieldNotes, "field-notes"),
+        (TextTheme::Blueprint, "blueprint"),
+    ] {
+        assert_eq!(t.id(), want);
+        assert_eq!(TextTheme::from_id(want), Some(t));
+        set_text_style(&mut board, id, Some(t), None, None).unwrap();
+        let json = board.to_json().unwrap();
+        assert!(json.contains(&format!("\"theme\": \"{want}\"")), "{json}");
+        assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
+        let look = t.look();
+        assert!(contrast(look.text, look.background) >= 4.5, "{want}: text must read on its card");
+        assert!(contrast(t.accent(), look.background) >= 3.0, "{want}: the accent shows on the card");
+    }
+    // Ids are unique, and a board from before still loads its old ids.
+    let ids: std::collections::HashSet<&str> = TextTheme::ALL.iter().map(|t| t.id()).collect();
+    assert_eq!(ids.len(), TextTheme::ALL.len());
+    assert_eq!(TextTheme::from_id("paper"), Some(TextTheme::Paper));
+}
+
+/// Themes 1d (Paul, 2026-11-10: "themes that are more than just a solid color and font size…
+/// lets get the base working").
+#[test]
+fn a_backdrop_paints_gradient_vignette_and_steady_grain() {
+    let flat = Backdrop::solid(0x204060);
+    assert_eq!(flat.color_at(0.1, 0.9), [32.0, 64.0, 96.0]);
+    assert_eq!(flat.grain_at(3, 4), 0.0);
+    // 90° runs top to bottom: the first stop at the top, the second at the bottom.
+    let g = Backdrop::gradient(0xffffff, 0x000000, 90.0, 0.0, 0.0);
+    assert_eq!(g.color_at(0.5, 0.0), [255.0, 255.0, 255.0]);
+    assert_eq!(g.color_at(0.5, 1.0), [0.0, 0.0, 0.0]);
+    assert!((g.color_at(0.2, 0.5)[0] - 127.5).abs() < 0.01, "even across");
+    // 0° runs left to right.
+    let h = Backdrop::gradient(0x000000, 0xff0000, 0.0, 0.0, 0.0);
+    assert!(h.color_at(0.9, 0.5)[0] > h.color_at(0.1, 0.5)[0]);
+    // Vignette darkens the corners, not the middle.
+    let v = Backdrop { vignette: 0.8, ..Backdrop::solid(0xc0c0c0) };
+    assert_eq!(v.color_at(0.5, 0.5), [192.0, 192.0, 192.0]);
+    assert!(v.color_at(0.0, 0.0)[0] < 100.0);
+    // Grain: the same at the same pixel, different nearby, bounded.
+    let n = Backdrop { grain: 1.0, ..Backdrop::solid(0x808080) };
+    assert_eq!(n.grain_at(10, 20), n.grain_at(10, 20));
+    assert!((0..64).any(|x| n.grain_at(x, 0) != n.grain_at(0, 0)));
+    assert!((0..256).all(|x| n.grain_at(x, 7).abs() <= 28.0));
+    // Every built-in has depth now: a gradient, grain or vignette.
+    for t in TextTheme::ALL {
+        let b = t.look().backdrop;
+        assert!(b.count > 1 || b.grain > 0.0 || b.vignette > 0.0, "{}", t.id());
+    }
+}
+
+#[test]
+fn theme_files_carry_the_gradient_and_the_accent_bar() {
+    let mut theme = Theme::builtin(TextTheme::Blueprint);
+    assert_eq!(theme.background.kind, BackgroundKind::Gradient);
+    assert!(theme.decor.accent_bar);
+    theme.background.stops = vec!["#102030".into(), "#203040".into(), "#304050".into()];
+    theme.background.angle = 45.0;
+    let json = theme.to_json();
+    assert!(json.contains("\"accentBar\": true"), "{json}");
+    let back = Theme::parse(json.as_bytes(), false).unwrap().0;
+    let look = back.look();
+    assert_eq!((look.backdrop.count, look.backdrop.stops), (3, [0x102030, 0x203040, 0x304050, 0x304050]));
+    assert_eq!(look.accent, Some(0xffd23f));
+    // No bar unless the file asks; an old file without `decor` loads with none.
+    theme.decor.accent_bar = false;
+    assert!(!theme.to_json().contains("decor"));
+    assert_eq!(Theme::parse(theme.to_json().as_bytes(), false).unwrap().0.look().accent, None);
+    // A stop the text can't be read on is a warning, not a refusal.
+    theme.background.stops = vec!["#1E4F8F".into(), "#FFFFFF".into()];
+    let (_, warnings) = Theme::parse(theme.to_json().as_bytes(), false).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("#FFFFFF")), "{warnings:?}");
 }

@@ -8,8 +8,8 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Clip, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextStyle,
-    TextTheme,
+    AnimFrame, Backdrop, Clip, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition,
+    TextStyle, TextTheme,
 };
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -34,9 +34,11 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
     let painter = painter.with_clip_rect(frame.intersect(painter.clip_rect()));
     if kind == TextKind::Card {
         // Over a background asset the theme colour becomes a scrim, so the image shows through.
-        let fill =
-            if clip.background().is_some() { rgb(look.background).gamma_multiply(0.35) } else { rgb(look.background) };
-        painter.rect_filled(frame, 0, fill);
+        if clip.background().is_some() {
+            painter.rect_filled(frame, 0, rgb(look.background).gamma_multiply(0.35));
+        } else {
+            paint_backdrop(&painter, frame, &look.backdrop);
+        }
     }
     // Past its duration (and its out) the words are gone; a Card keeps its background.
     if words.trim().is_empty() || anim.is_hidden() {
@@ -88,7 +90,46 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
             }
         }
     }
+    if let Some(accent) = look.accent {
+        let [x, y, w, h] = assetcraft_storyboard::accent_bar(
+            kind,
+            [left, top, block.x, block.y],
+            frame.height(),
+            [height * 0.45, height * 0.25],
+            look.plate.is_some(),
+        );
+        painter.rect_filled(Rect::from_min_size(pos2(x, y), vec2(w, h)), 0, rgb(accent).gamma_multiply(anim.alpha));
+    }
     painter.galley(at, galley, color);
+}
+
+/// A card's backdrop in the Viewer: a grid of vertex colours from the same
+/// [`Backdrop::color_at`] the export uses (gradient and vignette; grain is export-only — at
+/// Viewer sizes it reads as noise on the thumbnail, not film).
+pub(crate) fn paint_backdrop(painter: &Painter, rect: Rect, b: &Backdrop) {
+    if b.count <= 1 && b.vignette <= 0.0 {
+        painter.rect_filled(rect, 0, rgb(b.stops[0]));
+        return;
+    }
+    const COLS: u32 = 24;
+    const ROWS: u32 = 14;
+    let mut mesh = egui::Mesh::default();
+    for r in 0..=ROWS {
+        for c in 0..=COLS {
+            let (u, v) = (c as f32 / COLS as f32, r as f32 / ROWS as f32);
+            let [cr, cg, cb] = b.color_at(u, v).map(|x| x.round().clamp(0.0, 255.0) as u8);
+            mesh.colored_vertex(rect.lerp_inside(vec2(u, v)), Color32::from_rgb(cr, cg, cb));
+        }
+    }
+    let w = COLS + 1;
+    for r in 0..ROWS {
+        for c in 0..COLS {
+            let i = r * w + c;
+            mesh.add_triangle(i, i + 1, i + w);
+            mesh.add_triangle(i + 1, i + w + 1, i + w);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn shown_text(words: &str, uppercase: bool, anim: &AnimFrame) -> String {
@@ -187,7 +228,11 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         ui.label("Theme");
         egui::ComboBox::from_id_salt(("sb-theme", id)).selected_text(style.theme.name()).show_ui(ui, |ui| {
             for t in TextTheme::ALL {
-                if ui.selectable_label(style.theme == t, t.name()).clicked() && style.theme != t {
+                let row = ui.horizontal(|ui| {
+                    theme_swatch(ui, t);
+                    ui.selectable_label(style.theme == t, t.name())
+                });
+                if row.inner.clicked() && style.theme != t {
                     style_edit = Some(json!({ "clip": id, "theme": t.id() }));
                 }
             }
@@ -328,3 +373,18 @@ fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<f64> {
 
 /// Shortest duration, in seconds.
 const MIN_SECS: f64 = MIN_TEXT_MS as f64 / 1000.0;
+
+/// A theme's colours in a chip: its background, an "Aa" in its text colour, an accent bar —
+/// so eight theme names read at a glance in the picker.
+fn theme_swatch(ui: &mut Ui, t: TextTheme) {
+    let look = t.look();
+    let (rect, _) = ui.allocate_exact_size(vec2(30.0, 16.0), Sense::hover());
+    let p = ui.painter();
+    paint_backdrop(p, rect, &look.backdrop);
+    p.rect_stroke(rect, 2, Stroke::new(1.0, Color32::from_gray(0x55)), StrokeKind::Inside);
+    let bar =
+        Rect::from_min_max(pos2(rect.left() + 2.0, rect.bottom() - 4.0), pos2(rect.right() - 2.0, rect.bottom() - 2.0));
+    p.rect_filled(bar, 0, rgb(look.accent.unwrap_or(t.accent())));
+    let aa = if look.uppercase { "AA" } else { "Aa" };
+    p.text(rect.center() - vec2(0.0, 1.5), Align2::CENTER_CENTER, aa, FontId::proportional(10.0), rgb(look.text));
+}

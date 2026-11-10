@@ -23,6 +23,22 @@ fn clip(id: u32, shot: ShotType, secs: u64) -> Clip {
 }
 
 /// Pixels that aren't `rgb`, and the mean colour of those that aren't.
+/// Pixels of `img` that differ from `blank` (the same frame without its words) and their mean.
+fn ink_over(img: &Rgba, blank: &Rgba) -> (usize, [f32; 3]) {
+    let mut n = 0usize;
+    let mut sum = [0.0f32; 3];
+    for (p, q) in img.data.as_chunks::<4>().0.iter().zip(blank.data.as_chunks::<4>().0) {
+        if p[..3] != q[..3] {
+            n += 1;
+            for c in 0..3 {
+                sum[c] += f32::from(p[c]);
+            }
+        }
+    }
+    let mean = if n > 0 { [sum[0] / n as f32, sum[1] / n as f32, sum[2] / n as f32] } else { [0.0; 3] };
+    (n, mean)
+}
+
 fn stats(img: &Rgba, rgb: [u8; 3]) -> (usize, [f32; 3]) {
     let mut n = 0usize;
     let mut sum = [0.0f32; 3];
@@ -105,7 +121,12 @@ fn a_title_card_fills_with_its_theme_and_sets_its_words() {
     let f = c.clip_frame(&card, f64::INFINITY);
     let look = card.text_style.theme.look();
     let bg = rgb(look.background);
-    let (ink, mean) = stats(&f, bg);
+    // The theme's backdrop and bar without the words: what the letters are drawn over.
+    let mut blank_card = card.clone();
+    blank_card.description = " ".into();
+    let blank = c.clip_frame(&blank_card, f64::INFINITY);
+    assert!(stats(&blank, [0, 0, 0]).0 > 320 * 170, "the backdrop fills the card");
+    let (ink, mean) = ink_over(&f, &blank);
     assert!(ink > 100 && ink < 320 * 180 / 4, "letters over the theme background: {ink} pixels");
     let text = rgb(look.text);
     // The inked pixels lean towards the text colour (anti-aliasing mixes in the background).
@@ -113,18 +134,21 @@ fn a_title_card_fills_with_its_theme_and_sets_its_words() {
     assert!(towards(0) || towards(1) || towards(2), "{mean:?}");
     // The words are centred: ink left and right of centre.
     let ink_in = |x0: u32, x1: u32| {
-        (x0..x1).flat_map(|x| (0..180).map(move |y| (x, y))).filter(|&(x, y)| f.get(x, y)[..3] != bg).count()
+        (x0..x1)
+            .flat_map(|x| (0..180).map(move |y| (x, y)))
+            .filter(|&(x, y)| f.get(x, y)[..3] != blank.get(x, y)[..3])
+            .count()
     };
     assert!(ink_in(0, 160) > 20 && ink_in(160, 320) > 20);
     assert!(ink_in(0, 40) == 0 && ink_in(280, 320) == 0, "nothing at the far edges");
     // A typewriter intro shows fewer letters early on.
     card.text_style.animation = TextAnimation::Typewriter;
     let early = c.clip_frame(&card, 0.05);
-    assert!(stats(&early, bg).0 < ink, "fewer letters at 0.05 s");
+    assert!(ink_over(&early, &blank).0 < ink, "fewer letters at 0.05 s");
     // A fade starts almost invisible.
     card.text_style.animation = TextAnimation::Fade;
     let faint = c.clip_frame(&card, 0.0);
-    assert_eq!(stats(&faint, bg).0, 0, "alpha 0 at the start of a fade");
+    assert_eq!(ink_over(&faint, &blank).0, 0, "alpha 0 at the start of a fade");
     // A card over a background asset shows the picture through a scrim.
     card.asset_ids.push(asset("environments/soul_light_forest.jpg"));
     let over = c.clip_frame(&card, f64::INFINITY);
@@ -171,9 +195,10 @@ fn a_cut_is_drawn_by_time_and_bad_assets_are_reported_not_fatal() {
     let mut d = clip(3, ShotType::Ms, 1);
     d.asset_ids.push(asset("palettes/reapers_palette.bmp"));
     board.clips = vec![a, b, d];
-    let bg = rgb(board.clips[0].text_style.theme.look().background);
+    let backdrop = board.clips[0].text_style.theme.look().backdrop;
+    let want = backdrop.color_at(2.5 / 160.0, 2.5 / 90.0).map(|v| v.round() as u8);
     let f0 = c.frame(&board, Ticks::ZERO);
-    assert_eq!(f0.get(2, 2)[..3], bg, "the card at 0 s");
+    assert_eq!(f0.get(2, 2)[..3], want, "the card at 0 s");
     let f1 = c.frame(&board, Ticks::from_secs_f64(1.5).unwrap_or(Ticks::ZERO));
     assert_eq!(stats(&f1, [0, 0, 0]).0, 0, "the broken still draws nothing, no panic");
     let f3 = c.frame(&board, Ticks::from_secs_f64(3.5).unwrap_or(Ticks::ZERO));
@@ -320,4 +345,24 @@ fn a_sections_inset_is_drawn_in_its_corner_a_video_as_a_poster_box_and_swap_flip
     // An empty slot draws nothing.
     board.scenes[0].inset = Some(Inset::slot(InsetKind::Video));
     assert_eq!(comp.frame(&board, at_shot), plain);
+}
+
+/// Themes 1d: a card's backdrop is a gradient with a vignette, and the accent bar is drawn.
+#[test]
+fn a_title_card_draws_its_gradient_and_accent_bar() {
+    let mut c = compositor(320, 180);
+    let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(4).unwrap());
+    card.description = "Step 3".into();
+    card.text_style.theme = assetcraft_storyboard::TextTheme::Blueprint;
+    let f = c.clip_frame(&card, f64::INFINITY);
+    let (top, bottom, corner) = (f.get(160, 4), f.get(160, 175), f.get(0, 0));
+    assert!(top[2] > bottom[2] + 20, "lighter blue at the top: {top:?} vs {bottom:?}");
+    assert!(corner[2] < f.get(160, 30)[2], "vignette darkens the corner");
+    let yellow = f.data.as_chunks::<4>().0.iter().filter(|p| p[0] > 230 && p[1] > 190 && p[2] < 110).count();
+    assert!(yellow > 20, "the yellow accent bar is drawn ({yellow} px)");
+    // Cinematic has no bar; its black carries grain, the same every time.
+    card.text_style.theme = assetcraft_storyboard::TextTheme::Cinematic;
+    let a = c.clip_frame(&card, f64::INFINITY);
+    assert!(a.data.as_chunks::<4>().0.iter().take(320).any(|p| p[0] > 0), "grain on black");
+    assert_eq!(a, c.clip_frame(&card, f64::INFINITY), "grain is steady between frames");
 }

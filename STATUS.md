@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-11-08_
+_Last updated: 2026-11-10_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -582,3 +582,5 @@ _The superseded ArtCraft Library history (Stage 0 of the Library tab, findings F
 - 2026-11-07: themes spec T0′ approved (Look + Move + Place, EffectCraft as a door); step 1a built — theme files, loader, `storyboard.themes`.
 - 2026-11-08: fixes — clip text editable (`storyboard.text.set`, Inspector TEXT / Description fields), the slot note shown first + a Viewer placeholder, slot menus stay open while typing.
 - 2026-11-08: timed text (themes step 1c) — a title or overlay's Duration (or the whole clip), Effect while up (push · drift · pulse) and Out (fade · sink · zoom · erase); Inspector rows Theme · In · Duration · Effect · Out · Position; drawn the same in the Viewer and the export. Next: themes 1b (any theme id + 4 more themes, after Paul's T4 pick).
+- 2026-11-10: themes 1b-i — Noir Gold, Neon Night, Field Notes, Blueprint as built-in themes from spec §4 (8 in all), swatches in the Inspector's theme picker. Next: 1d accent bar (the accents aren't drawn yet), then 1b-ii theme files on clips.
+- 2026-11-10: themes 1d — the base drawn: gradient, grain, vignette and the accent bar on every theme, the same in the export and the Viewer; theme files carry `background` and `decor.accentBar`. Next: 1e decor (rules, corners, frame, patterns), 1f text finish, 1g theme motion, then 1b-ii.

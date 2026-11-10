@@ -3,7 +3,7 @@
 //! (TH6: the file is the shared contract with EffectCraft). Paul, 2026-11-07: "a theme will
 //! have fonts, colors, spacing, backgrounds…".
 //!
-//! The four looks titles have today ([`TextTheme`]) are the built-in themes
+//! The eight looks titles have ([`TextTheme`]) are the built-in themes
 //! ([`Theme::builtin`]); a theme file paints through the same [`Look`] (`Theme::look`), so the
 //! compositor and the Viewer need nothing new to draw one.
 //!
@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::text::{Look, TextAnimation, TextTheme};
+use crate::text::{Backdrop, Look, TextAnimation, TextTheme};
 
 /// The largest theme file read.
 pub const MAX_THEME_BYTES: usize = 64 * 1024;
@@ -61,6 +61,24 @@ pub struct Theme {
     /// The default moves.
     #[serde(default)]
     pub motion: Motion,
+    /// Shapes the theme adds (themes 1d: the accent bar).
+    #[serde(default, skip_serializing_if = "Decor::is_none")]
+    pub decor: Decor,
+}
+
+/// Shapes a theme draws besides the text (themes 1d; rules, corners and frames come in 1e).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Decor {
+    /// A bar in `color.accent`: under a card's title, down an overlay plate's edge.
+    #[serde(default)]
+    pub accent_bar: bool,
+}
+
+impl Decor {
+    fn is_none(&self) -> bool {
+        *self == Decor::default()
+    }
 }
 
 /// Author and licence.
@@ -354,7 +372,11 @@ impl Theme {
             return Err(ThemeError(format!("background has {} stops (solid: 1, gradient: 2–4)", b.stops.len())));
         }
         for st in &b.stops {
-            color("background.stops", st)?;
+            let c = color("background.stops", st)?;
+            let ratio = contrast(text, c);
+            if ratio < MIN_CONTRAST {
+                warnings.push(format!("text on background stop {st} is {ratio:.1}:1 (AA needs {MIN_CONTRAST}:1)"));
+            }
         }
         within("background.angle", b.angle, -360.0, 360.0)?;
         within("background.grain", b.grain, 0.0, 1.0)?;
@@ -375,14 +397,31 @@ impl Theme {
     /// What the theme paints on titles: the [`Look`] the compositor and Viewer use.
     pub fn look(&self) -> Look {
         let rgb = |s: &str| parse_color(s).unwrap_or(0);
+        let bg = rgb(&self.color.background);
+        let b = &self.background;
+        let mut stops = [bg; 4];
+        for (slot, c) in stops.iter_mut().zip(b.stops.iter()) {
+            *slot = rgb(c);
+        }
+        let count = match b.kind {
+            BackgroundKind::Solid => 1,
+            BackgroundKind::Gradient => b.stops.len().clamp(2, 4) as u8,
+        };
+        // Unused slots repeat the last stop, as `Backdrop::solid` / `gradient` build them.
+        let last = stops[usize::from(count) - 1];
+        for slot in stops.iter_mut().skip(usize::from(count)) {
+            *slot = last;
+        }
         Look {
-            background: rgb(&self.color.background),
+            background: bg,
             text: rgb(&self.color.text),
             plate: self.plate.as_ref().map(|p| (rgb(&p.color), p.alpha)),
             card_size: self.type_.scale.card,
             overlay_size: self.type_.scale.overlay,
             tracking: self.type_.display.tracking,
             uppercase: self.type_.display.uppercase,
+            backdrop: Backdrop { stops, count, angle: b.angle, grain: b.grain, vignette: b.vignette },
+            accent: self.decor.accent_bar.then(|| rgb(&self.color.accent)),
         }
     }
 
@@ -395,11 +434,16 @@ impl Theme {
     pub fn builtin(t: TextTheme) -> Theme {
         let l = t.look();
         let hex = |c: u32| format!("#{c:06X}");
-        let (surface, muted, accent, title_in) = match t {
-            TextTheme::Bold => (0xb81d30, 0xf5c2c8, 0x111111, "rise"),
-            TextTheme::Minimal => (0x1c1c1c, 0x8a8a8a, 0xcfcfcf, "fade"),
-            TextTheme::Cinematic => (0x141210, 0x8a7f6c, 0xd9a441, "fade"),
-            TextTheme::Paper => (0xece6da, 0x6f675c, 0xa4472d, "rise"),
+        let accent = t.accent();
+        let (surface, muted, accent2, title_in) = match t {
+            TextTheme::Bold => (0xb81d30, 0xf5c2c8, None, "rise"),
+            TextTheme::Minimal => (0x1c1c1c, 0x8a8a8a, None, "fade"),
+            TextTheme::Cinematic => (0x141210, 0x8a7f6c, None, "fade"),
+            TextTheme::Paper => (0xece6da, 0x6f675c, None, "rise"),
+            TextTheme::NoirGold => (0x17171b, 0x8a857a, None, "fade"),
+            TextTheme::NeonNight => (0x2a1248, 0xb9a6d9, Some(0x22e4ff), "zoom"),
+            TextTheme::FieldNotes => (0x4c5a38, 0xc9c1a8, None, "rise"),
+            TextTheme::Blueprint => (0x163c6e, 0xa9c4e6, None, "typewriter"),
         };
         Theme {
             version: THEME_VERSION,
@@ -413,7 +457,7 @@ impl Theme {
                 text: hex(l.text),
                 muted: hex(muted),
                 accent: hex(accent),
-                accent2: None,
+                accent2: accent2.map(hex),
             },
             type_: Type {
                 display: Face {
@@ -425,14 +469,26 @@ impl Theme {
                 body: Face { family: BUNDLED_FONTS[0].to_owned(), weight: 400, tracking: 0.0, uppercase: false },
                 scale: Scale { card: l.card_size, overlay: l.overlay_size, caption: default_caption() },
             },
-            background: Background::default(),
+            background: {
+                let d = l.backdrop;
+                let n = usize::from(d.count.clamp(1, 4));
+                Background {
+                    kind: if n > 1 { BackgroundKind::Gradient } else { BackgroundKind::Solid },
+                    stops: d.stops.iter().take(n).map(|c| hex(*c)).collect(),
+                    angle: d.angle,
+                    grain: d.grain,
+                    vignette: d.vignette,
+                }
+            },
             plate: l.plate.map(|(c, a)| Plate { color: hex(c), alpha: a }),
             space: Space::default(),
             motion: Motion { title_in: Some(title_in.to_owned()) },
+            decor: Decor { accent_bar: l.accent.is_some() },
         }
     }
 
-    /// The four built-in themes, in menu order.
+    /// The built-in themes, in menu order (themes §4: today's four looks, then Noir Gold, Neon
+    /// Night, Field Notes, Blueprint — TH7).
     pub fn builtins() -> Vec<Theme> {
         TextTheme::ALL.into_iter().map(Theme::builtin).collect()
     }

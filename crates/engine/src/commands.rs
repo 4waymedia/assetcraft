@@ -258,7 +258,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Themes",
         "Storyboard",
         None,
-        "{} → {themes: [{id, name, tags, source: builtin|user, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?}], problems: [{path, reason}], folder} (the built-in Bold, Minimal, Cinematic, Paper, then <working>/Themes/*.theme.json)",
+        "{} → {themes: [{id, name, tags, source: builtin|user, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?}], problems: [{path, reason}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json)",
         crate::theme_cmd::sb_themes
     ),
     cmd!(
@@ -502,7 +502,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Text Clip Style",
         "Storyboard",
         None,
-        "{clip: number, theme?: bold|minimal|cinematic|paper, animation?: none|fade|rise|zoom|typewriter (the in), duration?: seconds 0.5–600 (how long the text stays up from the clip's start, in and out included; 0 = until the clip ends), effect?: none|push|drift|pulse (while it is up), exit?: none|fade|sink|zoom|erase (the out), position?: lowerThirdLeft|lowerThirdRight|center|top|bottom} (one undo step)",
+        "{clip: number, theme?: bold|minimal|cinematic|paper|noir-gold|neon-night|field-notes|blueprint, animation?: none|fade|rise|zoom|typewriter (the in), duration?: seconds 0.5–600 (how long the text stays up from the clip's start, in and out included; 0 = until the clip ends), effect?: none|push|drift|pulse (while it is up), exit?: none|fade|sink|zoom|erase (the out), position?: lowerThirdLeft|lowerThirdRight|center|top|bottom} (one undo step)",
         crate::text_cmd::sb_text_style
     ),
     cmd!(

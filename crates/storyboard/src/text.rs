@@ -75,6 +75,17 @@ pub enum TextTheme {
     Cinematic,
     /// Off-white card, dark text.
     Paper,
+    /// 1920s luxury: black, cream capitals, gold (themes §4 #5).
+    #[serde(rename = "noir-gold")]
+    NoirGold,
+    /// Synthwave: deep purple, white, magenta and cyan (§4 #6).
+    #[serde(rename = "neon-night")]
+    NeonNight,
+    /// Documentary, nature: moss, paper, ochre (§4 #8).
+    #[serde(rename = "field-notes")]
+    FieldNotes,
+    /// How-to, tutorial: blueprint blue, white, yellow (§4 #13).
+    Blueprint,
 }
 
 /// What a theme paints. Colours are `0xRRGGBB`; sizes are fractions of the frame height.
@@ -94,11 +105,118 @@ pub struct Look {
     pub tracking: f32,
     /// Show the text in capitals.
     pub uppercase: bool,
+    /// What a card's background is: colour stops, grain, vignette (themes 1d).
+    pub backdrop: Backdrop,
+    /// The accent bar's colour — under a card's title, down an overlay plate's edge; `None` =
+    /// no bar.
+    pub accent: Option<u32>,
+}
+
+/// A card's background (themes 1d, `docs/design/themes.md`): up to four colour stops along
+/// an angle, film grain and darkened edges. One colour function for the export and the Viewer,
+/// so both draw the same card.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Backdrop {
+    /// Colour stops, `0xRRGGBB`; the first `count` are used.
+    pub stops: [u32; 4],
+    /// How many stops (1 = solid, 2–4 = gradient).
+    pub count: u8,
+    /// Gradient direction in degrees: 0 = left to right, 90 = top to bottom.
+    pub angle: f32,
+    /// Film grain, 0–1.
+    pub grain: f32,
+    /// Darkened edges, 0–1.
+    pub vignette: f32,
+}
+
+impl Backdrop {
+    /// One colour, nothing else.
+    pub const fn solid(color: u32) -> Backdrop {
+        Backdrop { stops: [color; 4], count: 1, angle: 0.0, grain: 0.0, vignette: 0.0 }
+    }
+
+    /// Two colours along `angle`, with grain and vignette.
+    pub const fn gradient(from: u32, to: u32, angle: f32, grain: f32, vignette: f32) -> Backdrop {
+        Backdrop { stops: [from, to, to, to], count: 2, angle, grain, vignette }
+    }
+
+    /// The colour at `(u, v)` (0–1 across and down the frame), vignette applied, without grain,
+    /// as linear 0–255 channels.
+    pub fn color_at(&self, u: f32, v: f32) -> [f32; 3] {
+        let n = usize::from(self.count.clamp(1, 4));
+        let mut c = channels(self.stops[0]);
+        if n > 1 {
+            let (sin, cos) = self.angle.to_radians().sin_cos();
+            let reach = cos.abs() + sin.abs();
+            let along = ((u - 0.5) * cos + (v - 0.5) * sin) / reach.max(1e-3);
+            let t = (0.5 + along).clamp(0.0, 1.0) * (n - 1) as f32;
+            let i = (t.floor() as usize).min(n - 2);
+            let f = t - i as f32;
+            let (a, b) = (channels(self.stops[i]), channels(self.stops[i + 1]));
+            for k in 0..3 {
+                c[k] = a[k] + (b[k] - a[k]) * f;
+            }
+        }
+        if self.vignette > 0.0 {
+            let (dx, dy) = ((u - 0.5) * 2.0, (v - 0.5) * 2.0);
+            let r = ((dx * dx + dy * dy).sqrt() / std::f32::consts::SQRT_2).clamp(0.0, 1.0);
+            let edge = ((r - 0.35) / 0.65).clamp(0.0, 1.0);
+            let dark = 1.0 - self.vignette.clamp(0.0, 1.0) * 0.85 * edge * edge * (3.0 - 2.0 * edge);
+            for ch in &mut c {
+                *ch *= dark;
+            }
+        }
+        c
+    }
+
+    /// Grain at pixel `(x, y)`: an offset to add to each channel (same for every frame, so a
+    /// still card doesn't shimmer and exports stay byte-identical).
+    pub fn grain_at(&self, x: u32, y: u32) -> f32 {
+        if self.grain <= 0.0 {
+            return 0.0;
+        }
+        let mut h = x.wrapping_mul(0x9E37_79B1) ^ y.wrapping_mul(0x85EB_CA77);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        let n = (h & 0xffff) as f32 / 65_535.0 * 2.0 - 1.0;
+        n * self.grain.clamp(0.0, 1.0) * 28.0
+    }
+}
+
+fn channels(c: u32) -> [f32; 3] {
+    [((c >> 16) & 0xff) as f32, ((c >> 8) & 0xff) as f32, (c & 0xff) as f32]
+}
+
+/// Where the accent bar goes, in pixels `[x, y, w, h]`, for text whose block is `block`
+/// (`[left, top, width, height]`) in a frame `frame_h` tall. A card's bar sits centred under
+/// the title; an overlay's runs down the plate's left edge (`pad` = the plate's padding), or
+/// under the text when there is no plate.
+pub fn accent_bar(kind: TextKind, block: [f32; 4], frame_h: f32, pad: [f32; 2], plate: bool) -> [f32; 4] {
+    let [left, top, w, h] = block;
+    let thick = (frame_h * 0.008).max(2.0);
+    match kind {
+        TextKind::Card => {
+            let bw = frame_h * 0.12;
+            [left + w / 2.0 - bw / 2.0, top + h + frame_h * 0.03, bw, thick]
+        }
+        TextKind::Overlay if plate => [left - pad[0], top - pad[1], thick * 1.5, h + 2.0 * pad[1]],
+        TextKind::Overlay => [left, top + h + thick, (frame_h * 0.06).min(w), thick],
+    }
 }
 
 impl TextTheme {
     /// Every theme, in menu order.
-    pub const ALL: [TextTheme; 4] = [TextTheme::Bold, TextTheme::Minimal, TextTheme::Cinematic, TextTheme::Paper];
+    pub const ALL: [TextTheme; 8] = [
+        TextTheme::Bold,
+        TextTheme::Minimal,
+        TextTheme::Cinematic,
+        TextTheme::Paper,
+        TextTheme::NoirGold,
+        TextTheme::NeonNight,
+        TextTheme::FieldNotes,
+        TextTheme::Blueprint,
+    ];
 
     /// Id used in commands and documents.
     pub fn id(self) -> &'static str {
@@ -107,6 +225,10 @@ impl TextTheme {
             TextTheme::Minimal => "minimal",
             TextTheme::Cinematic => "cinematic",
             TextTheme::Paper => "paper",
+            TextTheme::NoirGold => "noir-gold",
+            TextTheme::NeonNight => "neon-night",
+            TextTheme::FieldNotes => "field-notes",
+            TextTheme::Blueprint => "blueprint",
         }
     }
 
@@ -117,6 +239,10 @@ impl TextTheme {
             TextTheme::Minimal => "Minimal",
             TextTheme::Cinematic => "Cinematic",
             TextTheme::Paper => "Paper",
+            TextTheme::NoirGold => "Noir Gold",
+            TextTheme::NeonNight => "Neon Night",
+            TextTheme::FieldNotes => "Field Notes",
+            TextTheme::Blueprint => "Blueprint",
         }
     }
 
@@ -136,6 +262,8 @@ impl TextTheme {
                 overlay_size: 0.06,
                 tracking: 0.0,
                 uppercase: true,
+                backdrop: Backdrop::gradient(0xe5243b, 0xa8172a, 135.0, 0.0, 0.2),
+                accent: Some(0x111111),
             },
             TextTheme::Minimal => Look {
                 background: 0x0f1217,
@@ -145,6 +273,8 @@ impl TextTheme {
                 overlay_size: 0.05,
                 tracking: 0.02,
                 uppercase: false,
+                backdrop: Backdrop { vignette: 0.35, ..Backdrop::solid(0x0f1217) },
+                accent: Some(0xcfcfcf),
             },
             TextTheme::Cinematic => Look {
                 background: 0x000000,
@@ -154,6 +284,8 @@ impl TextTheme {
                 overlay_size: 0.045,
                 tracking: 0.35,
                 uppercase: true,
+                backdrop: Backdrop { grain: 0.35, ..Backdrop::solid(0x000000) },
+                accent: None,
             },
             TextTheme::Paper => Look {
                 background: 0xf3efe6,
@@ -163,7 +295,67 @@ impl TextTheme {
                 overlay_size: 0.05,
                 tracking: 0.0,
                 uppercase: false,
+                backdrop: Backdrop::gradient(0xf3efe6, 0xe4dccb, 90.0, 0.15, 0.15),
+                accent: Some(0xa4472d),
             },
+            TextTheme::NoirGold => Look {
+                background: 0x0b0b0d,
+                text: 0xf3e9d2,
+                plate: Some((0x0b0b0d, 190)),
+                card_size: 0.075,
+                overlay_size: 0.045,
+                tracking: 0.25,
+                uppercase: true,
+                backdrop: Backdrop::gradient(0x1d1d23, 0x0b0b0d, 90.0, 0.2, 0.5),
+                accent: Some(0xc9a24a),
+            },
+            TextTheme::NeonNight => Look {
+                background: 0x1a0b2e,
+                text: 0xffffff,
+                plate: Some((0x1a0b2e, 210)),
+                card_size: 0.10,
+                overlay_size: 0.055,
+                tracking: 0.06,
+                uppercase: true,
+                backdrop: Backdrop::gradient(0x2c1350, 0x0c0418, 90.0, 0.05, 0.35),
+                accent: Some(0xff2bd6),
+            },
+            TextTheme::FieldNotes => Look {
+                background: 0x3c4a2c,
+                text: 0xf1ead8,
+                plate: Some((0x3c4a2c, 225)),
+                card_size: 0.08,
+                overlay_size: 0.05,
+                tracking: 0.0,
+                uppercase: false,
+                backdrop: Backdrop::gradient(0x4c5a38, 0x2e3822, 90.0, 0.25, 0.35),
+                accent: Some(0xc58a2b),
+            },
+            TextTheme::Blueprint => Look {
+                background: 0x1e4f8f,
+                text: 0xffffff,
+                plate: Some((0x163c6e, 225)),
+                card_size: 0.08,
+                overlay_size: 0.048,
+                tracking: 0.08,
+                uppercase: true,
+                backdrop: Backdrop::gradient(0x2463a8, 0x153a6a, 90.0, 0.0, 0.25),
+                accent: Some(0xffd23f),
+            },
+        }
+    }
+
+    /// The theme's highlight colour (`0xRRGGBB`): the picker's swatch, later lower-third bars.
+    pub fn accent(self) -> u32 {
+        match self {
+            TextTheme::Bold => 0x111111,
+            TextTheme::Minimal => 0xcfcfcf,
+            TextTheme::Cinematic => 0xd9a441,
+            TextTheme::Paper => 0xa4472d,
+            TextTheme::NoirGold => 0xc9a24a,
+            TextTheme::NeonNight => 0xff2bd6,
+            TextTheme::FieldNotes => 0xc58a2b,
+            TextTheme::Blueprint => 0xffd23f,
         }
     }
 }

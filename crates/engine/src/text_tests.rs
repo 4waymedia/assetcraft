@@ -170,3 +170,13 @@ fn style_sets_how_long_the_text_stays_up_and_how_it_leaves() {
     run(&mut s, "storyboard.undo", json!({}));
     assert_eq!(first(&s).text_style.duration_ms, Some(4500));
 }
+
+#[test]
+fn style_takes_the_new_themes_by_id() {
+    let mut s = session();
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "neon-night"}));
+    assert_eq!(r["theme"], "neon-night");
+    assert_eq!(first(&s).text_style.theme, TextTheme::NeonNight);
+    let err = s.execute("storyboard.text.style", &json!({"clip": 1, "theme": "neon"})).unwrap_err();
+    assert!(err.to_string().contains("field-notes"), "the message lists every theme: {err}");
+}

@@ -62,7 +62,8 @@ pub(crate) fn sb_text_kind(s: &mut Session, p: &Value) -> CmdResult {
 /// `storyboard.text.style {clip, theme?, animation?, position?}`.
 pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
-    let theme = parse(p, "theme", TextTheme::from_id, "bold|minimal|cinematic|paper")?;
+    let theme_ids = TextTheme::ALL.map(TextTheme::id).join("|");
+    let theme = parse(p, "theme", TextTheme::from_id, &theme_ids)?;
     let animation = parse(p, "animation", TextAnimation::from_id, "none|fade|rise|zoom|typewriter")?;
     let position = parse(p, "position", TextPosition::from_id, "lowerThirdLeft|lowerThirdRight|center|top|bottom")?;
     let effect = parse(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;

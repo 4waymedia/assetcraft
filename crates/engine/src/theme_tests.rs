@@ -26,19 +26,19 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 fn themes_lists_the_built_ins_then_the_users_files_with_their_problems() {
     let (mut s, dir) = session("list");
     let themes = dir.join("Themes");
-    // No files yet: the four built-ins.
+    // No files yet: the eight built-ins.
     let out = run(&mut s, "storyboard.themes", json!({}));
     let ids: Vec<&str> = out["themes"].as_array().unwrap().iter().filter_map(|t| t["id"].as_str()).collect();
-    assert_eq!(ids, ["bold", "minimal", "cinematic", "paper"]);
+    assert_eq!(ids, ["bold", "minimal", "cinematic", "paper", "noir-gold", "neon-night", "field-notes", "blueprint"]);
     assert!(out["themes"].as_array().unwrap().iter().all(|t| t["source"] == "builtin"));
     assert_eq!(out["folder"].as_str().map(PathBuf::from), Some(themes.clone()));
     // A good file, one with a warning, a broken one, one taking a built-in's id, a duplicate,
     // and a file that isn't a theme.
     let mut noir = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Cinematic);
-    noir.id = "noir-gold".into();
-    noir.name = "Noir Gold".into();
+    noir.id = "gilded-age".into();
+    noir.name = "Gilded Age".into();
     noir.type_.display.family = "Cinzel".into();
-    std::fs::write(themes.join("noir-gold.theme.json"), noir.to_json()).unwrap();
+    std::fs::write(themes.join("gilded-age.theme.json"), noir.to_json()).unwrap();
     let mut neon = noir.clone();
     neon.id = "neon".into();
     neon.name = "Neon".into();
@@ -53,11 +53,11 @@ fn themes_lists_the_built_ins_then_the_users_files_with_their_problems() {
     let out = run(&mut s, "storyboard.themes", json!({}));
     let user: Vec<&Value> = out["themes"].as_array().unwrap().iter().filter(|t| t["source"] == "user").collect();
     let ids: Vec<&str> = user.iter().filter_map(|t| t["id"].as_str()).collect();
-    assert_eq!(ids, ["neon", "noir-gold"], "sorted by file name");
-    let noir_row = user.iter().find(|t| t["id"] == "noir-gold").unwrap();
+    assert_eq!(ids, ["gilded-age", "neon"], "sorted by file name");
+    let noir_row = user.iter().find(|t| t["id"] == "gilded-age").unwrap();
     assert!(noir_row["warnings"][0].as_str().unwrap().contains("Cinzel"), "{noir_row}");
     assert_eq!(noir_row["display"], "Cinzel");
-    assert!(noir_row["path"].as_str().unwrap().ends_with("noir-gold.theme.json"));
+    assert!(noir_row["path"].as_str().unwrap().ends_with("gilded-age.theme.json"));
     let problems = out["problems"].as_array().unwrap();
     assert_eq!(problems.len(), 3, "{problems:?}");
     let reason = |file: &str| {

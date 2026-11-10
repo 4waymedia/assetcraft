@@ -78,6 +78,20 @@ pub fn fill(out: &mut Rgba, rgb: [u8; 3]) {
     }
 }
 
+/// Paint a card's backdrop (themes 1d): gradient and vignette from
+/// [`Backdrop::color_at`](assetcraft_storyboard::Backdrop::color_at), then grain.
+pub fn backdrop(out: &mut Rgba, b: &assetcraft_storyboard::Backdrop) {
+    let (w, h) = (out.width.max(1), out.height.max(1));
+    let (fw, fh) = (w as f32, h as f32);
+    for (i, p) in out.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = ((i % w as usize) as u32, (i / w as usize) as u32);
+        let c = b.color_at((x as f32 + 0.5) / fw, (y as f32 + 0.5) / fh);
+        let g = b.grain_at(x, y);
+        let px = |v: f32| (v + g).round().clamp(0.0, 255.0) as u8;
+        *p = [px(c[0]), px(c[1]), px(c[2]), 255];
+    }
+}
+
 /// Blend a colour over the whole picture at `alpha` (a scrim).
 pub fn tint(out: &mut Rgba, rgb: [u8; 3], alpha: f32) {
     for y in 0..out.height {
