@@ -116,6 +116,8 @@ pub struct Look {
     pub decor: crate::decor::LookDecor,
     /// Shadow, outline or glow on the letters (themes 1f).
     pub finish: crate::decor::TextFinish,
+    /// The theme's moves: what a text does unless its clip says otherwise (themes 1g).
+    pub motion: Timing,
 }
 
 /// A card's background (themes 1d, `docs/design/themes.md`): up to four colour stops along
@@ -284,6 +286,12 @@ impl TextTheme {
                 accent: Some(0x111111),
                 decor: LookDecor::NONE,
                 finish: TextFinish::Shadow,
+                motion: Timing {
+                    animation: TextAnimation::Fade,
+                    duration_ms: None,
+                    effect: TextEffect::None,
+                    exit: TextExit::Fade,
+                },
             },
             TextTheme::Minimal => Look {
                 background: 0x0f1217,
@@ -297,6 +305,12 @@ impl TextTheme {
                 accent: Some(0xcfcfcf),
                 decor: LookDecor::NONE,
                 finish: TextFinish::Shadow,
+                motion: Timing {
+                    animation: TextAnimation::Fade,
+                    duration_ms: None,
+                    effect: TextEffect::None,
+                    exit: TextExit::Fade,
+                },
             },
             TextTheme::Cinematic => Look {
                 background: 0x000000,
@@ -310,6 +324,12 @@ impl TextTheme {
                 accent: None,
                 decor: LookDecor::NONE,
                 finish: TextFinish::None,
+                motion: Timing {
+                    animation: TextAnimation::Fade,
+                    duration_ms: None,
+                    effect: TextEffect::Push,
+                    exit: TextExit::Fade,
+                },
             },
             TextTheme::Paper => Look {
                 background: 0xf3efe6,
@@ -323,6 +343,12 @@ impl TextTheme {
                 accent: Some(0xa4472d),
                 decor: LookDecor { frame: true, ..LookDecor::NONE },
                 finish: TextFinish::None,
+                motion: Timing {
+                    animation: TextAnimation::Rise,
+                    duration_ms: None,
+                    effect: TextEffect::None,
+                    exit: TextExit::Sink,
+                },
             },
             TextTheme::NoirGold => Look {
                 background: 0x0b0b0d,
@@ -336,6 +362,12 @@ impl TextTheme {
                 accent: Some(0xc9a24a),
                 decor: LookDecor { rules: Rules::Both, corners: true, ..LookDecor::NONE },
                 finish: TextFinish::None,
+                motion: Timing {
+                    animation: TextAnimation::Fade,
+                    duration_ms: None,
+                    effect: TextEffect::Push,
+                    exit: TextExit::Fade,
+                },
             },
             TextTheme::NeonNight => Look {
                 background: 0x1a0b2e,
@@ -349,6 +381,12 @@ impl TextTheme {
                 accent: Some(0xff2bd6),
                 decor: LookDecor { pattern: Pattern::Scanlines, frame: true, ..LookDecor::NONE },
                 finish: TextFinish::Glow,
+                motion: Timing {
+                    animation: TextAnimation::Zoom,
+                    duration_ms: None,
+                    effect: TextEffect::Pulse,
+                    exit: TextExit::Zoom,
+                },
             },
             TextTheme::FieldNotes => Look {
                 background: 0x3c4a2c,
@@ -362,6 +400,12 @@ impl TextTheme {
                 accent: Some(0xc58a2b),
                 decor: LookDecor { pattern: Pattern::Dots, rules: Rules::Below, ..LookDecor::NONE },
                 finish: TextFinish::Shadow,
+                motion: Timing {
+                    animation: TextAnimation::Rise,
+                    duration_ms: None,
+                    effect: TextEffect::Drift,
+                    exit: TextExit::Fade,
+                },
             },
             TextTheme::Blueprint => Look {
                 background: 0x1e4f8f,
@@ -375,6 +419,12 @@ impl TextTheme {
                 accent: Some(0xffd23f),
                 decor: LookDecor { pattern: Pattern::Grid, corners: true, frame: true, ..LookDecor::NONE },
                 finish: TextFinish::None,
+                motion: Timing {
+                    animation: TextAnimation::Typewriter,
+                    duration_ms: None,
+                    effect: TextEffect::None,
+                    exit: TextExit::Erase,
+                },
             },
         };
         // Rules, corners and frame are drawn in the accent.
@@ -713,44 +763,48 @@ impl TextPosition {
     }
 }
 
-/// How a clip's text looks: theme, animation, and (for an Overlay) position.
+/// How a clip's text looks: theme, timing, and (for an Overlay) position. The timing fields
+/// are the clip's own choices; one left empty follows the theme ([`Look::motion`], themes 1g),
+/// so changing the theme changes the moves too. [`TextStyle::timing`] resolves them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TextStyle {
     /// Theme.
     #[serde(default)]
     pub theme: TextTheme,
-    /// Intro animation.
-    #[serde(default)]
-    pub animation: TextAnimation,
+    /// The in; `None` = the theme's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animation: Option<TextAnimation>,
     /// Overlay position (a Card centres its text).
     #[serde(default)]
     pub position: TextPosition,
     /// How long the text stays up from the clip's start, in milliseconds, its in and out
-    /// included; `None` = until the clip ends. Longer than the clip counts as the clip.
+    /// included: `Some(0)` = until the clip ends; `None` = the theme's. Longer than the clip
+    /// counts as the clip.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u32>,
-    /// What it does while it is up.
-    #[serde(default, skip_serializing_if = "is_default_effect")]
+    /// What it does while it is up; `None` = the theme's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<TextEffect>,
+    /// How it leaves; `None` = the theme's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<TextExit>,
+}
+
+/// A text's moves, resolved: the clip's choices over its theme's ([`TextStyle::timing`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Timing {
+    /// The in.
+    pub animation: TextAnimation,
+    /// Milliseconds up from the clip's start; `None` = until the clip ends.
+    pub duration_ms: Option<u32>,
+    /// While up.
     pub effect: TextEffect,
-    /// How it leaves.
-    #[serde(default, skip_serializing_if = "is_default_exit")]
+    /// The out.
     pub exit: TextExit,
 }
 
-fn is_default_effect(e: &TextEffect) -> bool {
-    *e == TextEffect::None
-}
-fn is_default_exit(e: &TextExit) -> bool {
-    *e == TextExit::None
-}
-
-impl TextStyle {
-    /// Whether this is the default style (left out of saved documents).
-    pub fn is_default(&self) -> bool {
-        *self == TextStyle::default()
-    }
-
+impl Timing {
     /// Seconds the text is up in a clip `clip_secs` long: its duration, or the clip.
     pub fn shown_secs(&self, clip_secs: f64) -> f64 {
         let clip = if clip_secs.is_finite() { clip_secs.max(0.0) } else { 0.0 };
@@ -778,6 +832,38 @@ impl TextStyle {
             self.animation.frame(elapsed)
         };
         self.effect.apply(base, elapsed, shown)
+    }
+}
+
+impl TextStyle {
+    /// Whether this is the default style (left out of saved documents).
+    pub fn is_default(&self) -> bool {
+        *self == TextStyle::default()
+    }
+
+    /// The moves this text makes: each of the clip's own choices, or else its theme's.
+    pub fn timing(&self) -> Timing {
+        let theme = self.theme.look().motion;
+        Timing {
+            animation: self.animation.unwrap_or(theme.animation),
+            duration_ms: match self.duration_ms {
+                None => theme.duration_ms,
+                Some(0) => None,
+                Some(ms) => Some(ms),
+            },
+            effect: self.effect.unwrap_or(theme.effect),
+            exit: self.exit.unwrap_or(theme.exit),
+        }
+    }
+
+    /// Seconds the text is up in a clip `clip_secs` long ([`Timing::shown_secs`]).
+    pub fn shown_secs(&self, clip_secs: f64) -> f64 {
+        self.timing().shown_secs(clip_secs)
+    }
+
+    /// The text's frame `elapsed` seconds into a clip `clip_secs` long ([`Timing::frame_at`]).
+    pub fn frame_at(&self, elapsed: f64, clip_secs: f64) -> AnimFrame {
+        self.timing().frame_at(elapsed, clip_secs)
     }
 }
 
@@ -850,7 +936,7 @@ pub fn set_text_style(
     board: &mut Storyboard,
     id: ClipId,
     theme: Option<TextTheme>,
-    animation: Option<TextAnimation>,
+    animation: Option<Option<TextAnimation>>,
     position: Option<TextPosition>,
 ) -> Result<bool, TextError> {
     let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
@@ -860,19 +946,22 @@ pub fn set_text_style(
     let before = clip.text_style;
     let s = &mut clip.text_style;
     s.theme = theme.unwrap_or(s.theme);
-    s.animation = animation.unwrap_or(s.animation);
+    if let Some(a) = animation {
+        s.animation = a;
+    }
     s.position = position.unwrap_or(s.position);
     Ok(clip.text_style != before)
 }
 
-/// Clip `id`'s text timing: `duration` (`Some(None)` = until the clip ends), `effect`, `exit`.
-/// `None` leaves that part as it is. Returns whether anything changed.
+/// Clip `id`'s text timing. Each part: `None` leaves it as it is, `Some(None)` follows the
+/// theme again, `Some(Some(v))` sets the clip's own. `duration` in ms, `0` = until the clip
+/// ends. Returns whether anything changed.
 pub fn set_text_timing(
     board: &mut Storyboard,
     id: ClipId,
     duration: Option<Option<u32>>,
-    effect: Option<TextEffect>,
-    exit: Option<TextExit>,
+    effect: Option<Option<TextEffect>>,
+    exit: Option<Option<TextExit>>,
 ) -> Result<bool, TextError> {
     let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
     if clip.text_kind().is_none() {
@@ -881,9 +970,13 @@ pub fn set_text_timing(
     let before = clip.text_style;
     let s = &mut clip.text_style;
     if let Some(d) = duration {
-        s.duration_ms = d.map(|ms| ms.clamp(MIN_TEXT_MS, MAX_TEXT_MS));
+        s.duration_ms = d.map(|ms| if ms == 0 { 0 } else { ms.clamp(MIN_TEXT_MS, MAX_TEXT_MS) });
     }
-    s.effect = effect.unwrap_or(s.effect);
-    s.exit = exit.unwrap_or(s.exit);
+    if let Some(e) = effect {
+        s.effect = e;
+    }
+    if let Some(e) = exit {
+        s.exit = e;
+    }
     Ok(clip.text_style != before)
 }

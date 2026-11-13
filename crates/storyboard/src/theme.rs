@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::decor::{LookDecor, Pattern, Rules, TextFinish};
-use crate::text::{Backdrop, Look, TextAnimation, TextTheme};
+use crate::text::{Backdrop, Look, TextAnimation, TextEffect, TextExit, TextTheme, Timing};
 
 /// The largest theme file read.
 pub const MAX_THEME_BYTES: usize = 64 * 1024;
@@ -267,12 +267,45 @@ impl Default for Space {
 }
 
 /// The default moves (TH5: named, from the known list).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Motion {
-    /// A [`TextAnimation`] id.
+    /// The in: a [`TextAnimation`] id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_in: Option<String>,
+    /// While up: a [`TextEffect`](crate::TextEffect) id (themes 1g).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_effect: Option<String>,
+    /// The out: a [`TextExit`](crate::TextExit) id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_out: Option<String>,
+    /// Seconds a text stays up (0.5–600); none = until its clip ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_seconds: Option<f32>,
+}
+
+impl Motion {
+    /// The moves as a [`Timing`]; an unnamed or unknown move is none.
+    pub fn timing(&self) -> Timing {
+        Timing {
+            animation: self.title_in.as_deref().and_then(TextAnimation::from_id).unwrap_or(TextAnimation::None),
+            duration_ms: self.title_seconds.filter(|s| s.is_finite() && *s > 0.0).map(|s| {
+                ((f64::from(s) * 1000.0).round() as u32).clamp(crate::text::MIN_TEXT_MS, crate::text::MAX_TEXT_MS)
+            }),
+            effect: self.title_effect.as_deref().and_then(TextEffect::from_id).unwrap_or_default(),
+            exit: self.title_out.as_deref().and_then(TextExit::from_id).unwrap_or_default(),
+        }
+    }
+
+    /// A [`Timing`] as the file writes it.
+    pub fn from_timing(t: Timing) -> Motion {
+        Motion {
+            title_in: Some(t.animation.id().to_owned()),
+            title_effect: (t.effect != TextEffect::None).then(|| t.effect.id().to_owned()),
+            title_out: (t.exit != TextExit::None).then(|| t.exit.id().to_owned()),
+            title_seconds: t.duration_ms.map(|ms| ms as f32 / 1000.0),
+        }
+    }
 }
 
 /// Why a theme file was refused.
@@ -421,10 +454,16 @@ impl Theme {
         }
         within("space.margin", self.space.margin, 0.0, 0.3)?;
         within("space.padding", self.space.padding, 0.0, 0.3)?;
-        if let Some(m) = &self.motion.title_in
-            && TextAnimation::from_id(m).is_none()
-        {
-            return Err(ThemeError(format!("motion.titleIn {m:?} isn't a known move")));
+        let m = &self.motion;
+        let known = |field: &str, v: &Option<String>, ok: fn(&str) -> bool| match v {
+            Some(id) if !ok(id) => Err(ThemeError(format!("motion.{field} {id:?} isn't a known move"))),
+            _ => Ok(()),
+        };
+        known("titleIn", &m.title_in, |id| TextAnimation::from_id(id).is_some())?;
+        known("titleEffect", &m.title_effect, |id| TextEffect::from_id(id).is_some())?;
+        known("titleOut", &m.title_out, |id| TextExit::from_id(id).is_some())?;
+        if let Some(secs) = m.title_seconds {
+            within("motion.titleSeconds", secs, 0.5, 600.0)?;
         }
         Ok(warnings)
     }
@@ -465,6 +504,7 @@ impl Theme {
             },
             accent: self.decor.accent_bar.then(|| rgb(&self.color.accent)),
             finish: self.type_.display.finish,
+            motion: self.motion.timing(),
             decor: LookDecor {
                 rules: self.decor.rules,
                 corners: self.decor.corners,
@@ -485,15 +525,15 @@ impl Theme {
         let l = t.look();
         let hex = |c: u32| format!("#{c:06X}");
         let accent = t.accent();
-        let (surface, muted, accent2, title_in) = match t {
-            TextTheme::Bold => (0xb81d30, 0xf5c2c8, None, "rise"),
-            TextTheme::Minimal => (0x1c1c1c, 0x8a8a8a, None, "fade"),
-            TextTheme::Cinematic => (0x141210, 0x8a7f6c, None, "fade"),
-            TextTheme::Paper => (0xece6da, 0x6f675c, None, "rise"),
-            TextTheme::NoirGold => (0x17171b, 0x8a857a, None, "fade"),
-            TextTheme::NeonNight => (0x2a1248, 0xb9a6d9, Some(0x22e4ff), "zoom"),
-            TextTheme::FieldNotes => (0x4c5a38, 0xc9c1a8, None, "rise"),
-            TextTheme::Blueprint => (0x163c6e, 0xa9c4e6, None, "typewriter"),
+        let (surface, muted, accent2) = match t {
+            TextTheme::Bold => (0xb81d30, 0xf5c2c8, None),
+            TextTheme::Minimal => (0x1c1c1c, 0x8a8a8a, None),
+            TextTheme::Cinematic => (0x141210, 0x8a7f6c, None),
+            TextTheme::Paper => (0xece6da, 0x6f675c, None),
+            TextTheme::NoirGold => (0x17171b, 0x8a857a, None),
+            TextTheme::NeonNight => (0x2a1248, 0xb9a6d9, Some(0x22e4ff)),
+            TextTheme::FieldNotes => (0x4c5a38, 0xc9c1a8, None),
+            TextTheme::Blueprint => (0x163c6e, 0xa9c4e6, None),
         };
         Theme {
             version: THEME_VERSION,
@@ -543,7 +583,7 @@ impl Theme {
             },
             plate: l.plate.map(|(c, a)| Plate { color: hex(c), alpha: a }),
             space: Space::default(),
-            motion: Motion { title_in: Some(title_in.to_owned()) },
+            motion: Motion::from_timing(l.motion),
             decor: Decor {
                 accent_bar: l.accent.is_some(),
                 rules: l.decor.rules,

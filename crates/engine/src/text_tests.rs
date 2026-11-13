@@ -62,7 +62,7 @@ fn style_sets_only_what_it_is_given() {
     );
     assert_eq!(r["position"], "lowerThirdLeft");
     let st = first(&s).text_style;
-    assert_eq!((st.theme, st.animation), (TextTheme::Paper, TextAnimation::Typewriter));
+    assert_eq!((st.theme, st.animation), (TextTheme::Paper, Some(TextAnimation::Typewriter)));
     assert_eq!(s.boards.undo_len(), undo + 1);
     let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "paper"}));
     assert_eq!(r["changed"], false);
@@ -159,14 +159,14 @@ fn style_sets_how_long_the_text_stays_up_and_how_it_leaves() {
         (Some(4.5), Some("push"), Some("fade"), Some(true))
     );
     let st = first(&s).text_style;
-    assert_eq!((st.duration_ms, st.effect, st.exit), (Some(4500), TextEffect::Push, TextExit::Fade));
+    assert_eq!((st.duration_ms, st.effect, st.exit), (Some(4500), Some(TextEffect::Push), Some(TextExit::Fade)));
     assert_eq!(s.boards.undo_len(), undo + 1, "one undo step for all three");
     let saved = &run(&mut s, "storyboard.state", json!({}))["board"]["clips"][0]["textStyle"];
     assert_eq!((saved["durationMs"].as_u64(), saved["exit"].as_str()), (Some(4500), Some("fade")));
     // 0 = until the clip ends.
     let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "duration": 0}));
     assert!(r["duration"].is_null());
-    assert_eq!(first(&s).text_style.duration_ms, None);
+    assert_eq!(first(&s).text_style.duration_ms, Some(0), "the clip's own choice: the whole clip");
     run(&mut s, "storyboard.undo", json!({}));
     assert_eq!(first(&s).text_style.duration_ms, Some(4500));
 }
@@ -179,4 +179,28 @@ fn style_takes_the_new_themes_by_id() {
     assert_eq!(first(&s).text_style.theme, TextTheme::NeonNight);
     let err = s.execute("storyboard.text.style", &json!({"clip": 1, "theme": "neon"})).unwrap_err();
     assert!(err.to_string().contains("field-notes"), "the message lists every theme: {err}");
+}
+
+/// Themes 1g: a clip follows its theme's moves until it picks its own; "theme" goes back.
+#[test]
+fn style_reports_the_moves_in_effect_and_goes_back_to_the_theme() {
+    let mut s = session();
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "blueprint", "animation": "theme"}));
+    assert_eq!((r["animation"].as_str(), r["exit"].as_str()), (Some("typewriter"), Some("erase")), "{r}");
+    assert_eq!(r["fromTheme"], json!(["animation", "duration", "effect", "exit"]));
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "exit": "fade", "duration": 3}));
+    assert_eq!((r["exit"].as_str(), r["duration"].as_f64()), (Some("fade"), Some(3.0)));
+    assert_eq!(r["fromTheme"], json!(["animation", "effect"]));
+    // Another theme: what the clip chose stays, the rest follows.
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "neon-night"}));
+    assert_eq!(
+        (r["animation"].as_str(), r["effect"].as_str(), r["exit"].as_str()),
+        (Some("zoom"), Some("pulse"), Some("fade"))
+    );
+    // Back to the theme for the out and the duration.
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "exit": "theme", "duration": "theme"}));
+    assert_eq!((r["exit"].as_str(), r["duration"].is_null()), (Some("zoom"), true));
+    assert_eq!(first(&s).text_style.exit, None);
+    let err = s.execute("storyboard.text.style", &json!({"clip": 1, "effect": "wobble"})).unwrap_err();
+    assert!(err.to_string().contains("|theme"), "{err}");
 }

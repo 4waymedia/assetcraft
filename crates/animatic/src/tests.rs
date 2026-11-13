@@ -142,11 +142,11 @@ fn a_title_card_fills_with_its_theme_and_sets_its_words() {
     assert!(ink_in(0, 160) > 20 && ink_in(160, 320) > 20);
     assert!(ink_in(0, 40) == 0 && ink_in(280, 320) == 0, "nothing at the far edges");
     // A typewriter intro shows fewer letters early on.
-    card.text_style.animation = TextAnimation::Typewriter;
+    card.text_style.animation = Some(TextAnimation::Typewriter);
     let early = c.clip_frame(&card, 0.05);
     assert!(ink_over(&early, &blank).0 < ink, "fewer letters at 0.05 s");
     // A fade starts almost invisible.
-    card.text_style.animation = TextAnimation::Fade;
+    card.text_style.animation = Some(TextAnimation::Fade);
     let faint = c.clip_frame(&card, 0.0);
     assert_eq!(ink_over(&faint, &blank).0, 0, "alpha 0 at the start of a fade");
     // A card over a background asset shows the picture through a scrim.

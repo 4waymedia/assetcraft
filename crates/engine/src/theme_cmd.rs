@@ -75,6 +75,9 @@ fn theme_json(t: &Theme, source: &str) -> Value {
         "colors": { "background": t.color.background, "text": t.color.text, "accent": t.color.accent },
         "display": t.type_.display.family, "body": t.type_.body.family,
         "titleIn": t.motion.title_in,
+        "titleEffect": t.motion.title_effect,
+        "titleOut": t.motion.title_out,
+        "titleSeconds": t.motion.title_seconds,
     })
 }
 

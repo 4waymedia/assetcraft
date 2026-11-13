@@ -135,7 +135,9 @@ impl Pacing {
             Pacing::Family => (TextTheme::Paper, TextAnimation::Fade),
             Pacing::Hero => (TextTheme::Bold, TextAnimation::Zoom),
         };
-        TextStyle { theme, animation, position: TextPosition::LowerThirdLeft, ..TextStyle::default() }
+        // A preset picks its own in on purpose (Energetic zooms in on Bold); the rest of the
+        // moves follow the theme.
+        TextStyle { theme, animation: Some(animation), position: TextPosition::LowerThirdLeft, ..TextStyle::default() }
     }
 
     fn params(self) -> Params {

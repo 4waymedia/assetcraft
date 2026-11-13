@@ -68,7 +68,7 @@ pub use template::{
 };
 pub use text::{
     AnimFrame, Backdrop, KindChange, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextError, TextExit,
-    TextKind, TextPosition, TextStyle, TextTheme, accent_bar, set_text_kind, set_text_style, set_text_timing,
+    TextKind, TextPosition, TextStyle, TextTheme, Timing, accent_bar, set_text_kind, set_text_style, set_text_timing,
 };
 pub use theme::{
     BUNDLED_FONTS, Background, BackgroundKind, Decor, Face, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast,

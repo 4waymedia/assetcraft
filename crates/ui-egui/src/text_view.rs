@@ -9,7 +9,7 @@ use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
     AnimFrame, Backdrop, Clip, DecorRect, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind,
-    TextPosition, TextStyle, TextTheme,
+    TextPosition, TextTheme, Timing,
 };
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -247,14 +247,20 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             }
         });
         ui.end_row();
+        let theme_moves = style.theme.look().motion;
         ui.label("In").on_hover_text("How the text arrives");
-        egui::ComboBox::from_id_salt(("sb-anim", id)).selected_text(style.animation.name()).show_ui(ui, |ui| {
-            for a in TextAnimation::ALL {
-                if ui.selectable_label(style.animation == a, a.name()).clicked() && style.animation != a {
-                    style_edit = Some(json!({ "clip": id, "animation": a.id() }));
-                }
-            }
-        });
+        let pick = move_combo(
+            ui,
+            ("sb-anim", id),
+            style.animation,
+            theme_moves.animation,
+            &TextAnimation::ALL,
+            TextAnimation::name,
+            TextAnimation::id,
+        );
+        if let Some(v) = pick {
+            style_edit = Some(json!({ "clip": id, "animation": v }));
+        }
         ui.end_row();
         ui.label("Duration").on_hover_text("How long the text stays up from the clip's start, its in and out included");
         if let Some(d) = duration_row(ui, clip) {
@@ -262,22 +268,25 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         }
         ui.end_row();
         ui.label("Effect").on_hover_text("What the text does while it is up");
-        egui::ComboBox::from_id_salt(("sb-effect", id)).selected_text(style.effect.name()).show_ui(ui, |ui| {
-            for e in TextEffect::ALL {
-                if ui.selectable_label(style.effect == e, e.name()).clicked() && style.effect != e {
-                    style_edit = Some(json!({ "clip": id, "effect": e.id() }));
-                }
-            }
-        });
+        let pick = move_combo(
+            ui,
+            ("sb-effect", id),
+            style.effect,
+            theme_moves.effect,
+            &TextEffect::ALL,
+            TextEffect::name,
+            TextEffect::id,
+        );
+        if let Some(v) = pick {
+            style_edit = Some(json!({ "clip": id, "effect": v }));
+        }
         ui.end_row();
         ui.label("Out").on_hover_text("How the text leaves at the end of its duration");
-        egui::ComboBox::from_id_salt(("sb-exit", id)).selected_text(style.exit.name()).show_ui(ui, |ui| {
-            for e in TextExit::ALL {
-                if ui.selectable_label(style.exit == e, e.name()).clicked() && style.exit != e {
-                    style_edit = Some(json!({ "clip": id, "exit": e.id() }));
-                }
-            }
-        });
+        let pick =
+            move_combo(ui, ("sb-exit", id), style.exit, theme_moves.exit, &TextExit::ALL, TextExit::name, TextExit::id);
+        if let Some(v) = pick {
+            style_edit = Some(json!({ "clip": id, "exit": v }));
+        }
         ui.end_row();
         ui.label("Position");
         ui.add_enabled_ui(kind == TextKind::Overlay, |ui| {
@@ -313,10 +322,11 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         );
     }
     let clip_secs = clip.duration.as_secs_f64();
-    let timed = style.duration_ms.is_some() || style.exit != TextExit::None || style.effect != TextEffect::None;
+    let timing = style.timing();
+    let timed = timing.duration_ms.is_some() || timing.exit != TextExit::None || timing.effect != TextEffect::None;
     if !timed {
         // Replays the in, then holds for a second.
-        let intro = style.animation.seconds();
+        let intro = timing.animation.seconds();
         let cycle = intro + 1.0;
         let elapsed = if intro > 0.0 { ui.input(|i| i.time) % cycle } else { f64::INFINITY };
         paint_text(painter, frame, clip, elapsed);
@@ -330,13 +340,13 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     }
     // In, effect, out, a beat of nothing, again. A long duration is shortened to 5 s here so
     // the out comes round; the caption says the real numbers.
-    let shown = style.shown_secs(clip_secs);
+    let shown = timing.shown_secs(clip_secs);
     let p = shown.clamp(0.5, PREVIEW_MAX_SECS);
-    let preview = TextStyle { duration_ms: Some((p * 1000.0) as u32), ..style };
+    let preview = Timing { duration_ms: Some((p * 1000.0) as u32), ..timing };
     let elapsed = ui.input(|i| i.time) % (p + PREVIEW_GAP_SECS);
     paint_text_frame(painter, frame, clip, preview.frame_at(elapsed, p));
     ui.ctx().request_repaint();
-    let caption = if style.duration_ms.is_some() && shown < clip_secs {
+    let caption = if timing.duration_ms.is_some() && shown < clip_secs {
         format!("Up {shown:.1} s of the clip's {clip_secs:.1} s, then gone")
     } else {
         format!("Up for the whole clip ({clip_secs:.1} s)")
@@ -348,20 +358,75 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
 const PREVIEW_MAX_SECS: f64 = 5.0;
 const PREVIEW_GAP_SECS: f64 = 0.6;
 
-/// The Duration row: "Whole clip", or seconds. A drag commits once, when it ends (one undo
-/// step); a typed value commits when it lands. Returns the `duration` param (0 = whole clip).
-fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<f64> {
+/// A move's menu (themes 1g): first "Theme (…)" — follow the theme — then every move. The
+/// shown value says which: "Zoom · theme" or "Fade". Returns the param to send: a move's id,
+/// or `"theme"`.
+fn move_combo<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    salt: (&str, u32),
+    own: Option<T>,
+    theme: T,
+    all: &[T],
+    name: fn(T) -> &'static str,
+    id: fn(T) -> &'static str,
+) -> Option<&'static str> {
+    let mut out = None;
+    let shown = match own {
+        Some(v) => name(v).to_owned(),
+        None => format!("{} · theme", name(theme)),
+    };
+    egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
+        let follow = format!("Theme ({})", name(theme));
+        if ui.selectable_label(own.is_none(), follow).on_hover_text("Follow the theme's move").clicked()
+            && own.is_some()
+        {
+            out = Some("theme");
+        }
+        ui.separator();
+        for &v in all {
+            if ui.selectable_label(own == Some(v), name(v)).clicked() && own != Some(v) {
+                out = Some(id(v));
+            }
+        }
+    });
+    out
+}
+
+/// The Duration row: the theme's, the whole clip, or seconds. A drag commits once, when it
+/// ends (one undo step); a typed value commits when it lands. Returns the `duration` param:
+/// `"theme"`, `0` (whole clip) or seconds.
+fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<serde_json::Value> {
     let clip_secs = clip.duration.as_secs_f64();
-    let current = clip.text_style.duration_ms.map(|ms| f64::from(ms) / 1000.0);
+    let own = clip.text_style.duration_ms;
+    let theme = clip.text_style.theme.look().motion.duration_ms;
     let max = clip_secs.clamp(MIN_SECS, f64::from(MAX_TEXT_MS) / 1000.0);
+    let label =
+        |ms: Option<u32>| ms.map_or_else(|| "Whole clip".to_owned(), |ms| format!("{:.1} s", f64::from(ms) / 1000.0));
     let mut out = None;
     ui.horizontal(|ui| {
-        let mut whole = current.is_none();
-        if ui.checkbox(&mut whole, "Whole clip").on_hover_text("Up until the clip ends").changed() {
-            // Unticked: start from three seconds (or the clip, if shorter).
-            out = Some(if whole { 0.0 } else { (max.min(3.0) * 10.0).round() / 10.0 });
-        }
-        if let Some(secs) = current {
+        let shown = match own {
+            None => format!("{} · theme", label(theme)),
+            Some(0) => "Whole clip".to_owned(),
+            Some(_) => "Set time".to_owned(),
+        };
+        egui::ComboBox::from_id_salt(("sb-duration", clip.id.0)).selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(own.is_none(), format!("Theme ({})", label(theme))).clicked() && own.is_some() {
+                out = Some(json!("theme"));
+            }
+            ui.separator();
+            if ui.selectable_label(own == Some(0), "Whole clip").on_hover_text("Up until the clip ends").clicked()
+                && own != Some(0)
+            {
+                out = Some(json!(0));
+            }
+            if ui.selectable_label(own.is_some_and(|ms| ms > 0), "Set time").clicked() && !own.is_some_and(|ms| ms > 0)
+            {
+                // Start from three seconds (or the clip, if shorter).
+                out = Some(json!((max.min(3.0) * 10.0).round() / 10.0));
+            }
+        });
+        if let Some(ms) = own.filter(|ms| *ms > 0) {
+            let secs = f64::from(ms) / 1000.0;
             let key = egui::Id::new(("sb-text-duration", clip.id.0));
             let mut v: f64 = ui.data(|d| d.get_temp::<f64>(key)).unwrap_or(secs);
             let r =
@@ -372,7 +437,7 @@ fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<f64> {
                 ui.data_mut(|d| d.remove::<f64>(key));
                 let v = (v * 10.0).round() / 10.0;
                 if (r.drag_stopped() || r.changed()) && (v - secs).abs() > 1e-6 {
-                    out = Some(v);
+                    out = Some(json!(v));
                 }
             }
         }

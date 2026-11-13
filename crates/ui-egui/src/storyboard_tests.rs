@@ -1641,5 +1641,35 @@ fn the_inspector_previews_a_timed_title_through_its_out() {
         t += 0.1;
     }
     let st = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style;
-    assert_eq!((st.duration_ms, st.exit), (Some(2000), assetcraft_storyboard::TextExit::Sink));
+    assert_eq!((st.duration_ms, st.exit), (Some(2000), Some(assetcraft_storyboard::TextExit::Sink)));
+}
+
+/// Themes 1g: a title that follows its theme previews the theme's moves; picking the theme's
+/// own value again ("theme") clears the clip's choice.
+#[test]
+fn the_inspector_previews_a_title_following_its_themes_moves() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let card = nav
+        .session()
+        .storyboard()
+        .unwrap()
+        .clips
+        .iter()
+        .find(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl)
+        .unwrap()
+        .id
+        .0;
+    nav.run("storyboard.select", json!({ "clip": card }));
+    nav.run("storyboard.text.style", json!({ "clip": card, "theme": "blueprint", "animation": "theme" }));
+    let mut t = 0.0;
+    while t < 6.0 {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.25;
+    }
+    let st = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style;
+    assert_eq!((st.animation, st.exit), (None, None), "following the theme");
+    assert_eq!(st.timing().exit, assetcraft_storyboard::TextExit::Erase, "Blueprint erases its titles");
 }

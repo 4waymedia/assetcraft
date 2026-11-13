@@ -64,10 +64,10 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
     let theme_ids = TextTheme::ALL.map(TextTheme::id).join("|");
     let theme = parse(p, "theme", TextTheme::from_id, &theme_ids)?;
-    let animation = parse(p, "animation", TextAnimation::from_id, "none|fade|rise|zoom|typewriter")?;
+    let animation = parse_or_theme(p, "animation", TextAnimation::from_id, "none|fade|rise|zoom|typewriter")?;
     let position = parse(p, "position", TextPosition::from_id, "lowerThirdLeft|lowerThirdRight|center|top|bottom")?;
-    let effect = parse(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;
-    let exit = parse(p, "exit", TextExit::from_id, "none|fade|sink|zoom|erase")?;
+    let effect = parse_or_theme(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;
+    let exit = parse_or_theme(p, "exit", TextExit::from_id, "none|fade|sink|zoom|erase")?;
     let duration = text_duration(p)?;
     if theme.is_none()
         && animation.is_none()
@@ -90,26 +90,55 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         s.boards.checkpoint();
         s.boards.board = Some(board);
     }
+    // What the text does (the clip's choices over its theme's), and which parts follow the theme.
+    let t = style.timing();
+    let from_theme: Vec<&str> = [
+        ("animation", style.animation.is_none()),
+        ("duration", style.duration_ms.is_none()),
+        ("effect", style.effect.is_none()),
+        ("exit", style.exit.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(k, inherit)| inherit.then_some(k))
+    .collect();
     Ok(json!({
         "clip": id.0,
         "changed": changed,
         "theme": style.theme.id(),
-        "animation": style.animation.id(),
+        "animation": t.animation.id(),
         "position": style.position.id(),
-        "duration": style.duration_ms.map(|ms| f64::from(ms) / 1000.0),
-        "effect": style.effect.id(),
-        "exit": style.exit.id(),
+        "duration": t.duration_ms.map(|ms| f64::from(ms) / 1000.0),
+        "effect": t.effect.id(),
+        "exit": t.exit.id(),
+        "fromTheme": from_theme,
     }))
 }
 
-/// `duration`: seconds the text stays up (0.5–600), or `0` for until the clip ends.
+/// A move: one of `ids`, or `"theme"` to follow the theme again (`Some(None)`).
+fn parse_or_theme<T>(
+    p: &Value,
+    key: &str,
+    from_id: fn(&str) -> Option<T>,
+    ids: &str,
+) -> Result<Option<Option<T>>, CmdError> {
+    if p.get(key).and_then(Value::as_str) == Some("theme") {
+        return Ok(Some(None));
+    }
+    Ok(parse(p, key, from_id, &format!("{ids}|theme"))?.map(Some))
+}
+
+/// `duration`: seconds the text stays up (0.5–600), `0` for until the clip ends, or
+/// `"theme"` for the theme's.
 fn text_duration(p: &Value) -> Result<Option<Option<u32>>, CmdError> {
     let Some(v) = p.get("duration").filter(|v| !v.is_null()) else { return Ok(None) };
+    if v.as_str() == Some("theme") {
+        return Ok(Some(None));
+    }
     let secs = v.as_f64().filter(|s| s.is_finite()).ok_or_else(|| {
-        CmdError::BadParams("`duration` must be seconds (0.5–600), or 0 for until the clip ends".into())
+        CmdError::BadParams("`duration` must be seconds (0.5–600), 0 for until the clip ends, or \"theme\"".into())
     })?;
     if secs == 0.0 {
-        return Ok(Some(None));
+        return Ok(Some(Some(0)));
     }
     let ms = (secs * 1000.0).round();
     if ms < f64::from(MIN_TEXT_MS) || ms > f64::from(MAX_TEXT_MS) {

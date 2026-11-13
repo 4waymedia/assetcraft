@@ -619,14 +619,17 @@ fn text_style_edits_and_round_trips() {
     let id = board.clips[0].id;
     let json = board.to_json().unwrap();
     assert!(!json.contains("textStyle"), "the default style is left out");
-    assert!(set_text_style(&mut board, id, Some(TextTheme::Cinematic), Some(TextAnimation::Typewriter), None).unwrap());
+    assert!(
+        set_text_style(&mut board, id, Some(TextTheme::Cinematic), Some(Some(TextAnimation::Typewriter)), None)
+            .unwrap()
+    );
     assert!(!set_text_style(&mut board, id, Some(TextTheme::Cinematic), None, None).unwrap(), "no change");
     set_text_kind(&mut board, id, TextKind::Overlay).unwrap();
     assert!(set_text_style(&mut board, id, None, None, Some(TextPosition::Top)).unwrap());
     let style = board.clips[0].text_style;
     assert_eq!(
         (style.theme, style.animation, style.position),
-        (TextTheme::Cinematic, TextAnimation::Typewriter, TextPosition::Top)
+        (TextTheme::Cinematic, Some(TextAnimation::Typewriter), TextPosition::Top)
     );
     let json = board.to_json().unwrap();
     assert!(json.contains("\"theme\": \"cinematic\"") && json.contains("\"position\": \"top\""), "{json}");
@@ -1272,9 +1275,10 @@ fn theme_files_are_checked_as_hostile_input() {
 #[test]
 fn text_timing_runs_in_effect_out_then_hides() {
     let style = TextStyle {
-        animation: TextAnimation::Fade,
+        animation: Some(TextAnimation::Fade),
         duration_ms: Some(4000),
-        exit: TextExit::Fade,
+        effect: Some(TextEffect::None),
+        exit: Some(TextExit::Fade),
         ..TextStyle::default()
     };
     let clip = 10.0;
@@ -1288,25 +1292,31 @@ fn text_timing_runs_in_effect_out_then_hides() {
     // A duration past the clip counts as the clip.
     assert_eq!(style.shown_secs(2.5), 2.5);
     // No duration, no out: the text stays to the end (the old behaviour).
-    let plain = TextStyle { animation: TextAnimation::Fade, ..TextStyle::default() };
+    let plain = TextStyle {
+        animation: Some(TextAnimation::Fade),
+        duration_ms: Some(0),
+        effect: Some(TextEffect::None),
+        exit: Some(TextExit::None),
+        ..TextStyle::default()
+    };
     assert_eq!(plain.frame_at(9.99, clip), AnimFrame::REST);
     assert_eq!(plain.frame_at(clip, clip), AnimFrame::REST);
     // No duration but an out: it leaves as the clip ends.
-    let ends = TextStyle { exit: TextExit::Erase, ..TextStyle::default() };
+    let ends = TextStyle { exit: Some(TextExit::Erase), ..TextStyle::default() };
     assert!(ends.frame_at(9.6, clip).reveal < 1.0 && ends.frame_at(9.6, clip).reveal > 0.0);
     // A duration shorter than in + out: the in finishes, the out gets what is left.
     let tight = TextStyle {
-        animation: TextAnimation::Typewriter,
+        animation: Some(TextAnimation::Typewriter),
         duration_ms: Some(1500),
-        exit: TextExit::Erase,
+        exit: Some(TextExit::Erase),
         ..TextStyle::default()
     };
     assert!(tight.frame_at(1.19, clip).reveal > 0.9, "typing on");
     assert!(tight.frame_at(1.4, clip).reveal < 0.5, "erasing");
     // Effects move the text while it is up.
-    let push = TextStyle { effect: TextEffect::Push, duration_ms: Some(5000), ..TextStyle::default() };
+    let push = TextStyle { effect: Some(TextEffect::Push), duration_ms: Some(5000), ..TextStyle::default() };
     assert!(push.frame_at(4.0, clip).scale > push.frame_at(1.0, clip).scale);
-    let drift = TextStyle { effect: TextEffect::Drift, ..TextStyle::default() };
+    let drift = TextStyle { effect: Some(TextEffect::Drift), ..TextStyle::default() };
     assert!(drift.frame_at(8.0, clip).offset_y < 0.0);
     for e in TextEffect::ALL {
         assert_eq!(TextEffect::from_id(e.id()), Some(e));
@@ -1320,7 +1330,10 @@ fn text_timing_runs_in_effect_out_then_hides() {
 fn text_timing_edits_round_trip_and_old_boards_load() {
     let mut board = sample();
     let id = board.clips[0].id;
-    assert!(set_text_timing(&mut board, id, Some(Some(3000)), Some(TextEffect::Pulse), Some(TextExit::Sink)).unwrap());
+    assert!(
+        set_text_timing(&mut board, id, Some(Some(3000)), Some(Some(TextEffect::Pulse)), Some(Some(TextExit::Sink)))
+            .unwrap()
+    );
     assert!(!set_text_timing(&mut board, id, Some(Some(3000)), None, None).unwrap(), "no change");
     // Clamped to the allowed range.
     set_text_timing(&mut board, id, Some(Some(10)), None, None).unwrap();
@@ -1329,9 +1342,14 @@ fn text_timing_edits_round_trip_and_old_boards_load() {
     let json = board.to_json().unwrap();
     assert!(json.contains("\"durationMs\": 3000") && json.contains("\"exit\": \"sink\""), "{json}");
     assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
-    // Back to "until the clip ends".
-    assert!(set_text_timing(&mut board, id, Some(None), Some(TextEffect::None), Some(TextExit::None)).unwrap());
-    assert!(!board.to_json().unwrap().contains("durationMs"));
+    // "Until the clip ends", chosen on the clip: saved as 0.
+    assert!(set_text_timing(&mut board, id, Some(Some(0)), None, None).unwrap());
+    assert!(board.to_json().unwrap().contains("\"durationMs\": 0"));
+    assert_eq!(board.clips[0].text_style.timing().duration_ms, None);
+    // Back to the theme's for all three: nothing saved.
+    assert!(set_text_timing(&mut board, id, Some(None), Some(None), Some(None)).unwrap());
+    let json = board.to_json().unwrap();
+    assert!(!json.contains("durationMs") && !json.contains("\"exit\""), "{json}");
     let shot = board.clips[1].id;
     assert_eq!(set_text_timing(&mut board, shot, Some(Some(2000)), None, None), Err(TextError::NoText(shot)));
 }
@@ -1511,4 +1529,40 @@ fn text_finish_makes_passes_under_the_words() {
     assert!(!theme.to_json().contains("finish"));
     let bad = json.replace("\"glow\"", "\"sparkle\"");
     assert!(Theme::parse(bad.as_bytes(), false).is_err(), "an unknown finish is refused");
+}
+
+/// Themes 1g (Paul, 2026-11-08: "theme, transition in, duration, effect, transition out,
+/// position"): the theme picks the moves; a clip's own choice wins, and "theme" goes back.
+#[test]
+fn a_theme_sets_the_moves_and_a_clip_can_override_each() {
+    let neon = TextStyle { theme: TextTheme::NeonNight, ..TextStyle::default() };
+    let t = neon.timing();
+    assert_eq!(
+        (t.animation, t.effect, t.exit, t.duration_ms),
+        (TextAnimation::Zoom, TextEffect::Pulse, TextExit::Zoom, None)
+    );
+    // The clip's own choices, one at a time.
+    let own = TextStyle { animation: Some(TextAnimation::Fade), exit: Some(TextExit::None), ..neon };
+    let t = own.timing();
+    assert_eq!((t.animation, t.effect, t.exit), (TextAnimation::Fade, TextEffect::Pulse, TextExit::None));
+    // Switching the theme re-times what the clip didn't choose.
+    let blue = TextStyle { theme: TextTheme::Blueprint, ..own };
+    assert_eq!((blue.timing().animation, blue.timing().effect), (TextAnimation::Fade, TextEffect::None));
+    // A theme with an out hides the text at the clip's end.
+    assert!(TextStyle { theme: TextTheme::Blueprint, ..TextStyle::default() }.frame_at(9.99, 10.0).reveal < 0.1);
+    // Every built-in's moves survive its theme file.
+    for th in TextTheme::ALL {
+        let file = Theme::parse(Theme::builtin(th).to_json().as_bytes(), true).unwrap().0;
+        assert_eq!(file.look().motion, th.look().motion, "{}", th.id());
+    }
+    // A file's moves are checked like the rest.
+    let mut theme = Theme::builtin(TextTheme::Paper);
+    theme.motion.title_out = Some("explode".into());
+    assert!(Theme::parse(theme.to_json().as_bytes(), false).is_err());
+    theme.motion.title_out = Some("sink".into());
+    theme.motion.title_seconds = Some(0.1);
+    assert!(Theme::parse(theme.to_json().as_bytes(), false).is_err(), "too short");
+    theme.motion.title_seconds = Some(4.0);
+    let look = Theme::parse(theme.to_json().as_bytes(), false).unwrap().0.look();
+    assert_eq!((look.motion.exit, look.motion.duration_ms), (TextExit::Sink, Some(4000)));
 }
