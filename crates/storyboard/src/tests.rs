@@ -1478,3 +1478,37 @@ fn theme_files_name_their_decor() {
         );
     }
 }
+
+/// Themes 1f: shadow, outline and glow are extra passes of the words, under them.
+#[test]
+fn text_finish_makes_passes_under_the_words() {
+    let mut look = TextTheme::Bold.look();
+    assert_eq!(look.finish, TextFinish::Shadow);
+    let shadow = finish_passes(&look, 100.0);
+    assert!(shadow.iter().all(|p| p.dx > 0.0 && p.dy > 0.0 && p.color == 0x000000), "down and right, black");
+    // Outline: a ring all round, in the tone opposite the text.
+    look.finish = TextFinish::Outline;
+    let ring = finish_passes(&look, 100.0);
+    assert_eq!(ring.len(), 12);
+    assert!(ring.iter().all(|p| p.color == 0x000000), "white text gets a dark edge");
+    assert!(ring.iter().any(|p| p.dx < 0.0) && ring.iter().any(|p| p.dy < 0.0));
+    let mut paper = TextTheme::Paper.look();
+    paper.finish = TextFinish::Outline;
+    assert!(finish_passes(&paper, 100.0).iter().all(|p| p.color == 0xffffff), "dark text gets a light edge");
+    // Glow: rings in the accent, faint, wider than the outline.
+    let neon = TextTheme::NeonNight.look();
+    let glow = finish_passes(&neon, 100.0);
+    assert!(glow.iter().all(|p| p.color == 0xff2bd6 && p.alpha < 0.3));
+    assert!(glow.iter().map(|p| p.dx.hypot(p.dy)).fold(0.0, f32::max) > 10.0);
+    // None, or a nonsense height: nothing.
+    assert!(finish_passes(&TextTheme::Paper.look(), 100.0).is_empty());
+    assert!(finish_passes(&neon, f32::NAN).is_empty() && finish_passes(&neon, 0.0).is_empty());
+    // The theme file names it on the display face; old files have none.
+    let mut theme = Theme::builtin(TextTheme::NeonNight);
+    let json = theme.to_json();
+    assert!(json.contains("\"finish\": \"glow\""), "{json}");
+    theme.type_.display.finish = TextFinish::None;
+    assert!(!theme.to_json().contains("finish"));
+    let bad = json.replace("\"glow\"", "\"sparkle\"");
+    assert!(Theme::parse(bad.as_bytes(), false).is_err(), "an unknown finish is refused");
+}

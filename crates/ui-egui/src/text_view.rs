@@ -97,6 +97,11 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
     for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block.x, block.y], frame.height(), pad) {
         paint_decor(&painter, Pos2::ZERO, &r, anim.alpha);
     }
+    // Shadow, outline or glow: the same words, under them (themes 1f).
+    for p in assetcraft_storyboard::finish_passes(&look, height) {
+        let tint = rgb(p.color).gamma_multiply((p.alpha * anim.alpha).clamp(0.0, 1.0));
+        painter.galley_with_override_text_color(at + vec2(p.dx, p.dy), galley.clone(), tint);
+    }
     painter.galley(at, galley, color);
 }
 

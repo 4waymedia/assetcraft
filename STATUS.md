@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-11-10_
+_Last updated: 2026-11-13_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -585,3 +585,4 @@ _The superseded ArtCraft Library history (Stage 0 of the Library tab, findings F
 - 2026-11-10: themes 1b-i — Noir Gold, Neon Night, Field Notes, Blueprint as built-in themes from spec §4 (8 in all), swatches in the Inspector's theme picker. Next: 1d accent bar (the accents aren't drawn yet), then 1b-ii theme files on clips.
 - 2026-11-10: themes 1d — the base drawn: gradient, grain, vignette and the accent bar on every theme, the same in the export and the Viewer; theme files carry `background` and `decor.accentBar`. Next: 1e decor (rules, corners, frame, patterns), 1f text finish, 1g theme motion, then 1b-ii.
 - 2026-11-10: themes 1e — decor: rules (below · both · double), corner marks, frame, patterns (grid · dots · scanlines) and radial backgrounds, one rectangle list drawn by the export and the Viewer; the 5 richer built-ins use them. Next: 1f text finish (shadow, outline, glow), 1g theme motion, then 1b-ii.
+- 2026-11-13: themes 1f — text finish (shadow · outline · glow) on a theme's display face, drawn as passes of the words under them in the export and the Viewer; Neon Night glows, Bold / Minimal / Field Notes cast a shadow. Next: 1g theme motion, then 1b-ii (theme files on clips).

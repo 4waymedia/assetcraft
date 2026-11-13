@@ -413,6 +413,11 @@ impl Compositor {
         for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block[0], block[1]], h, pad) {
             draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha * anim.alpha);
         }
+        // Shadow, outline or glow: the same words, under them (themes 1f).
+        for p in assetcraft_storyboard::finish_passes(&look, height) {
+            let a = p.alpha * anim.alpha;
+            self.fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
+        }
         self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
     }
 

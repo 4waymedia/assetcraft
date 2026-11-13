@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::decor::{LookDecor, Pattern, Rules};
+use crate::decor::{LookDecor, Pattern, Rules, TextFinish};
 use crate::text::{Backdrop, Look, TextAnimation, TextTheme};
 
 /// The largest theme file read.
@@ -163,6 +163,13 @@ pub struct Face {
     /// Shown in capitals.
     #[serde(default)]
     pub uppercase: bool,
+    /// How the letters are finished: `none` · `shadow` · `outline` · `glow` (themes 1f).
+    #[serde(default, skip_serializing_if = "is_no_finish")]
+    pub finish: TextFinish,
+}
+
+fn is_no_finish(f: &TextFinish) -> bool {
+    *f == TextFinish::None
 }
 
 fn default_weight() -> u16 {
@@ -289,16 +296,18 @@ pub fn parse_color(s: &str) -> Option<u32> {
     u32::from_str_radix(hex, 16).ok()
 }
 
+/// Relative luminance of `0xRRGGBB`, 0 (black) – 1 (white), as WCAG defines it.
+pub fn luminance(c: u32) -> f64 {
+    let ch = |v: u32| {
+        let s = f64::from(v & 0xff) / 255.0;
+        if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * ch(c >> 16) + 0.7152 * ch(c >> 8) + 0.0722 * ch(c)
+}
+
 /// WCAG contrast ratio of two `0xRRGGBB` colours (1–21).
 pub fn contrast(a: u32, b: u32) -> f64 {
-    fn lum(c: u32) -> f64 {
-        let ch = |v: u32| {
-            let s = f64::from(v & 0xff) / 255.0;
-            if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * ch(c >> 16) + 0.7152 * ch(c >> 8) + 0.0722 * ch(c)
-    }
-    let (x, y) = (lum(a), lum(b));
+    let (x, y) = (luminance(a), luminance(b));
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
@@ -455,6 +464,7 @@ impl Theme {
                 radial: b.kind == BackgroundKind::Radial,
             },
             accent: self.decor.accent_bar.then(|| rgb(&self.color.accent)),
+            finish: self.type_.display.finish,
             decor: LookDecor {
                 rules: self.decor.rules,
                 corners: self.decor.corners,
@@ -505,8 +515,15 @@ impl Theme {
                     weight: if t == TextTheme::Minimal { 300 } else { 700 },
                     tracking: l.tracking,
                     uppercase: l.uppercase,
+                    finish: l.finish,
                 },
-                body: Face { family: BUNDLED_FONTS[0].to_owned(), weight: 400, tracking: 0.0, uppercase: false },
+                body: Face {
+                    family: BUNDLED_FONTS[0].to_owned(),
+                    weight: 400,
+                    tracking: 0.0,
+                    uppercase: false,
+                    finish: TextFinish::None,
+                },
                 scale: Scale { card: l.card_size, overlay: l.overlay_size, caption: default_caption() },
             },
             background: {

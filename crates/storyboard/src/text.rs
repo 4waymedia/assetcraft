@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::decor::{LookDecor, Pattern, Rules};
+use crate::decor::{LookDecor, Pattern, Rules, TextFinish};
 
 use crate::model::{ClipId, ShotType, Storyboard};
 
@@ -114,6 +114,8 @@ pub struct Look {
     pub accent: Option<u32>,
     /// Rules, corner marks, frame, pattern (themes 1e).
     pub decor: crate::decor::LookDecor,
+    /// Shadow, outline or glow on the letters (themes 1f).
+    pub finish: crate::decor::TextFinish,
 }
 
 /// A card's background (themes 1d, `docs/design/themes.md`): up to four colour stops along
@@ -281,6 +283,7 @@ impl TextTheme {
                 backdrop: Backdrop::gradient(0xe5243b, 0xa8172a, 135.0, 0.0, 0.2),
                 accent: Some(0x111111),
                 decor: LookDecor::NONE,
+                finish: TextFinish::Shadow,
             },
             TextTheme::Minimal => Look {
                 background: 0x0f1217,
@@ -293,6 +296,7 @@ impl TextTheme {
                 backdrop: Backdrop { vignette: 0.35, ..Backdrop::solid(0x0f1217) },
                 accent: Some(0xcfcfcf),
                 decor: LookDecor::NONE,
+                finish: TextFinish::Shadow,
             },
             TextTheme::Cinematic => Look {
                 background: 0x000000,
@@ -305,6 +309,7 @@ impl TextTheme {
                 backdrop: Backdrop { grain: 0.35, ..Backdrop::solid(0x000000) },
                 accent: None,
                 decor: LookDecor::NONE,
+                finish: TextFinish::None,
             },
             TextTheme::Paper => Look {
                 background: 0xf3efe6,
@@ -317,6 +322,7 @@ impl TextTheme {
                 backdrop: Backdrop::gradient(0xf3efe6, 0xe4dccb, 90.0, 0.15, 0.15),
                 accent: Some(0xa4472d),
                 decor: LookDecor { frame: true, ..LookDecor::NONE },
+                finish: TextFinish::None,
             },
             TextTheme::NoirGold => Look {
                 background: 0x0b0b0d,
@@ -329,6 +335,7 @@ impl TextTheme {
                 backdrop: Backdrop::radial(0x24242b, 0x0b0b0d, 0.2, 0.4),
                 accent: Some(0xc9a24a),
                 decor: LookDecor { rules: Rules::Both, corners: true, ..LookDecor::NONE },
+                finish: TextFinish::None,
             },
             TextTheme::NeonNight => Look {
                 background: 0x1a0b2e,
@@ -341,6 +348,7 @@ impl TextTheme {
                 backdrop: Backdrop::gradient(0x2c1350, 0x0c0418, 90.0, 0.05, 0.35),
                 accent: Some(0xff2bd6),
                 decor: LookDecor { pattern: Pattern::Scanlines, frame: true, ..LookDecor::NONE },
+                finish: TextFinish::Glow,
             },
             TextTheme::FieldNotes => Look {
                 background: 0x3c4a2c,
@@ -353,6 +361,7 @@ impl TextTheme {
                 backdrop: Backdrop::gradient(0x4c5a38, 0x2e3822, 90.0, 0.25, 0.35),
                 accent: Some(0xc58a2b),
                 decor: LookDecor { pattern: Pattern::Dots, rules: Rules::Below, ..LookDecor::NONE },
+                finish: TextFinish::Shadow,
             },
             TextTheme::Blueprint => Look {
                 background: 0x1e4f8f,
@@ -365,6 +374,7 @@ impl TextTheme {
                 backdrop: Backdrop::gradient(0x2463a8, 0x153a6a, 90.0, 0.0, 0.25),
                 accent: Some(0xffd23f),
                 decor: LookDecor { pattern: Pattern::Grid, corners: true, frame: true, ..LookDecor::NONE },
+                finish: TextFinish::None,
             },
         };
         // Rules, corners and frame are drawn in the accent.

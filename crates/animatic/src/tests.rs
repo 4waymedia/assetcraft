@@ -389,3 +389,31 @@ fn a_title_card_draws_its_decor() {
     let b = c.clip_frame(&card, f64::INFINITY);
     assert!(!yellow(&b.get(30, 30)));
 }
+
+/// Themes 1f: Neon Night's glow and Bold's shadow are in the exported card.
+#[test]
+fn a_title_card_draws_its_text_finish() {
+    let mut c = compositor(640, 360);
+    let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(4).unwrap());
+    card.description = "Neon".into();
+    card.text_style.theme = assetcraft_storyboard::TextTheme::NeonNight;
+    let glow = c.clip_frame(&card, f64::INFINITY);
+    let pinkish = |p: &[u8; 4]| {
+        let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
+        r > g + 40 && b > g + 40 && r > 120
+    };
+    let halo = glow.data.as_chunks::<4>().0.iter().filter(|p| pinkish(p)).count();
+    assert!(halo > 400, "a magenta halo round the letters: {halo} px");
+    // Bold: a dark pixel with a white letter just up and to the left of it is the shadow
+    // (the black accent bar has no letter above-left of it).
+    card.text_style.theme = assetcraft_storyboard::TextTheme::Bold;
+    let bold = c.clip_frame(&card, f64::INFINITY);
+    let shadowed = (3..360)
+        .flat_map(|y| (3..640).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let (p, up_left) = (bold.get(x, y), bold.get(x - 3, y - 3));
+            p[0] < 120 && up_left[0] > 230 && up_left[1] > 230
+        })
+        .count();
+    assert!(shadowed > 30, "a shadow down-right of the letters: {shadowed} px");
+}

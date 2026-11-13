@@ -205,3 +205,67 @@ pub fn text_decor(look: &Look, kind: TextKind, block: [f32; 4], frame_h: f32, pa
     }
     out
 }
+
+/// How a theme finishes its letters (themes 1f): drawn as extra passes of the same words
+/// under them ([`finish_passes`]), so the export and the Viewer match.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextFinish {
+    /// Plain letters.
+    #[default]
+    None,
+    /// A soft drop shadow, down and right.
+    Shadow,
+    /// A thin edge in the opposite tone (dark round light text, light round dark).
+    Outline,
+    /// A halo in the accent colour (neon).
+    Glow,
+}
+
+/// One extra pass of the words: drawn `dx`, `dy` pixels off, in `color` at `alpha`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FinishPass {
+    /// Offset right, px.
+    pub dx: f32,
+    /// Offset down, px.
+    pub dy: f32,
+    /// `0xRRGGBB`.
+    pub color: u32,
+    /// 0–1, times the words' own alpha.
+    pub alpha: f32,
+}
+
+/// The passes to draw before the words for `look`'s finish, for text `height` px tall.
+pub fn finish_passes(look: &Look, height: f32) -> Vec<FinishPass> {
+    let mut out = Vec::new();
+    if !height.is_finite() || height <= 0.0 {
+        return out;
+    }
+    let ring = |out: &mut Vec<FinishPass>, r: f32, steps: u32, color: u32, alpha: f32| {
+        for i in 0..steps {
+            let a = i as f32 / steps as f32 * std::f32::consts::TAU;
+            out.push(FinishPass { dx: r * a.cos(), dy: r * a.sin(), color, alpha });
+        }
+    };
+    match look.finish {
+        TextFinish::None => {}
+        TextFinish::Shadow => {
+            let d = (height * 0.05).max(1.0);
+            out.push(FinishPass { dx: d * 1.8, dy: d * 1.8, color: 0x000000, alpha: 0.22 });
+            out.push(FinishPass { dx: d, dy: d, color: 0x000000, alpha: 0.5 });
+        }
+        TextFinish::Outline => {
+            let r = (height * 0.035).max(1.0);
+            let lum = crate::theme::luminance(look.text);
+            let edge = if lum > 0.4 { 0x000000 } else { 0xffffff };
+            ring(&mut out, r, 12, edge, 1.0);
+        }
+        TextFinish::Glow => {
+            let c = look.decor.color;
+            ring(&mut out, (height * 0.12).max(3.0), 16, c, 0.05);
+            ring(&mut out, (height * 0.07).max(2.0), 12, c, 0.09);
+            ring(&mut out, (height * 0.03).max(1.0), 8, c, 0.22);
+        }
+    }
+    out
+}

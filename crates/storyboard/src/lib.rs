@@ -40,7 +40,10 @@ pub mod validate;
 
 pub use analyse::{ANALYZER, AnalyseError, FIT_TARGETS, TrackFacts, cue_map};
 pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
-pub use decor::{DecorRect, LookDecor, MAX_PATTERN_SHAPES, Pattern, Rules, card_decor, text_decor};
+pub use decor::{
+    DecorRect, FinishPass, LookDecor, MAX_PATTERN_SHAPES, Pattern, Rules, TextFinish, card_decor, finish_passes,
+    text_decor,
+};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
 pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,
@@ -68,8 +71,8 @@ pub use text::{
     TextKind, TextPosition, TextStyle, TextTheme, accent_bar, set_text_kind, set_text_style, set_text_timing,
 };
 pub use theme::{
-    BUNDLED_FONTS, Background, BackgroundKind, Decor, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast,
-    parse_color,
+    BUNDLED_FONTS, Background, BackgroundKind, Decor, Face, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast,
+    luminance, parse_color,
 };
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};
 pub use validate::{BoardError, FORMAT_VERSION, Limits};
