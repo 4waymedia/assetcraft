@@ -1408,11 +1408,73 @@ fn theme_files_carry_the_gradient_and_the_accent_bar() {
     assert_eq!((look.backdrop.count, look.backdrop.stops), (3, [0x102030, 0x203040, 0x304050, 0x304050]));
     assert_eq!(look.accent, Some(0xffd23f));
     // No bar unless the file asks; an old file without `decor` loads with none.
-    theme.decor.accent_bar = false;
+    theme.decor = Decor::default();
     assert!(!theme.to_json().contains("decor"));
     assert_eq!(Theme::parse(theme.to_json().as_bytes(), false).unwrap().0.look().accent, None);
     // A stop the text can't be read on is a warning, not a refusal.
     theme.background.stops = vec!["#1E4F8F".into(), "#FFFFFF".into()];
     let (_, warnings) = Theme::parse(theme.to_json().as_bytes(), false).unwrap();
     assert!(warnings.iter().any(|w| w.contains("#FFFFFF")), "{warnings:?}");
+}
+
+/// Themes 1e: rules, corners, frame and patterns, as plain rectangles both renderers draw.
+#[test]
+fn decor_draws_rules_corners_frame_and_patterns_inside_the_card() {
+    let (w, h) = (1920.0, 1080.0);
+    let inside = |r: &DecorRect| r.x >= -1.0 && r.y >= -1.0 && r.x + r.w <= w + 1.0 && r.y + r.h <= h + 1.0;
+    // Blueprint: grid, corners, frame — all inside the card, corners and frame in yellow.
+    let blue = TextTheme::Blueprint.look();
+    let shapes = card_decor(&blue, w, h);
+    assert!(shapes.iter().all(inside));
+    assert!(shapes.iter().filter(|r| r.color == 0xffd23f).count() == 4 + 8, "frame sides + corner arms");
+    let grid = shapes.iter().filter(|r| r.color == blue.text).count();
+    assert!(grid > 20 && grid < 60, "about 10 rows and 18 columns: {grid}");
+    // Neon Night: scanlines; Field Notes: dots — bounded on a huge frame.
+    assert!(card_decor(&TextTheme::NeonNight.look(), w, h).len() > 150);
+    assert!(card_decor(&TextTheme::FieldNotes.look(), 20_000.0, 20_000.0).len() <= MAX_PATTERN_SHAPES + 8);
+    // Nonsense sizes draw nothing rather than misbehave.
+    assert!(card_decor(&blue, f32::NAN, h).is_empty() && card_decor(&blue, 2.0, 2.0).is_empty());
+    // Bold has no decor on the card.
+    assert!(card_decor(&TextTheme::Bold.look(), w, h).is_empty());
+    // Noir Gold: a rule above and one below the title, wider than it; no accent bar then.
+    let noir = TextTheme::NoirGold.look();
+    let block = [760.0, 480.0, 400.0, 120.0];
+    let rules = text_decor(&noir, TextKind::Card, block, h, [0.0, 0.0]);
+    assert_eq!(rules.len(), 2);
+    assert!(rules[0].y < block[1] && rules[1].y > block[1] + block[3] && rules[0].w > block[2]);
+    // An overlay keeps its accent bar even when the theme's card has rules.
+    let ov = text_decor(&noir, TextKind::Overlay, block, h, [20.0, 10.0]);
+    assert_eq!((ov.len(), ov[0].color), (1, noir.accent.unwrap_or(0)));
+    // Radial: the middle is the first stop, the corners the last.
+    let r = Backdrop::radial(0xffffff, 0x000000, 0.0, 0.0);
+    assert_eq!(r.color_at(0.5, 0.5), [255.0, 255.0, 255.0]);
+    assert_eq!(r.color_at(0.0, 0.0), [0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn theme_files_name_their_decor() {
+    let mut theme = Theme::builtin(TextTheme::Paper);
+    theme.decor =
+        Decor { accent_bar: false, rules: Rules::Double, corners: true, frame: false, pattern: Pattern::Dots };
+    theme.background.kind = BackgroundKind::Radial;
+    theme.background.stops = vec!["#FFFFFF".into(), "#EEE8DC".into()];
+    let json = theme.to_json();
+    for want in ["\"rules\": \"double\"", "\"pattern\": \"dots\"", "\"corners\": true", "\"kind\": \"radial\""] {
+        assert!(json.contains(want), "{want} in {json}");
+    }
+    let look = Theme::parse(json.as_bytes(), false).unwrap().0.look();
+    assert_eq!((look.decor.rules, look.decor.pattern, look.decor.corners), (Rules::Double, Pattern::Dots, true));
+    assert!(look.backdrop.radial);
+    // A name it doesn't know is refused, with the field named.
+    let bad = json.replace("\"dots\"", "\"plaid\"");
+    assert!(Theme::parse(bad.as_bytes(), false).is_err());
+    // Every built-in round-trips through its file.
+    for t in TextTheme::ALL {
+        assert_eq!(
+            Theme::parse(Theme::builtin(t).to_json().as_bytes(), true).unwrap().0.look(),
+            t.look(),
+            "{}",
+            t.id()
+        );
+    }
 }

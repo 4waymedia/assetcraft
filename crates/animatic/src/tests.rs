@@ -366,3 +366,26 @@ fn a_title_card_draws_its_gradient_and_accent_bar() {
     assert!(a.data.as_chunks::<4>().0.iter().take(320).any(|p| p[0] > 0), "grain on black");
     assert_eq!(a, c.clip_frame(&card, f64::INFINITY), "grain is steady between frames");
 }
+
+/// Themes 1e: Blueprint's corner marks, frame and grid are in the exported card.
+#[test]
+fn a_title_card_draws_its_decor() {
+    let mut c = compositor(640, 360);
+    let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, Ticks::from_secs(4).unwrap());
+    card.description = "Step 3".into();
+    card.text_style.theme = assetcraft_storyboard::TextTheme::Blueprint;
+    let f = c.clip_frame(&card, f64::INFINITY);
+    let yellow = |p: &[u8]| p[0] > 200 && p[1] > 170 && p[2] < 120;
+    // The top-left corner mark sits inside the frame line, 6.5 % in.
+    let corner = (20..40).flat_map(|y| (20..40).map(move |x| (x, y))).filter(|&(x, y)| yellow(&f.get(x, y))).count();
+    assert!(corner > 10, "corner mark: {corner} px");
+    // The frame runs along the top, 4 % in.
+    assert!(yellow(&f.get(320, 14)) || yellow(&f.get(320, 15)), "frame line");
+    // Grid lines are faint white over the blue: a column at the grid line is lighter than beside it.
+    let grid_x = (320.0f32 % 36.0) as u32 + 36;
+    assert!(f.get(grid_x, 100)[0] > f.get(grid_x + 9, 100)[0], "grid line lighter than the paper");
+    // Bold draws no card decor: only the backdrop, the words and its bar.
+    card.text_style.theme = assetcraft_storyboard::TextTheme::Bold;
+    let b = c.clip_frame(&card, f64::INFINITY);
+    assert!(!yellow(&b.get(30, 30)));
+}

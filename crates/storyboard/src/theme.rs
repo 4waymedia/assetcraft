@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::decor::{LookDecor, Pattern, Rules};
 use crate::text::{Backdrop, Look, TextAnimation, TextTheme};
 
 /// The largest theme file read.
@@ -66,13 +67,36 @@ pub struct Theme {
     pub decor: Decor,
 }
 
-/// Shapes a theme draws besides the text (themes 1d; rules, corners and frames come in 1e).
+/// Shapes a theme draws besides the text (themes 1d–1e), in `color.accent` (a pattern in
+/// `color.text`, faint). See [`crate::decor`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Decor {
-    /// A bar in `color.accent`: under a card's title, down an overlay plate's edge.
-    #[serde(default)]
+    /// A bar under a card's title (when it has no `rules`), down an overlay plate's edge.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub accent_bar: bool,
+    /// Lines around a card's title: `none` · `below` · `both` · `double`.
+    #[serde(default, skip_serializing_if = "is_no_rules")]
+    pub rules: Rules,
+    /// L-shaped marks in a card's corners.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub corners: bool,
+    /// A thin border inset from a card's edge.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub frame: bool,
+    /// A pattern on a card: `none` · `grid` · `dots` · `scanlines`.
+    #[serde(default, skip_serializing_if = "is_no_pattern")]
+    pub pattern: Pattern,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+fn is_no_rules(r: &Rules) -> bool {
+    *r == Rules::None
+}
+fn is_no_pattern(p: &Pattern) -> bool {
+    *p == Pattern::None
 }
 
 impl Decor {
@@ -196,6 +220,8 @@ pub enum BackgroundKind {
     Solid,
     /// 2–4 colours along `angle`.
     Gradient,
+    /// 2–4 colours from the centre out (themes 1e).
+    Radial,
 }
 
 /// The overlay plate.
@@ -366,7 +392,7 @@ impl Theme {
         let b = &self.background;
         let need = match b.kind {
             BackgroundKind::Solid => 0..=1,
-            BackgroundKind::Gradient => 2..=4,
+            BackgroundKind::Gradient | BackgroundKind::Radial => 2..=4,
         };
         if !b.stops.is_empty() && !need.contains(&b.stops.len()) {
             return Err(ThemeError(format!("background has {} stops (solid: 1, gradient: 2–4)", b.stops.len())));
@@ -405,7 +431,7 @@ impl Theme {
         }
         let count = match b.kind {
             BackgroundKind::Solid => 1,
-            BackgroundKind::Gradient => b.stops.len().clamp(2, 4) as u8,
+            BackgroundKind::Gradient | BackgroundKind::Radial => b.stops.len().clamp(2, 4) as u8,
         };
         // Unused slots repeat the last stop, as `Backdrop::solid` / `gradient` build them.
         let last = stops[usize::from(count) - 1];
@@ -420,8 +446,22 @@ impl Theme {
             overlay_size: self.type_.scale.overlay,
             tracking: self.type_.display.tracking,
             uppercase: self.type_.display.uppercase,
-            backdrop: Backdrop { stops, count, angle: b.angle, grain: b.grain, vignette: b.vignette },
+            backdrop: Backdrop {
+                stops,
+                count,
+                angle: b.angle,
+                grain: b.grain,
+                vignette: b.vignette,
+                radial: b.kind == BackgroundKind::Radial,
+            },
             accent: self.decor.accent_bar.then(|| rgb(&self.color.accent)),
+            decor: LookDecor {
+                rules: self.decor.rules,
+                corners: self.decor.corners,
+                frame: self.decor.frame,
+                pattern: self.decor.pattern,
+                color: rgb(&self.color.accent),
+            },
         }
     }
 
@@ -473,7 +513,11 @@ impl Theme {
                 let d = l.backdrop;
                 let n = usize::from(d.count.clamp(1, 4));
                 Background {
-                    kind: if n > 1 { BackgroundKind::Gradient } else { BackgroundKind::Solid },
+                    kind: match (n > 1, d.radial) {
+                        (false, _) => BackgroundKind::Solid,
+                        (true, false) => BackgroundKind::Gradient,
+                        (true, true) => BackgroundKind::Radial,
+                    },
                     stops: d.stops.iter().take(n).map(|c| hex(*c)).collect(),
                     angle: d.angle,
                     grain: d.grain,
@@ -483,7 +527,13 @@ impl Theme {
             plate: l.plate.map(|(c, a)| Plate { color: hex(c), alpha: a }),
             space: Space::default(),
             motion: Motion { title_in: Some(title_in.to_owned()) },
-            decor: Decor { accent_bar: l.accent.is_some() },
+            decor: Decor {
+                accent_bar: l.accent.is_some(),
+                rules: l.decor.rules,
+                corners: l.decor.corners,
+                frame: l.decor.frame,
+                pattern: l.decor.pattern,
+            },
         }
     }
 

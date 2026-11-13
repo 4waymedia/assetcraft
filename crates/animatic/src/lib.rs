@@ -346,6 +346,9 @@ impl Compositor {
                 draw::tint(out, rgb(look.background), 0.35);
             } else {
                 draw::backdrop(out, &look.backdrop);
+                for r in assetcraft_storyboard::card_decor(&look, out.width as f32, out.height as f32) {
+                    draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha);
+                }
             }
         }
         // Past its duration (and its out) the words are gone; a Card keeps its background.
@@ -406,11 +409,9 @@ impl Compositor {
                 }
             }
         }
-        if let Some(accent) = look.accent {
-            let pad = [height * 0.45, height * 0.25];
-            let [x, y, bw, bh] =
-                assetcraft_storyboard::accent_bar(kind, [left, top, block[0], block[1]], h, pad, look.plate.is_some());
-            draw::rect(out, x, y, bw, bh, rgb(accent), anim.alpha);
+        let pad = [height * 0.45, height * 0.25];
+        for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block[0], block[1]], h, pad) {
+            draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha * anim.alpha);
         }
         self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
     }

@@ -8,11 +8,11 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Backdrop, Clip, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition,
-    TextStyle, TextTheme,
+    AnimFrame, Backdrop, Clip, DecorRect, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind,
+    TextPosition, TextStyle, TextTheme,
 };
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
 
 /// Kind chip size.
@@ -38,6 +38,9 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
             painter.rect_filled(frame, 0, rgb(look.background).gamma_multiply(0.35));
         } else {
             paint_backdrop(&painter, frame, &look.backdrop);
+            for r in assetcraft_storyboard::card_decor(&look, frame.width(), frame.height()) {
+                paint_decor(&painter, frame.min, &r, 1.0);
+            }
         }
     }
     // Past its duration (and its out) the words are gone; a Card keeps its background.
@@ -90,17 +93,18 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
             }
         }
     }
-    if let Some(accent) = look.accent {
-        let [x, y, w, h] = assetcraft_storyboard::accent_bar(
-            kind,
-            [left, top, block.x, block.y],
-            frame.height(),
-            [height * 0.45, height * 0.25],
-            look.plate.is_some(),
-        );
-        painter.rect_filled(Rect::from_min_size(pos2(x, y), vec2(w, h)), 0, rgb(accent).gamma_multiply(anim.alpha));
+    let pad = [height * 0.45, height * 0.25];
+    for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block.x, block.y], frame.height(), pad) {
+        paint_decor(&painter, Pos2::ZERO, &r, anim.alpha);
     }
     painter.galley(at, galley, color);
+}
+
+/// One decor shape, offset by `origin` (card decor is laid out from the frame's corner; text
+/// decor is already in screen space).
+fn paint_decor(painter: &Painter, origin: Pos2, r: &DecorRect, alpha: f32) {
+    let rect = Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h));
+    painter.rect_filled(rect, 0, rgb(r.color).gamma_multiply((r.alpha * alpha).clamp(0.0, 1.0)));
 }
 
 /// A card's backdrop in the Viewer: a grid of vertex colours from the same

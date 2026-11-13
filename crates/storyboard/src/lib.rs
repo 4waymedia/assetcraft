@@ -23,6 +23,7 @@
 
 pub mod analyse;
 pub mod cuemap;
+pub mod decor;
 pub mod fill;
 pub mod generate;
 pub mod inset;
@@ -39,6 +40,7 @@ pub mod validate;
 
 pub use analyse::{ANALYZER, AnalyseError, FIT_TARGETS, TrackFacts, cue_map};
 pub use cuemap::{CUEMAP_VERSION, CueMap, CueMapError, Fit, FitMode, Timeline};
+pub use decor::{DecorRect, LookDecor, MAX_PATTERN_SHAPES, Pattern, Rules, card_decor, text_decor};
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
 pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,

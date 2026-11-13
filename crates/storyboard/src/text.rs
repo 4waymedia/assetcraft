@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::decor::{LookDecor, Pattern, Rules};
+
 use crate::model::{ClipId, ShotType, Storyboard};
 
 /// How a clip's text is presented.
@@ -110,6 +112,8 @@ pub struct Look {
     /// The accent bar's colour — under a card's title, down an overlay plate's edge; `None` =
     /// no bar.
     pub accent: Option<u32>,
+    /// Rules, corner marks, frame, pattern (themes 1e).
+    pub decor: crate::decor::LookDecor,
 }
 
 /// A card's background (themes 1d, `docs/design/themes.md`): up to four colour stops along
@@ -127,17 +131,24 @@ pub struct Backdrop {
     pub grain: f32,
     /// Darkened edges, 0–1.
     pub vignette: f32,
+    /// From the centre out (first stop in the middle) instead of along `angle`.
+    pub radial: bool,
 }
 
 impl Backdrop {
     /// One colour, nothing else.
     pub const fn solid(color: u32) -> Backdrop {
-        Backdrop { stops: [color; 4], count: 1, angle: 0.0, grain: 0.0, vignette: 0.0 }
+        Backdrop { stops: [color; 4], count: 1, angle: 0.0, grain: 0.0, vignette: 0.0, radial: false }
     }
 
     /// Two colours along `angle`, with grain and vignette.
     pub const fn gradient(from: u32, to: u32, angle: f32, grain: f32, vignette: f32) -> Backdrop {
-        Backdrop { stops: [from, to, to, to], count: 2, angle, grain, vignette }
+        Backdrop { stops: [from, to, to, to], count: 2, angle, grain, vignette, radial: false }
+    }
+
+    /// Two colours from the centre (`inner`) to the corners (`outer`).
+    pub const fn radial(inner: u32, outer: u32, grain: f32, vignette: f32) -> Backdrop {
+        Backdrop { stops: [inner, outer, outer, outer], count: 2, angle: 0.0, grain, vignette, radial: true }
     }
 
     /// The colour at `(u, v)` (0–1 across and down the frame), vignette applied, without grain,
@@ -146,10 +157,15 @@ impl Backdrop {
         let n = usize::from(self.count.clamp(1, 4));
         let mut c = channels(self.stops[0]);
         if n > 1 {
-            let (sin, cos) = self.angle.to_radians().sin_cos();
-            let reach = cos.abs() + sin.abs();
-            let along = ((u - 0.5) * cos + (v - 0.5) * sin) / reach.max(1e-3);
-            let t = (0.5 + along).clamp(0.0, 1.0) * (n - 1) as f32;
+            let t = if self.radial {
+                let (dx, dy) = ((u - 0.5) * 2.0, (v - 0.5) * 2.0);
+                (dx * dx + dy * dy).sqrt() / std::f32::consts::SQRT_2
+            } else {
+                let (sin, cos) = self.angle.to_radians().sin_cos();
+                let reach = cos.abs() + sin.abs();
+                0.5 + ((u - 0.5) * cos + (v - 0.5) * sin) / reach.max(1e-3)
+            };
+            let t = t.clamp(0.0, 1.0) * (n - 1) as f32;
             let i = (t.floor() as usize).min(n - 2);
             let f = t - i as f32;
             let (a, b) = (channels(self.stops[i]), channels(self.stops[i + 1]));
@@ -253,7 +269,7 @@ impl TextTheme {
 
     /// What the theme paints.
     pub fn look(self) -> Look {
-        match self {
+        let mut look = match self {
             TextTheme::Bold => Look {
                 background: 0xe5243b,
                 text: 0xffffff,
@@ -264,6 +280,7 @@ impl TextTheme {
                 uppercase: true,
                 backdrop: Backdrop::gradient(0xe5243b, 0xa8172a, 135.0, 0.0, 0.2),
                 accent: Some(0x111111),
+                decor: LookDecor::NONE,
             },
             TextTheme::Minimal => Look {
                 background: 0x0f1217,
@@ -275,6 +292,7 @@ impl TextTheme {
                 uppercase: false,
                 backdrop: Backdrop { vignette: 0.35, ..Backdrop::solid(0x0f1217) },
                 accent: Some(0xcfcfcf),
+                decor: LookDecor::NONE,
             },
             TextTheme::Cinematic => Look {
                 background: 0x000000,
@@ -286,6 +304,7 @@ impl TextTheme {
                 uppercase: true,
                 backdrop: Backdrop { grain: 0.35, ..Backdrop::solid(0x000000) },
                 accent: None,
+                decor: LookDecor::NONE,
             },
             TextTheme::Paper => Look {
                 background: 0xf3efe6,
@@ -297,6 +316,7 @@ impl TextTheme {
                 uppercase: false,
                 backdrop: Backdrop::gradient(0xf3efe6, 0xe4dccb, 90.0, 0.15, 0.15),
                 accent: Some(0xa4472d),
+                decor: LookDecor { frame: true, ..LookDecor::NONE },
             },
             TextTheme::NoirGold => Look {
                 background: 0x0b0b0d,
@@ -306,8 +326,9 @@ impl TextTheme {
                 overlay_size: 0.045,
                 tracking: 0.25,
                 uppercase: true,
-                backdrop: Backdrop::gradient(0x1d1d23, 0x0b0b0d, 90.0, 0.2, 0.5),
+                backdrop: Backdrop::radial(0x24242b, 0x0b0b0d, 0.2, 0.4),
                 accent: Some(0xc9a24a),
+                decor: LookDecor { rules: Rules::Both, corners: true, ..LookDecor::NONE },
             },
             TextTheme::NeonNight => Look {
                 background: 0x1a0b2e,
@@ -319,6 +340,7 @@ impl TextTheme {
                 uppercase: true,
                 backdrop: Backdrop::gradient(0x2c1350, 0x0c0418, 90.0, 0.05, 0.35),
                 accent: Some(0xff2bd6),
+                decor: LookDecor { pattern: Pattern::Scanlines, frame: true, ..LookDecor::NONE },
             },
             TextTheme::FieldNotes => Look {
                 background: 0x3c4a2c,
@@ -330,6 +352,7 @@ impl TextTheme {
                 uppercase: false,
                 backdrop: Backdrop::gradient(0x4c5a38, 0x2e3822, 90.0, 0.25, 0.35),
                 accent: Some(0xc58a2b),
+                decor: LookDecor { pattern: Pattern::Dots, rules: Rules::Below, ..LookDecor::NONE },
             },
             TextTheme::Blueprint => Look {
                 background: 0x1e4f8f,
@@ -341,8 +364,12 @@ impl TextTheme {
                 uppercase: true,
                 backdrop: Backdrop::gradient(0x2463a8, 0x153a6a, 90.0, 0.0, 0.25),
                 accent: Some(0xffd23f),
+                decor: LookDecor { pattern: Pattern::Grid, corners: true, frame: true, ..LookDecor::NONE },
             },
-        }
+        };
+        // Rules, corners and frame are drawn in the accent.
+        look.decor.color = self.accent();
+        look
     }
 
     /// The theme's highlight colour (`0xRRGGBB`): the picker's swatch, later lower-third bars.
