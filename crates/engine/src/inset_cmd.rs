@@ -417,3 +417,20 @@ pub(crate) fn sb_voiceover(s: &mut Session, p: &Value) -> CmdResult {
         },
     }))
 }
+
+/// `storyboard.trackLevel {db}` (V1; Paul, 2026-11-14: "volume for the sound track"): the song's
+/// level in the Cut's mix, in whole dB within `TRACK_DB_RANGE`. Playback and the exported video
+/// both use it. One undo step; the same level again changes nothing. Replies `{db, message}`.
+pub(crate) fn sb_track_level(s: &mut Session, p: &Value) -> CmdResult {
+    let db = level(p, "db", assetcraft_storyboard::TRACK_DB_RANGE)?
+        .ok_or_else(|| CmdError::BadParams("`db` is required".into()))?;
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let track = board.track.as_mut().ok_or_else(|| CmdError::Unavailable("the storyboard has no song".into()))?;
+    let message = format!("Song level: {db:+} dB");
+    if track.level_db != db {
+        track.level_db = db;
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({ "db": db, "message": message }))
+}

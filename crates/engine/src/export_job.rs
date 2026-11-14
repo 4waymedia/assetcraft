@@ -489,7 +489,8 @@ impl Job {
 
     /// The Cut's sound, as long as the Cut: the song through the board's audio edit, lowered
     /// under every section whose inset video has "Mix audio in" to that section's Music level,
-    /// with the video's own sound over it at its Voice level (SR4). `None` with neither.
+    /// with the video's own sound over it at its Voice level (SR4); the song at its level
+    /// (`Track.level_db`, V1). `None` with neither.
     fn audio(&self) -> Result<(Option<AudioTrack>, Vec<String>), Stop> {
         let music = match self.board.track.as_ref().filter(|t| Path::new(&t.id.0).is_absolute()) {
             Some(track) => {
@@ -503,7 +504,11 @@ impl Job {
                     fade_out: e.fade_out.map(|[s, n]| (s, n)),
                     length: e.length_frames,
                 });
-                Some(Program::new(Arc::new(decoded), edit.as_ref()))
+                let level = track.level_db;
+                Some(
+                    Program::new(Arc::new(decoded), edit.as_ref())
+                        .with_music_gain(assetcraft_audio::mix::db(f64::from(level))),
+                )
             }
             None => None,
         };

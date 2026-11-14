@@ -217,3 +217,19 @@ fn resampling_for_analysis_removes_what_would_alias() {
     assert!((to_analysis_rate(&vec![0.0; 8_000], 8_000).len() as i64 - 22_050).abs() <= 1);
     assert!(to_analysis_rate(&[], 44_100).is_empty());
 }
+
+/// V1: the storyboard's song level scales the music, in `frame` and so in `render` (playback
+/// and export).
+#[test]
+fn a_programs_music_gain_scales_the_song() {
+    let p = Program::new(ramp(8_000, 1_000), None).with_music_gain(crate::mix::db(-6.0));
+    let (l, r) = p.frame(500);
+    assert!((l - 0.5 * 0.501_187).abs() < 1e-4 && l == r, "-6 dB is about half: {l}");
+    let mut out = vec![0.0f32; 4];
+    p.render(500.0 / 8_000.0, 8_000, &mut out, 2);
+    assert!((out[0] - l).abs() < 1e-6, "render uses it too");
+    for bad in [f32::NAN, -1.0, f32::INFINITY] {
+        let p = Program::new(ramp(8_000, 1_000), None).with_music_gain(bad);
+        assert_eq!(p.frame(500), (0.5, 0.5), "{bad} is taken as unity");
+    }
+}

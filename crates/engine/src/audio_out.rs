@@ -130,7 +130,9 @@ impl Session {
         let board = self.boards.board.clone()?;
         let wanted = crate::export_job::voices(&board);
         let mut layers = Vec::new();
-        let mut key = String::new();
+        // The song level (V1) is part of the key, so a change rebuilds the program.
+        let level = board.track.as_ref().map_or(0, |t| t.level_db);
+        let mut key = format!("level {level};");
         for v in &wanted {
             let p = PathBuf::from(&v.path);
             self.load_slot(&p);
@@ -155,7 +157,9 @@ impl Session {
         }
         let Some(Load::Ready(decoded)) = self.load_state(&path) else { return None };
         let prog = Arc::new(
-            Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref()).with_layers(layers),
+            Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref())
+                .with_layers(layers)
+                .with_music_gain(assetcraft_audio::mix::db(f64::from(level))),
         );
         self.audio.program = Some((path, edit_now, key, Arc::clone(&prog)));
         Some(prog)

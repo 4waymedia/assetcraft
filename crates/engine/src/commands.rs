@@ -543,6 +543,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::cut_cmd::sb_split
     ),
     cmd!(
+        EDIT,
+        "storyboard.trackLevel",
+        "Song Level",
+        "Storyboard",
+        None,
+        "{db: integer} → {db, message} (the song's level in the Cut's mix, -30..=6 dB, 0 = as the file is; playback and the exported video both use it; one undo step)",
+        crate::inset_cmd::sb_track_level
+    ),
+    cmd!(
         APP_STEP,
         "storyboard.snapping",
         "Snapping",

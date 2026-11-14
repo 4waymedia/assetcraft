@@ -312,6 +312,18 @@ pub struct Track {
     /// for the credits clip (`{music}`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credit: Option<String>,
+    /// The song's level in the Cut's mix, in dB ([`TRACK_DB_RANGE`]; 0 = as the file is, left
+    /// out of the file). Playback and the exported video both use it (Paul, 2026-11-14:
+    /// "volume for the sound track").
+    #[serde(default, skip_serializing_if = "is_zero_db")]
+    pub level_db: i8,
+}
+
+/// The song level's range in dB: a little louder, or down to almost silent.
+pub const TRACK_DB_RANGE: (i8, i8) = (-30, 6);
+
+fn is_zero_db(db: &i8) -> bool {
+    *db == 0
 }
 
 /// An audio edit: which parts of the file play, in order, and how they join and end. Frames are

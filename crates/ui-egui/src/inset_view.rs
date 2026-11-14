@@ -170,6 +170,7 @@ pub(crate) fn level_slider(ui: &mut Ui, key: (&str, u32), label: &str, value: i8
     let mut v: i32 = ui.data(|d| d.get_temp::<i32>(id)).unwrap_or(i32::from(value));
     let tip = match label {
         "Music" => "How loud the music is under this section while the video's sound plays",
+        "Song" => "The song's level in the Cut: playback and the exported video both use it (Ctrl+Z undoes)",
         _ => "How loud the video's own sound is",
     };
     let r = ui

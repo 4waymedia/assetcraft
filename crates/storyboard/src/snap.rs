@@ -159,6 +159,7 @@ mod tests {
             beat_grid: Vec::new(),
             song_sections: vec![SongSection { name: "Chorus".into(), start: secs(10.0), end: secs(20.0) }],
             edit: None,
+            level_db: 0,
             credit: None,
         });
         b

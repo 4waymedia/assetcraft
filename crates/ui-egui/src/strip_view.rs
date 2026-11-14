@@ -28,6 +28,8 @@
 //!   ([`snap_resize`], cut-editing.md C5), with a labelled line; snapping off or Shift drags free
 //!   in tenths of a second. The Inspector's Duration field runs the same command. The card
 //!   follows the pointer while dragging ([`ResizeDrag`]).
+//! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
+//!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
 //! listing: the UI never reads the disk), with the Organizer's thumbnail keys.
@@ -207,6 +209,14 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
         toggle_play(nav, at);
     }
     ui.label(RichText::new(format!("{} / {}", at.timecode(), total.timecode())).font(FontId::monospace(12.0)));
+    // The song's level in the mix (V1): one `storyboard.trackLevel` when the slider is let go.
+    if let Some(level) = nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| t.level_db) {
+        ui.separator();
+        let range = assetcraft_storyboard::TRACK_DB_RANGE;
+        if let Some(db) = crate::inset_view::level_slider(ui, ("song", 0), "Song", level, range) {
+            nav.run("storyboard.trackLevel", json!({ "db": db }));
+        }
+    }
 }
 
 /// Space in Storyboard mode, and the ▶/⏸ button.

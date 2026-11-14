@@ -185,3 +185,33 @@ fn snapping_toggles_and_is_remembered() {
     assert!(!from_disk.snapping, "read from prefs.json");
     assert!(Prefs::parse("{}").0.snapping, "and on when the file doesn't say");
 }
+
+/// `storyboard.trackLevel` (V1): the song's level, one undo step, saved only when not 0 dB.
+#[test]
+fn the_song_level_is_one_undo_step_and_saved_with_the_board() {
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.trackLevel", json!({ "db": -6 }));
+    assert_eq!(r["db"], -6, "{r}");
+    assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().level_db, -6);
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    run(&mut s, "storyboard.trackLevel", json!({ "db": -6 }));
+    assert_eq!(s.boards.undo_len(), undo + 1, "the same level again is no step");
+    for bad in [json!({}), json!({ "db": 7 }), json!({ "db": -31 }), json!({ "db": 1.5 }), json!({ "db": "loud" })] {
+        assert!(matches!(s.execute("storyboard.trackLevel", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    // In the file: present when set, left out at 0 dB (old files load unchanged), checked on load.
+    let board = s.storyboard().unwrap().clone();
+    let text = serde_json::to_string(&board).unwrap();
+    assert!(text.contains("\"levelDb\":-6"), "saved");
+    let back = assetcraft_storyboard::Storyboard::from_json(text.as_bytes()).unwrap();
+    assert_eq!(back.track.unwrap().level_db, -6);
+    let loud = text.replace("\"levelDb\":-6", "\"levelDb\":40");
+    assert!(assetcraft_storyboard::Storyboard::from_json(loud.as_bytes()).is_err());
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().level_db, 0);
+    assert!(!serde_json::to_string(s.storyboard().unwrap()).unwrap().contains("levelDb"), "0 dB is left out");
+    // No song, no level.
+    s.boards.board.as_mut().unwrap().track = None;
+    assert!(matches!(s.execute("storyboard.trackLevel", &json!({ "db": -3 })), Err(CmdError::Unavailable(_))));
+}

@@ -43,6 +43,8 @@ pub struct Program {
     length: u64,
     /// Voices over the music (SR4): each ducks the music under its window and plays over it.
     layers: Vec<Layer>,
+    /// The music's level (the storyboard's song level; 1 = as decoded).
+    music_gain: f32,
 }
 
 /// A voice over the program (SR4): a section's inset video sound, from `start` for `length`
@@ -86,6 +88,7 @@ impl Program {
                 fade_out: None,
                 length: total,
                 layers: Vec::new(),
+                music_gain: 1.0,
             };
         };
         let r = |f: u64| rescale(f, edit.rate, rate);
@@ -103,7 +106,7 @@ impl Program {
         let shortest = segments.iter().map(|(a, b, _)| b - a).min().unwrap_or(0);
         let half_crossfade = (r(edit.crossfade) / 2).min(shortest / 2);
         let fade_out = edit.fade_out.map(|(s, n)| (r(s), r(n).max(1)));
-        Program { audio, segments, half_crossfade, fade_out, length, layers: Vec::new() }
+        Program { audio, segments, half_crossfade, fade_out, length, layers: Vec::new(), music_gain: 1.0 }
     }
 
     /// Sample rate of the program (the audio's).
@@ -163,7 +166,14 @@ impl Program {
             let g = (x * FRAC_PI_2).cos() as f32;
             out = (out.0 * g, out.1 * g);
         }
-        out
+        (out.0 * self.music_gain, out.1 * self.music_gain)
+    }
+
+    /// This program with its music at `gain` (linear; see [`crate::mix::db`]). A gain that isn't
+    /// a finite number from 0 up is taken as 1.
+    pub fn with_music_gain(mut self, gain: f32) -> Program {
+        self.music_gain = if gain.is_finite() && gain >= 0.0 { gain } else { 1.0 };
+        self
     }
 
     /// This program with voices over it (SR4).

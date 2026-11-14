@@ -108,6 +108,7 @@ pub fn sample() -> Storyboard {
         beat_grid: Vec::new(),
         song_sections: Vec::new(),
         edit: None,
+        level_db: 0,
         credit: None,
     });
     board

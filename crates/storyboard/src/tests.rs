@@ -44,6 +44,7 @@ fn sample() -> Storyboard {
         beat_grid: vec![],
         song_sections: vec![],
         edit: None,
+        level_db: 0,
         credit: None,
     });
     board

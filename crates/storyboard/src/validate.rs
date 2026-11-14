@@ -213,6 +213,10 @@ impl Storyboard {
             if track.duration > l.max_duration {
                 return Err(BoardError::Limit("the track is longer than the limit".into()));
             }
+            let (lo, hi) = crate::model::TRACK_DB_RANGE;
+            if !(lo..=hi).contains(&track.level_db) {
+                return Err(BoardError::Invalid(format!("the song level must be {lo} to {hi} dB")));
+            }
             count("beats", track.beat_grid.len(), l.max_beats)?;
             if track.beat_grid.windows(2).any(|w| w[0] >= w[1])
                 || track.beat_grid.last().is_some_and(|b| *b > track.duration)
