@@ -32,6 +32,7 @@ pub mod motion;
 pub mod recut;
 pub mod sample;
 pub mod shape;
+pub mod snap;
 pub mod template;
 pub mod text;
 pub mod theme;
@@ -61,6 +62,7 @@ pub use motion::{
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
+pub use snap::{BEAT_MIN_PX, BEATS_PER_BAR, SNAP_PX, SnapKind, SnapOptions, Snapped, snap};
 pub use template::{
     BUNDLED, CREDITS_NAME, STEP_PATTERN, STEP_SECS, STEP_SECS_RANGE, STEPS_RANGE, TITLE_SECS, TemplateInfo,
     bundled as bundled_template, bundled_sized as bundled_template_sized, bundled_with as bundled_template_with,

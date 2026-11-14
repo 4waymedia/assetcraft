@@ -279,6 +279,9 @@ pub struct Prefs {
     /// The Start screen's "Add the credits clip at the end" (Paul, 2026-11-06); on by default.
     #[serde(default = "yes")]
     pub credits: bool,
+    /// Snapping for the cut tools (cut-editing.md C5; `storyboard.snapping`, S); on by default.
+    #[serde(default = "yes")]
+    pub snapping: bool,
 }
 
 fn yes() -> bool {
@@ -301,6 +304,7 @@ impl Default for Prefs {
             model: ModelPrefs::default(),
             recent_storyboards: Vec::new(),
             credits: true,
+            snapping: true,
         }
     }
 }
@@ -353,6 +357,9 @@ impl Prefs {
         prefs.working_folder = root.get("working_folder").and_then(Value::as_str).map(PathBuf::from);
         if let Some(c) = root.get("credits").and_then(Value::as_bool) {
             prefs.credits = c;
+        }
+        if let Some(on) = root.get("snapping").and_then(Value::as_bool) {
+            prefs.snapping = on;
         }
         if let Some(Value::Array(items)) = root.get("recent_storyboards") {
             prefs.recent_storyboards = items

@@ -224,6 +224,8 @@ pub struct Session {
     recent_storyboards: Vec<PathBuf>,
     /// The Start screen's "Add the credits clip" (saved in prefs).
     credits: bool,
+    /// Snapping for the cut tools (`storyboard.snapping`; saved in prefs).
+    snapping: bool,
 }
 
 impl Session {
@@ -275,6 +277,7 @@ impl Session {
             exporter: export_job::Exporter::default(),
             recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
             credits: prefs.credits,
+            snapping: prefs.snapping,
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -552,12 +555,18 @@ impl Session {
             working_folder: self.working_folder.clone().filter(|p| p.to_str().is_some()),
             recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
             credits: self.credits,
+            snapping: self.snapping,
         }
     }
 
     /// Whether the Start screen adds the credits clip (the checkbox; remembered).
     pub fn credits_on(&self) -> bool {
         self.credits
+    }
+
+    /// Whether the cut tools snap (`storyboard.snapping`; remembered).
+    pub fn snapping_on(&self) -> bool {
+        self.snapping
     }
 
     /// Set the Start screen's credits checkbox (remembered in prefs).

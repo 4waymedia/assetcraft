@@ -469,8 +469,12 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
     let menus = nav.menus();
     let titles: Vec<_> = menus.iter().map(|m| m.title).collect();
     assert_eq!(titles, ["File", "Edit", "View", "Go", "Tools", "Window", "Help"]);
+    // Storyboard mode adds its own items (View › Snapping): walk those menus too.
+    let mut board = navigator(fake(), Prefs::default()).0;
+    board.run("app.mode", json!({ "mode": "storyboard" }));
+    let board_menus = board.menus();
     let mut items = Vec::new();
-    for m in &menus {
+    for m in menus.iter().chain(&board_menus) {
         walk(&m.entries, &mut items);
     }
     let mut used = std::collections::HashSet::new();

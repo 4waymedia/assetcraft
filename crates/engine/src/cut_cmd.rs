@@ -191,3 +191,16 @@ pub(crate) fn sb_split(s: &mut Session, p: &Value) -> CmdResult {
         ),
     }))
 }
+
+/// `storyboard.snapping {on?}` (C5): turn snapping for the cut tools on or off (remembered), or
+/// toggle it with no `on`. Replies `{on, message}`. Holding Shift while dragging still snaps to
+/// nothing for that drag.
+pub(crate) fn sb_snapping(s: &mut Session, p: &Value) -> CmdResult {
+    let on = match p.get("on") {
+        None | Some(Value::Null) => !s.snapping,
+        Some(v) => v.as_bool().ok_or_else(|| CmdError::BadParams("`on` must be true/false".into()))?,
+    };
+    s.snapping = on;
+    let message = if on { "Snapping on · cuts snap to cuts, the playhead and the music" } else { "Snapping off" };
+    Ok(json!({ "on": on, "message": message }))
+}

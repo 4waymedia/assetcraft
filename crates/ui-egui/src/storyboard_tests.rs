@@ -1673,3 +1673,36 @@ fn the_inspector_previews_a_title_following_its_themes_moves() {
     assert_eq!((st.animation, st.exit), (None, None), "following the theme");
     assert_eq!(st.timing().exit, assetcraft_storyboard::TextExit::Erase, "Blueprint erases its titles");
 }
+
+/// Cut editing F3a (cut-editing.md C5, C3): S toggles snapping, shown checked under View, and
+/// Ctrl+K splits the clip under the playhead.
+#[test]
+fn s_toggles_snapping_and_ctrl_k_splits_at_the_playhead() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let checked = |nav: &Navigator| match find_entry(&crate::menu::menus(nav), "View", "Snapping") {
+        Some(MenuEntry::Item { checked, shortcut, .. }) => (*checked, *shortcut),
+        _ => (None, None),
+    };
+    assert!(nav.session().snapping_on(), "on by default");
+    assert_eq!(checked(&nav), (Some(true), Some("S")));
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::S, Modifiers::NONE)], t);
+    assert!(!nav.session().snapping_on(), "S turned it off");
+    assert_eq!(checked(&nav).0, Some(false));
+    assert!(!nav.session().prefs().snapping, "and it is remembered");
+    // Ctrl+K: one second into the first shot that isn't a title card.
+    let board = nav.session().storyboard().unwrap().clone();
+    let i = board.clips.iter().position(|c| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap();
+    let start: f64 = board.clips[..i].iter().map(|c| c.duration.as_secs_f64()).sum();
+    nav.run("storyboard.seek", json!({ "seconds": start + 1.0 }));
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::K, Modifiers::COMMAND)], t);
+    let after = nav.session().storyboard().unwrap();
+    assert_eq!(after.clips.len(), board.clips.len() + 1, "Ctrl+K split a clip");
+    assert!((after.clips[i].duration.as_secs_f64() - 1.0).abs() < 1e-6, "at the playhead");
+    assert_eq!(after.clips[i + 1].shot_type, board.clips[i].shot_type);
+}

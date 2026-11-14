@@ -291,6 +291,19 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
     match spec.id {
         id if NOT_IN_MENUS.contains(&id) => Vec::new(),
         "nav.open" => vec![item(format!("{}…", spec.label), None, true, MenuAction::FocusPath)],
+        // View › Snapping, in Storyboard mode only (cut-editing.md C5).
+        "storyboard.snapping" if s.mode() == Mode::Storyboard => vec![MenuEntry::Item {
+            label: spec.label.into(),
+            shortcut: spec.shortcut,
+            enabled: true,
+            checked: Some(s.snapping_on()),
+            tooltip: Some(
+                "Cuts snap to other cuts, the playhead, song sections, bars and beats; Shift while dragging is free"
+                    .into(),
+            ),
+            action: cmd(spec.id, json!({ "on": !s.snapping_on() })),
+        }],
+        "storyboard.snapping" => Vec::new(),
         "nav.back" => simple(s.can_back()),
         "nav.forward" => simple(s.can_forward()),
         "nav.up" => simple(s.can_up()),

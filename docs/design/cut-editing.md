@@ -1,6 +1,6 @@
 # Cut editing: trim, roll, split and snapping, from the suite
 
-_2026-11-14 · Stage 4 (Storyboard) · plan approved by Paul 2026-11-14 ("Perfect!"); S1a built_
+_2026-11-14 · Stage 4 (Storyboard) · plan approved by Paul 2026-11-14 ("Perfect!"); S1a, C1a, C3, C5a built_
 
 - **Scope:** the minimum cut tools on the Strip (move a cut, trim a clip, split, delete and close up)
   and snapping for every cut marker, plus how AssetCraft pins EffectCraft and craft-libs and stays
@@ -140,6 +140,7 @@ Proposed policy:
 | R-S1 | The suite is on **egui 0.37** with its own egui fork (`storytold/egui` @ `6d518fc`, patched in EffectCraft, FilmCraft and craft-libs `47107f6`); AssetCraft is on egui 0.36, so `craft-ui` can't move to the shared revision yet | Step S1b: egui 0.36 → 0.37 and the suite's egui patch, then `craft-ui` at the siblings' revision; until then `craft-ui` is a listed exception in `xtask suite` | Claude | open     |
 | R-S2 | Older sibling pins are behind: LightCraft 0.8.0 (newest v0.21.1), PdfCraft 0.8.0 (v0.21.1), PhotoCraft 0.9.0 (v0.23.1), SoundCraft 0.7.0 (v0.20.1) | Bump each to its newest tag in its own commit (P5), with its decoder tests on `test_data`  | Claude | opportunity |
 | R-S3 | Each app's release pins several craft-libs revisions                                             | A suite-wide "one craft-libs revision per release" rule would help every app            | Paul (suite) | opportunity |
+| R-C6 | (C5a, 2026-11-14) The board's `Track` keeps beats and sections but not the cue map's downbeats, meter or hits, so snapping counts bars in 4/4 from the first beat (`snap::BEATS_PER_BAR`) and can't snap to hits yet | Carry `downbeats`, `beatsPerBar` and `hits` from the cue map onto `Track` (optional fields, so old boards load), then use them in `snap` | Claude | opportunity |
 
 ## 6. Steps
 
@@ -147,9 +148,9 @@ Proposed policy:
 | ---- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | S1a  | P1, P3, P4, P6: the suite block in `Cargo.toml` (EffectCraft `v0.24.1`, FilmCraft `v0.20.1`), `cargo xtask suite`, `cargo xtask size` (**built 2026-11-14**) | `xtask suite ok (15 pins in 7 repositories)`; `assetcraft is 37.3 MB of the 100 MB budget`; `Cargo.lock` unchanged |
 | S1b  | R-S1: egui 0.37 + the suite's egui patch; `craft-ui` at the siblings' revision                           | `ci` green; UI tests pass; `xtask suite` with no exceptions              |
-| C5a  | `snap` in `crates/storyboard` with music candidates; `storyboard.snapping`                               | Tests: nearest wins, ties by kind, reach scales with zoom, off = no snap |
+| C5a  | `snap` in `crates/storyboard` with music candidates; `storyboard.snapping` (**built 2026-11-14**, F3a: `crates/storyboard/src/snap.rs`; View › Snapping, S, remembered in prefs; Ctrl+K runs C3 at the playhead) | 4 snap tests (nearest wins, reach scales with zoom, ties by kind with labels, beats only ≥ 18 pt apart, detected grid, dragged cut left out); engine: toggle, `on`, remembered; UI: S and Ctrl+K |
 | C1a  | `storyboard.roll {left, seconds? \| beats? \| to?}` through `filmcraft-edit::roll` and the board ↔ one-track `Sequence` adapter (`crates/engine/src/cut_adapter.rs`, `cut_cmd.rs`); FilmCraft `v0.20.1` now in the build (**built 2026-11-14**) | 4 tests (`roll_tests.rs`): later and earlier, to a time, by beats; total and everything after unchanged; stops at half a second with `limited`; one undo step; bad requests refused |
-| C1b  | Dragging a cut line on the Strip (with C5 snapping)                                                      | UI test: a drag is one `storyboard.roll`                                 |
+| C1b  | Dragging a cut line on the Strip (with C5 snapping and its labelled line); the resize drag snaps the same way (F3b, next) | UI test: a drag is one `storyboard.roll`                                 |
 | C2   | ~~`storyboard.resize {edge: "in"}`~~ Folded into C6 (2026-11-14): with no source in-point, trimming a clip's start only changes its length, which `storyboard.resize` already does; it differs once clips carry `source_in` | —                                                                        |
 | C3   | `storyboard.split {at, clip?}` through `filmcraft-edit::razor_items` (**built 2026-11-14**); Ctrl+K comes with the Strip's playhead (F3) | 2 tests: two clips of the same shot, lengths sum to the original, out-transition moves to the second half, notes and overlay stay on the first, one undo step; refused for a title card, a half under 0.5 s, a cut, past the end, the wrong clip |
 | R-C1 | `craft-time` in place of our time copy                                                                   | Every storyboard test passes unchanged                                   |

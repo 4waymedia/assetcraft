@@ -537,10 +537,19 @@ static COMMANDS: &[CommandSpec] = &[
         "storyboard.split",
         "Split Clip",
         "Storyboard",
-        // Ctrl+K comes with the Strip's playhead (F3), which supplies `at`.
-        None,
+        // The Strip's Ctrl+K supplies `at` from the playhead.
+        Some("Ctrl+K"),
         "{at: number, clip?: number} (split the clip under `at`, seconds in the Cut, into two: the first half keeps its in-transition, notes and overlay text; the second is the same shot with the original's out-transition; both keep half a second at least; title cards aren't split; FilmCraft's razor; one undo step)",
         crate::cut_cmd::sb_split
+    ),
+    cmd!(
+        APP_STEP,
+        "storyboard.snapping",
+        "Snapping",
+        "View",
+        Some("S"),
+        "{on?: bool} → {on, message} (cut tools snap to cuts, the playhead, song sections, bars and beats within 9 pt on screen; no `on` toggles; remembered; Shift while dragging is a free drag)",
+        crate::cut_cmd::sb_snapping
     ),
     cmd!(
         EDIT,

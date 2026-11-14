@@ -162,3 +162,26 @@ fn a_split_needs_room_for_both_halves_and_never_cuts_a_title_card() {
     }
     assert_eq!(s.storyboard().unwrap().clips, board.clips, "nothing changed");
 }
+
+/// `storyboard.snapping` (C5): on by default, toggles, takes `on`, and is remembered.
+#[test]
+fn snapping_toggles_and_is_remembered() {
+    let mut s = session();
+    assert!(s.snapping_on() && s.prefs().snapping, "on by default");
+    let r = run(&mut s, "storyboard.snapping", json!({}));
+    assert_eq!(r["on"].as_bool(), Some(false), "no `on` toggles: {r}");
+    assert!(!s.prefs().snapping, "saved with the prefs");
+    run(&mut s, "storyboard.snapping", json!({ "on": true }));
+    run(&mut s, "storyboard.snapping", json!({ "on": true }));
+    assert!(s.snapping_on(), "`on: true` sets, it doesn't toggle");
+    assert!(matches!(s.execute("storyboard.snapping", &json!({ "on": "yes" })), Err(CmdError::BadParams(_))));
+    // A session restored from prefs with it off starts off.
+    let mut prefs = s.prefs();
+    prefs.snapping = false;
+    let fs = FakeFs::new().known(KnownFolder::Home, "/home/paul");
+    let s2 = Session::new(Arc::new(fs), Arc::new(RecordingLauncher::default()), prefs);
+    assert!(!s2.snapping_on());
+    let (from_disk, _) = Prefs::parse(r#"{"snapping": false}"#);
+    assert!(!from_disk.snapping, "read from prefs.json");
+    assert!(Prefs::parse("{}").0.snapping, "and on when the file doesn't say");
+}

@@ -385,7 +385,7 @@ impl Navigator {
             document_view::open(self);
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo, save, space, delete, enter, escape) = ctx.input_mut(|i| {
+            let (undo, redo, save, space, delete, enter, escape, snapping, split) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
@@ -398,6 +398,9 @@ impl Navigator {
                         | i.consume_key(egui::Modifiers::SHIFT, egui::Key::Backspace),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                    // Cut editing (cut-editing.md C5, C3): S toggles snapping, Ctrl+K splits.
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::S),
+                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::K),
                 )
             });
             if delete && !self.session.selected_clips().is_empty() {
@@ -412,6 +415,15 @@ impl Navigator {
                 // Esc stops the export first; the render job keeps its own Esc.
             } else if escape && motion_view::job_progress(self).is_some() {
                 motion_view::toggle_render_job(self);
+            }
+            if snapping && !starting {
+                self.run("storyboard.snapping", json!({}));
+            }
+            // Ctrl+K splits the clip under the playhead (FilmCraft's razor). On a cut or a title
+            // card the command says why in the status bar.
+            if split && !starting {
+                let at = strip_view::playhead(self, ctx).as_secs_f64();
+                self.run("storyboard.split", json!({ "at": at }));
             }
             // Space: on the Start screen, the selected track's cut (timeline); else the Cut.
             if space && starting {
