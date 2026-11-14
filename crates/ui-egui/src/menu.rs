@@ -64,6 +64,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.resize",
     // The Strip's cut lines drive it (cut-editing.md C1).
     "storyboard.roll",
+    // Ctrl+K at the playhead on the Strip drives it (cut-editing.md C3).
+    "storyboard.split",
     // The Strip's INSET row and the Inspector's INSET section drive these (SR2).
     "storyboard.inset",
     "storyboard.insetClear",

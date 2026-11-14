@@ -534,6 +534,16 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.split",
+        "Split Clip",
+        "Storyboard",
+        // Ctrl+K comes with the Strip's playhead (F3), which supplies `at`.
+        None,
+        "{at: number, clip?: number} (split the clip under `at`, seconds in the Cut, into two: the first half keeps its in-transition, notes and overlay text; the second is the same shot with the original's out-transition; both keep half a second at least; title cards aren't split; FilmCraft's razor; one undo step)",
+        crate::cut_cmd::sb_split
+    ),
+    cmd!(
+        EDIT,
         "storyboard.inset",
         "Section Inset",
         "Storyboard",

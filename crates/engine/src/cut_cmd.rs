@@ -1,7 +1,8 @@
 //! The cut tools (`docs/design/cut-editing.md` §3), run through FilmCraft's edit algebra via
 //! [`crate::cut_adapter`]. C1 `storyboard.roll`: move the cut between two clips. One clip gets
 //! longer by what the other loses, so the Cut's total and everything after it stay where they
-//! are, and the music stays in place. One undo step; a refused or zero move leaves none.
+//! are, and the music stays in place. C3 `storyboard.split`: split a clip in two (FilmCraft's
+//! razor). One undo step each; a refused or zero edit leaves none.
 
 use crate::cut_adapter::{self, apply_lengths, to_sequence};
 use crate::resize_cmd::MIN_CLIP_SECS;
@@ -93,5 +94,100 @@ pub(crate) fn sb_roll(s: &mut Session, p: &Value) -> CmdResult {
         } else {
             "The cut can't move that way: a clip would be shorter than half a second".to_string()
         },
+    }))
+}
+
+/// `storyboard.split {at, clip?}` (C3): split the clip under `at` (seconds in the Cut) into two
+/// through FilmCraft's razor. The first half keeps its in-transition, notes and overlay text; the
+/// second is the same shot (assets, description, camera move, text style) with the original's
+/// out-transition, starting on a plain cut. Both halves keep half a second at least. A title
+/// card isn't split (half a card has no words: shorten it instead). `clip`, when given, must be
+/// the clip under `at`. One undo step.
+pub(crate) fn sb_split(s: &mut Session, p: &Value) -> CmdResult {
+    let at = p
+        .get("at")
+        .and_then(Value::as_f64)
+        .filter(|t| *t > 0.0)
+        .and_then(secs_to_tick)
+        .ok_or_else(|| CmdError::BadParams("`at` must be a time in the Cut, in seconds".into()))?;
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    // The clip under `at`, and where it starts.
+    let mut start = Tick::ZERO;
+    let mut found = None;
+    for (i, c) in board.clips.iter().enumerate() {
+        let end = Tick(start.0.saturating_add(cut_adapter::tick(c.duration)?.0));
+        if at.0 > start.0 && at.0 < end.0 {
+            found = Some((i, start, end));
+            break;
+        }
+        start = end;
+    }
+    let (index, start, end) = found
+        .ok_or_else(|| CmdError::BadParams("`at` must fall inside a clip, not on a cut or past the end".into()))?;
+    let source = board.clips[index].clone();
+    if let Some(want) = p.get("clip").filter(|v| !v.is_null()).map(clip_id).transpose()?
+        && want != source.id
+    {
+        return Err(CmdError::BadParams(format!("clip #{} isn't under that time", want.0)));
+    }
+    if source.shot_type == assetcraft_storyboard::ShotType::Ttl {
+        return Err(CmdError::BadParams("a title card can't be split; shorten it instead".into()));
+    }
+    let min = Ticks::from_secs_f64(MIN_CLIP_SECS).unwrap_or(Ticks(1));
+    let min_t = cut_adapter::tick(min)?;
+    if at.0 - start.0 < min_t.0 || end.0 - at.0 < min_t.0 {
+        return Err(CmdError::BadParams(format!("both halves need {MIN_CLIP_SECS} s at least")));
+    }
+    let new_id = board.next_clip_id().ok_or_else(|| CmdError::BadParams("no clip ids left".into()))?;
+
+    let mut cut = to_sequence(&board, min)?;
+    let fc = FcClipId(u64::from(source.id.0));
+    let made = cut_adapter::edit(&mut cut, |seq, ctx| filmcraft_edit::razor_items(seq, &[fc], at, ctx));
+    let [right] = made.as_slice() else {
+        return Err(CmdError::Unavailable("the clip couldn't be split there".into()));
+    };
+    // Rebuild the clip list from the edited track: existing clips by id, the new right half
+    // as a copy of the source.
+    let mut clips = Vec::with_capacity(board.clips.len() + 1);
+    for (id, len) in cut_adapter::lengths(&cut)? {
+        if id == right.0 {
+            let mut half = source.clone();
+            half.id = new_id;
+            half.duration = len;
+            half.transition_in = assetcraft_storyboard::Transition::Cut;
+            half.notes.clear();
+            half.overlay = None;
+            half.sync_to_downbeat = false;
+            clips.push(half);
+        } else {
+            let mut c = board
+                .clips
+                .iter()
+                .find(|c| u64::from(c.id.0) == id)
+                .cloned()
+                .ok_or_else(|| CmdError::Unavailable("the split lost a clip".into()))?;
+            c.duration = len;
+            if c.id == source.id {
+                c.transition_out = assetcraft_storyboard::Transition::Cut;
+            }
+            clips.push(c);
+        }
+    }
+    board.clips = clips;
+    s.boards.checkpoint();
+    s.boards.board = Some(board);
+    Ok(json!({
+        "clip": source.id.0,
+        "new": new_id.0,
+        "at": tick_secs(at),
+        "first": tick_secs(Tick(at.0 - start.0)),
+        "second": tick_secs(Tick(end.0 - at.0)),
+        "message": format!(
+            "Clip #{:02} split at {:.2} s: {:.2} s + {:.2} s",
+            index + 1,
+            tick_secs(at),
+            tick_secs(Tick(at.0 - start.0)),
+            tick_secs(Tick(end.0 - at.0))
+        ),
     }))
 }

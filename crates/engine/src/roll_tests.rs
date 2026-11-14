@@ -3,6 +3,7 @@
 
 use super::*;
 use assetcraft_fs::FakeFs;
+use assetcraft_storyboard::{ClipId, ShotType};
 use serde_json::json;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -99,4 +100,65 @@ fn a_cut_moves_by_beats_of_the_track_and_bad_requests_are_refused() {
     ] {
         assert!(matches!(s.execute("storyboard.roll", &bad), Err(CmdError::BadParams(_))), "{why}: {bad}");
     }
+}
+
+/// `storyboard.split` (cut-editing.md C3): FilmCraft's razor on the Cut.
+#[test]
+fn a_split_makes_two_clips_of_the_same_shot_and_keeps_the_cut_length() {
+    let mut s = session();
+    let board = s.storyboard().unwrap().clone();
+    // The first clip that isn't a title card, and where it starts.
+    let (i, shot) = board.clips.iter().enumerate().find(|(_, c)| c.shot_type != ShotType::Ttl).unwrap();
+    let start: f64 = board.clips[..i].iter().map(|c| c.duration.as_secs_f64()).sum();
+    let len = shot.duration.as_secs_f64();
+    let (t0, undo, count) = (total(&s), s.boards.undo_len(), board.clips.len());
+    let r = run(&mut s, "storyboard.split", json!({ "at": start + 1.0, "clip": shot.id.0 }));
+    let new = r["new"].as_u64().unwrap() as u32;
+    let after = s.storyboard().unwrap();
+    assert_eq!(after.clips.len(), count + 1);
+    let (a, b) = (&after.clips[i], &after.clips[i + 1]);
+    assert_eq!((a.id, b.id), (shot.id, ClipId(new)), "the new half sits right after the first");
+    assert!((a.duration.as_secs_f64() - 1.0).abs() < 1e-9 && (b.duration.as_secs_f64() - (len - 1.0)).abs() < 1e-9);
+    assert_eq!(
+        (b.shot_type, &b.asset_ids, &b.description, b.scene_id),
+        (shot.shot_type, &shot.asset_ids, &shot.description, shot.scene_id)
+    );
+    assert_eq!(b.transition_out, shot.transition_out, "the out-transition goes with the second half");
+    assert_eq!(a.transition_out, assetcraft_storyboard::Transition::Cut);
+    assert!(b.notes.is_empty() && b.overlay.is_none(), "notes and overlay text stay on the first half");
+    assert!((total(&s) - t0).abs() < 1e-9, "the Cut is as long as before");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().clips, board.clips, "undo puts it back");
+}
+
+#[test]
+fn a_split_needs_room_for_both_halves_and_never_cuts_a_title_card() {
+    let mut s = session();
+    let board = s.storyboard().unwrap().clone();
+    let mut starts = Vec::new();
+    let mut t = 0.0;
+    for c in &board.clips {
+        starts.push(t);
+        t += c.duration.as_secs_f64();
+    }
+    let card = board.clips.iter().position(|c| c.shot_type == ShotType::Ttl);
+    let shot = board.clips.iter().position(|c| c.shot_type != ShotType::Ttl).unwrap();
+    let other = board.clips.iter().position(|c| c.id != board.clips[shot].id).unwrap();
+    let mut cases = vec![
+        (json!({ "at": starts[shot] + 0.2 }), "a 0.2 s first half"),
+        (json!({ "at": starts[1] }), "exactly on a cut"),
+        (json!({ "at": t + 5.0 }), "past the end"),
+        (json!({ "at": 0.0 }), "at the start"),
+        (json!({ "at": "soon" }), "not a number"),
+        (json!({}), "no time"),
+        (json!({ "at": starts[shot] + 1.0, "clip": board.clips[other].id.0 }), "the wrong clip"),
+    ];
+    if let Some(c) = card {
+        cases.push((json!({ "at": starts[c] + board.clips[c].duration.as_secs_f64() / 2.0 }), "a title card"));
+    }
+    for (bad, why) in cases {
+        assert!(matches!(s.execute("storyboard.split", &bad), Err(CmdError::BadParams(_))), "{why}: {bad}");
+    }
+    assert_eq!(s.storyboard().unwrap().clips, board.clips, "nothing changed");
 }
