@@ -1,6 +1,6 @@
 # STATUS
 
-_Last updated: 2026-11-13_
+_Last updated: 2026-11-14_
 
 **Decision (Paul, 2026-10-14): the repo moves to `F:\Script-Projects\ArtCrafting\assetcraft`**, one folder per repo under `ArtCrafting`. CLAUDE.md and README.md paths updated; the older paths further down are history.
 
@@ -587,3 +587,4 @@ _The superseded ArtCraft Library history (Stage 0 of the Library tab, findings F
 - 2026-11-10: themes 1e — decor: rules (below · both · double), corner marks, frame, patterns (grid · dots · scanlines) and radial backgrounds, one rectangle list drawn by the export and the Viewer; the 5 richer built-ins use them. Next: 1f text finish (shadow, outline, glow), 1g theme motion, then 1b-ii.
 - 2026-11-13: themes 1f — text finish (shadow · outline · glow) on a theme's display face, drawn as passes of the words under them in the export and the Viewer; Neon Night glows, Bold / Minimal / Field Notes cast a shadow. Next: 1g theme motion, then 1b-ii (theme files on clips).
 - 2026-11-13: themes 1g — the theme sets a title's moves (in · effect · out · duration) and a clip overrides any of them; "theme" in `storyboard.text.style` and the Inspector's menus goes back. Older boards keep their saved in; titles there now take the theme's out and effect (e.g. Cinematic pushes and fades out). Next: 1b-ii (theme files on clips), then step 2 (Slide · Pop · Wipe · Stagger).
+- 2026-11-14: suite reuse — `docs/design/suite-reuse.md`: titles become EffectCraft compositions built by a new `crates/titles` (spike S0: an EffectCraft comp built and rendered from outside EffectCraft, 1080p in 59–114 ms, 640×360 in 12 ms, 107 crates all in the licence allowlist); export codecs and muxing move to `craft-video` / `craft-media` after a check against D-SF6; fonts move to `craft-fonts`. Next: M1 (`crates/titles`, a Card through EffectCraft with parity tests), pending Paul's go.

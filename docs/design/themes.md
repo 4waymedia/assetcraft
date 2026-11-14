@@ -12,6 +12,12 @@ _2026-11-06 (revised 2026-11-07) · Stage 4 (Storyboard) → suite · spec T0′
   4 hard-coded themes (Bold, Minimal, Cinematic, Paper) painting a `Look` (`text.rs:82`: background,
   text, plate, sizes, tracking, uppercase) on title cards and overlays only, with the app's UI font.
 
+> **2026-11-14 — drawing moves to EffectCraft's crates.** Paul, 2026-11-13: "I would prefer to use the
+> same functions from effectCraft. I don't want to recreate things that are already a suite
+> standard." The theme file and its commands stay; what draws a theme (steps 1c–1g's renderer, and
+> step 2's planned moves) becomes an EffectCraft composition built by a new `crates/titles`. The split,
+> spike numbers and migration steps M1–M8 are in [suite-reuse.md](suite-reuse.md).
+
 ## Decisions
 
 | ID   | Decision                                                                                       | By / date          | Consequence                                                         |
