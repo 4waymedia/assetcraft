@@ -114,6 +114,7 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         formats,
         music_folder,
         preview_volume,
+        listen_volume,
         working_folder,
         model,
         recent_storyboards,
@@ -126,6 +127,7 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         || *formats != b.formats
         || *music_folder != b.music_folder
         || *preview_volume != b.preview_volume
+        || *listen_volume != b.listen_volume
         || *working_folder != b.working_folder
         || *model != b.model
         || *recent_storyboards != b.recent_storyboards

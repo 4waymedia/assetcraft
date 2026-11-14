@@ -68,6 +68,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.split",
     // The Song slider in the Strip's transport controls drives it (V1).
     "storyboard.trackLevel",
+    // The speaker slider beside it (V2).
+    "storyboard.listenVolume",
     // The Strip's INSET row and the Inspector's INSET section drive these (SR2).
     "storyboard.inset",
     "storyboard.insetClear",

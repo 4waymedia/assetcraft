@@ -447,7 +447,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Preview Volume",
         "Storyboard",
         None,
-        "{volume: 0..1} (track preview level, saved; Watch your Cut stays at full level)",
+        "{volume: 0..1} (track preview level, saved; Watch your Cut has its own, storyboard.listenVolume)",
         crate::track_cmd::track_preview_volume
     ),
     cmd!(APP, "storyboard.view", "Shot Map View", "View", None, "{view: map|strip|fill}", storyboard::sb_view),
@@ -541,6 +541,15 @@ static COMMANDS: &[CommandSpec] = &[
         Some("Ctrl+K"),
         "{at: number, clip?: number} (split the clip under `at`, seconds in the Cut, into two: the first half keeps its in-transition, notes and overlay text; the second is the same shot with the original's out-transition; both keep half a second at least; title cards aren't split; FilmCraft's razor; one undo step)",
         crate::cut_cmd::sb_split
+    ),
+    cmd!(
+        APP,
+        "storyboard.listenVolume",
+        "Listening Volume",
+        "Storyboard",
+        None,
+        "{volume: 0..1} → {volume} (how loud the Cut plays while editing; saved; the exported video doesn't use it — the song's level in the mix is storyboard.trackLevel)",
+        crate::track_cmd::sb_listen_volume
     ),
     cmd!(
         EDIT,

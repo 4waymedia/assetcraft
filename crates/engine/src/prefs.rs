@@ -268,6 +268,10 @@ pub struct Prefs {
     pub music_folder: Option<PathBuf>,
     /// Track preview volume in percent, 0–100 (`track.previewVolume`); `None` = the default.
     pub preview_volume: Option<u8>,
+    /// How loud the Cut plays while editing, in percent, 0–100 (`storyboard.listenVolume`, V2);
+    /// `None` = full. The exported video doesn't use it.
+    #[serde(default)]
+    pub listen_volume: Option<u8>,
     /// The AssetCraft working folder (`app.workingFolder`); `None` = the default,
     /// `Documents/AssetCraft`.
     pub working_folder: Option<PathBuf>,
@@ -300,6 +304,7 @@ impl Default for Prefs {
             formats: FormatPrefs::default(),
             music_folder: None,
             preview_volume: None,
+            listen_volume: None,
             working_folder: None,
             model: ModelPrefs::default(),
             recent_storyboards: Vec::new(),
@@ -354,6 +359,7 @@ impl Prefs {
         }
         prefs.music_folder = root.get("music_folder").and_then(Value::as_str).map(PathBuf::from);
         prefs.preview_volume = root.get("preview_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
+        prefs.listen_volume = root.get("listen_volume").and_then(Value::as_u64).map(|v| v.min(100) as u8);
         prefs.working_folder = root.get("working_folder").and_then(Value::as_str).map(PathBuf::from);
         if let Some(c) = root.get("credits").and_then(Value::as_bool) {
             prefs.credits = c;

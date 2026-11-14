@@ -179,7 +179,8 @@ impl Session {
             _ => {}
         }
         let program = self.program()?;
-        self.audio.player.set_volume(1.0);
+        // The listening volume (V2): how loud the Cut plays here; the song level is in the program.
+        self.audio.player.set_volume(volume_gain(self.listen_volume));
         match self.audio.player.play(Arc::clone(&program), from.as_secs_f64()) {
             Ok(()) => {
                 self.audio.playing = Some(program);
@@ -284,6 +285,19 @@ impl Session {
                 false
             }
             _ => true,
+        }
+    }
+
+    /// How loud the Cut plays while editing, 0–1 (V2).
+    pub fn listen_volume(&self) -> f32 {
+        self.listen_volume
+    }
+
+    /// Set the listening volume (0–1); the playing Cut changes level at once.
+    pub(crate) fn set_listen_volume(&mut self, volume: f32) {
+        self.listen_volume = volume.clamp(0.0, 1.0);
+        if self.audio.playing.is_some() && self.audio.preview.is_none() {
+            self.audio.player.set_volume(volume_gain(self.listen_volume));
         }
     }
 

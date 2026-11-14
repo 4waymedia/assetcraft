@@ -214,13 +214,13 @@ pub(crate) fn column(nav: &mut Navigator, ui: &mut Ui, chosen: Option<&str>) -> 
         ui.label(RichText::new(format!("{analysed} ready · {waiting} to analyse")).monospace().small().weak())
             .on_hover_text(format!("{analysed} tracks analysed, {waiting} not analysed yet"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Preview volume (Paul, 2026-10-16: a quick sample at a low volume). Saved; the Cut stays at full level.
+            // Preview volume (Paul, 2026-10-16: a quick sample at a low volume). Saved; the Cut has its own (V2).
             let mut v = nav.session.preview_volume();
             ui.label(RichText::new(format!("{:>3.0}%", v * 100.0)).monospace().small());
             let slider = egui::Slider::new(&mut v, 0.0..=1.0).show_value(false);
             let r = ui
                 .add_sized(vec2(90.0, 16.0), slider)
-                .on_hover_text("Preview volume (Watch your Cut plays at full level)");
+                .on_hover_text("Preview volume (Watch your Cut has its own, beside the Song level)");
             if r.changed() {
                 nav.run("track.previewVolume", json!({ "volume": v }));
             }

@@ -212,6 +212,8 @@ pub struct Session {
     music_folder: Option<PathBuf>,
     /// Track preview volume, 0–1 (`track.previewVolume`).
     preview_volume: f32,
+    /// How loud the Cut plays while editing, 0–1 (`storyboard.listenVolume`; saved). Not exported.
+    listen_volume: f32,
     /// The AssetCraft working folder as set (`app.workingFolder`; `None` = the default).
     working_folder: Option<PathBuf>,
     /// Where in-app track analyses are kept (`storyboard.analyse`; set by the app).
@@ -271,6 +273,7 @@ impl Session {
             decodes: decode::Decodes::default(),
             music_folder: prefs.music_folder.clone(),
             preview_volume: prefs.preview_volume.map_or(audio_out::DEFAULT_PREVIEW_VOLUME, |p| f32::from(p) / 100.0),
+            listen_volume: prefs.listen_volume.map_or(1.0, |p| f32::from(p) / 100.0),
             working_folder: prefs.working_folder.clone(),
             analysis_dir: None,
             analyser: analyse_job::Analyser::default(),
@@ -551,6 +554,7 @@ impl Session {
             formats: self.formats,
             music_folder: self.music_folder.clone().filter(|p| p.to_str().is_some()),
             preview_volume: Some((self.preview_volume * 100.0).round().clamp(0.0, 100.0) as u8),
+            listen_volume: Some((self.listen_volume * 100.0).round().clamp(0.0, 100.0) as u8),
             model: self.model,
             working_folder: self.working_folder.clone().filter(|p| p.to_str().is_some()),
             recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),

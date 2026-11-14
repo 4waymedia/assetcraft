@@ -30,6 +30,8 @@
 //!   follows the pointer while dragging ([`ResizeDrag`]).
 //! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
 //!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
+//!   Beside it, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
+//!   here, at once and saved; the export doesn't use it.
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
 //! listing: the UI never reads the disk), with the Organizer's thumbnail keys.
@@ -217,6 +219,17 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
             nav.run("storyboard.trackLevel", json!({ "db": db }));
         }
     }
+    // The listening volume (V2): how loud it plays here, at once and saved; not exported.
+    ui.separator();
+    let mut v = nav.session.listen_volume();
+    ui.label("🔊");
+    let r = ui
+        .add_sized(vec2(90.0, 16.0), egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
+        .on_hover_text("How loud the Cut plays while you edit (saved; the exported video uses the Song level)");
+    if r.changed() {
+        nav.run("storyboard.listenVolume", json!({ "volume": v }));
+    }
+    ui.label(RichText::new(format!("{:>3.0}%", v * 100.0)).monospace().small());
 }
 
 /// Space in Storyboard mode, and the ▶/⏸ button.

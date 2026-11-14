@@ -130,3 +130,15 @@ pub(crate) fn track_preview_volume(s: &mut Session, p: &Value) -> CmdResult {
     s.set_preview_volume(v as f32);
     Ok(json!({ "volume": s.preview_volume() }))
 }
+
+/// `storyboard.listenVolume {volume: 0..1}` (V2): how loud the Cut plays while editing (saved).
+/// The exported video doesn't use it: the song's level in the mix is `storyboard.trackLevel`.
+pub(crate) fn sb_listen_volume(s: &mut Session, p: &Value) -> CmdResult {
+    let v = p
+        .get("volume")
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        .ok_or_else(|| CmdError::BadParams("`volume` must be 0..1".into()))?;
+    s.set_listen_volume(v as f32);
+    Ok(json!({ "volume": s.listen_volume() }))
+}

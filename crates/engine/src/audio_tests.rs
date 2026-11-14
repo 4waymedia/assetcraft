@@ -338,3 +338,37 @@ fn watch_your_cut_hears_an_inset_videos_sound_over_the_ducked_music() {
     run(&mut s, "storyboard.play", json!({ "from": 0.0 }));
     assert!(player.log().last().unwrap().ends_with("+ 1 voice"), "{:?}", player.log());
 }
+
+/// V1 + V2 while the Cut plays: the listening volume changes the player's gain at once (and is
+/// saved); a new song level rebuilds the program, so the next frame replays it from the playhead.
+#[test]
+fn the_listening_volume_and_song_level_change_a_playing_cut() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    run(&mut s, "storyboard.generate", json!({ "cueMap": music("track.cuemap.json"), "seconds": 30 }));
+    s.poll_audio(Ticks::ZERO);
+    assert!(s.wait_track_audio(Duration::from_secs(10)));
+    run(&mut s, "storyboard.play", json!({ "from": 1.0 }));
+    assert_eq!(player.gain(), Some(1.0), "full by default, as before");
+    let r = run(&mut s, "storyboard.listenVolume", json!({ "volume": 0.5 }));
+    assert_eq!(r["volume"], 0.5);
+    assert_eq!(player.gain(), Some(0.25), "at once, on the slider's curve (squared)");
+    assert_eq!(s.prefs().listen_volume, Some(50), "saved");
+    for bad in [json!({}), json!({ "volume": 1.5 }), json!({ "volume": "half" })] {
+        assert!(matches!(s.execute("storyboard.listenVolume", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    // The song level: the next frame plays the rebuilt program from where the playhead is.
+    let before = player.log().len();
+    run(&mut s, "storyboard.trackLevel", json!({ "db": -12 }));
+    s.poll_audio(Ticks::from_secs_f64(1.5).unwrap_or(Ticks::ZERO));
+    let log = player.log();
+    assert_eq!(log[before..], ["stop", "play 10.0s from 1.5"], "replayed once, from the playhead");
+    assert_eq!(player.gain(), Some(0.25), "and still at the listening volume");
+    // A session restored from prefs keeps the listening volume.
+    let s2 = Session::new(
+        Arc::new(FakeFs::new().known(KnownFolder::Home, "/home/paul")),
+        Arc::new(RecordingLauncher::default()),
+        s.prefs(),
+    );
+    assert!((s2.listen_volume() - 0.5).abs() < 1e-6);
+}
