@@ -8,6 +8,8 @@
 mod analyse_job;
 mod audio_out;
 mod commands;
+mod cut_adapter;
+mod cut_cmd;
 mod decode;
 pub mod document_cmd;
 pub mod effect;
@@ -716,6 +718,8 @@ mod places_tests;
 mod rename_tests;
 #[cfg(test)]
 mod resize_tests;
+#[cfg(test)]
+mod roll_tests;
 #[cfg(test)]
 mod storyboard_tests;
 #[cfg(test)]

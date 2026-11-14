@@ -44,6 +44,7 @@ impl Session {
             | "storyboard.text.style"
             | "storyboard.motion"
             | "storyboard.resize"
+            | "storyboard.roll"
             | "storyboard.inset"
             | "storyboard.insetClear"
             | "storyboard.voiceover"

@@ -104,6 +104,7 @@ The plate and accent bar landed in the wrong place and the glow was faint: the s
 | R-U1 | Embedding `effectcraft-render` pulls `effectcraft-segment` (ML models) through `effectcraft-effects` | EffectCraft crates | Light embedders               | Propose a feature on `effectcraft-effects` that leaves out Roto/face models                              | EffectCraft    | opportunity |
 | R-U2 | Template values (`render --template --values`) have no documented schema                         | EffectCraft CLI  | Templates as theme moves           | Document the `--values` schema                                                                           | EffectCraft    | opportunity |
 | R-U3 | The theme file is meant to be suite-wide (`themes.md` scope) but lives in AssetCraft             | themes           | One theme file for every app       | Propose a `craft-theme` crate in craft-libs once the schema settles                                      | Paul (suite)   | opportunity |
+| R-U4 | AssetCraft pins craft-libs at `5c874d5`; EffectCraft at `47107f6`, so both get fetched and shared crates compile twice | dependencies | One build of the suite | One craft-libs rev, the pinned EffectCraft's; pin policy P1–P5 and `cargo xtask suite` in [cut-editing.md](cut-editing.md) §5 | Claude | proposed |
 
 ## 5. Migration, one step at a time
 
@@ -118,6 +119,7 @@ Each step ends green (`cargo xtask ci`) and changes no user file format.
 | M5   | Stack and Laser Trace as comp recipes (`motion.bannerIn` / `bannerOut`)                                                       | Filmstrip proof against the Banner Build Moves mock                    |
 | M6   | "Open in EffectCraft…": save the title comp as `.ecproj`                                                                      | The file opens in EffectCraft and renders the same frame               |
 | M7   | R-M1 spike, then the switch if it matches D-SF6                                                                               | Export tests; file sizes and PSNR recorded beside D-SF6                |
+| M0   | Suite pins (cut-editing.md step S1): EffectCraft by tag, one craft-libs rev, `cargo xtask suite` | Builds green; `xtask suite` reports the pins |
 | M8   | R-F1 fonts                                                                                                                    | Titles and UI set in the same faces from `craft-fonts`                 |
 
 ### Theme fields → EffectCraft comp

@@ -8,8 +8,14 @@
 //!   with a message, not failed.
 //! - `cargo xtask deny`: licence and source checks (`deny.toml`) with cargo-deny, if installed;
 //!   without it the step is skipped with a message, not failed.
+//! - `cargo xtask suite`: the sibling-app pins beside their newest tags; fails if one repository is
+//!   pinned at two revisions (`docs/design/cut-editing.md` §5). Read-only.
+//! - `cargo xtask size`: builds the release app and fails if it is over [`SIZE_BUDGET_MB`]
+//!   (Paul, 2026-11-14: "If we keep AssetCraft under 100 MB, that would be amazing"). Run it when a
+//!   dependency or a feature lands; it is not part of `ci` (a release build takes minutes).
 
 mod layers;
+mod suite;
 
 use std::process::{Command, ExitCode};
 
@@ -20,8 +26,10 @@ fn main() -> ExitCode {
         Some("layers") => check_layers(),
         Some("wasm") => wasm(),
         Some("deny") => deny(),
+        Some("suite") => suite::run(&workspace_root()),
+        Some("size") => size(),
         _ => {
-            eprintln!("usage: cargo xtask <ci|layers|wasm|deny>");
+            eprintln!("usage: cargo xtask <ci|layers|wasm|deny|suite|size>");
             return ExitCode::from(2);
         }
     };
@@ -148,6 +156,59 @@ fn check_layers() -> Result<(), String> {
         }
         Err(format!("layers: {} violation(s)", errors.len()))
     }
+}
+
+/// The shipped app's size limit, in MB (1 MB = 1,048,576 bytes).
+const SIZE_BUDGET_MB: f64 = 100.0;
+
+/// The workspace root: the parent of this crate's folder.
+fn workspace_root() -> std::path::PathBuf {
+    let here = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    here.parent().map(std::path::Path::to_path_buf).unwrap_or(here)
+}
+
+/// Build `assetcraft` in release and check it against [`SIZE_BUDGET_MB`]. On Windows the `.exe`
+/// is what ships (its debug info is in the `.pdb` beside it); elsewhere the binary carries its line
+/// tables, so a stripped copy is measured when `strip` is available.
+fn size() -> Result<(), String> {
+    println!("xtask: size (release build of the app)");
+    let status = Command::new(cargo())
+        .args(["build", "--release", "-p", "assetcraft"])
+        .status()
+        .map_err(|e| format!("size: could not start cargo: {e}"))?;
+    if !status.success() {
+        return Err("size: the release build failed".into());
+    }
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"));
+    let exe = target.join("release").join(if cfg!(windows) { "assetcraft.exe" } else { "assetcraft" });
+    let full = std::fs::metadata(&exe).map_err(|e| format!("size: {}: {e}", exe.display()))?.len();
+    let mut shipped = full;
+    let mut note = String::new();
+    if !cfg!(windows) {
+        let copy = target.join("release").join("assetcraft.size-check");
+        let stripped = Command::new("strip").arg("-o").arg(&copy).arg(&exe).status().is_ok_and(|s| s.success());
+        match std::fs::metadata(&copy) {
+            Ok(m) if stripped => {
+                shipped = m.len();
+                note = format!(" (stripped; {:.1} MB with line tables)", mb(full));
+            }
+            _ => note = " (not stripped: `strip` unavailable)".into(),
+        }
+        let _ = std::fs::remove_file(&copy);
+    }
+    let used = mb(shipped);
+    println!("xtask: assetcraft is {used:.1} MB of the {SIZE_BUDGET_MB:.0} MB budget{note}");
+    if used > SIZE_BUDGET_MB {
+        Err(format!("size: {used:.1} MB is over the {SIZE_BUDGET_MB:.0} MB budget"))
+    } else {
+        Ok(())
+    }
+}
+
+fn mb(bytes: u64) -> f64 {
+    bytes as f64 / 1_048_576.0
 }
 
 fn cargo() -> String {

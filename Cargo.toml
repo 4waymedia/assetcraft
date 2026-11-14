@@ -51,7 +51,20 @@ notify = "8.2"
 # SoundCraft's version (storytold/soundcraft Cargo.toml) without the `wayland` feature, so Linux needs no
 # libwayland headers; Windows uses the system dialog, Linux the XDG desktop portal.
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
-# UI (L6 and apps only; see xtask/src/layers.rs). craft-ui pinned to the rev FilmCraft/PhotoCraft use.
+# The suite (docs/design/suite-reuse.md, cut-editing.md §5): sibling crates pinned by release tag
+# (policy P1). Check with `cargo xtask suite`; bump in a commit of its own (P5).
+# EffectCraft v0.24.1 (582344d): title compositions and their renderer (crates/titles, step M1).
+effectcraft-project = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+effectcraft-render = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+effectcraft-keyframe = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+effectcraft-time = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+effectcraft-color = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+# FilmCraft v0.20.1 (cedf0c9): the cut tools' edit algebra (roll, trim, split; cut-editing.md C1-C4).
+filmcraft-edit = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+filmcraft-project = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+filmcraft-time = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+# UI (L6 and apps only; see xtask/src/layers.rs). craft-ui pinned to the rev FilmCraft/PhotoCraft used
+# with egui 0.36; the suite is on egui 0.37 now, so this moves with AssetCraft's egui (step S1b).
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
 egui = { version = "0.36", default-features = false, features = ["default_fonts"] }
 eframe = { version = "0.36", default-features = false }

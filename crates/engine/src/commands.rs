@@ -525,6 +525,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.roll",
+        "Move Cut",
+        "Storyboard",
+        None,
+        "{left: number, seconds?: number | beats?: number | to?: number} (move the cut after clip `left` by seconds or beats, signed, or to a time in the Cut; the clip after it gives or takes the difference, so the Cut's total and the music stay put; neither clip goes under half a second, and the reply says how far it moved; FilmCraft's roll; one undo step)",
+        crate::cut_cmd::sb_roll
+    ),
+    cmd!(
+        EDIT,
         "storyboard.inset",
         "Section Inset",
         "Storyboard",
