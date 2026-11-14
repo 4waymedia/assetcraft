@@ -23,9 +23,11 @@
 //!   video's own length sizes the section). **AUDIO row:** the track under the Cut — each piece
 //!   of its edit (the chorus loop, SR3) with its waveform, section bands and splice marks.
 //! - **Resize (SR1):** dragging a card's right edge sets that clip's length through
-//!   `storyboard.resize` when the drag ends (one undo step); with a track the edge snaps to
-//!   whole beats, Shift drags free in tenths of a second. The Inspector's Duration field runs
-//!   the same command. The card follows the pointer while dragging ([`ResizeDrag`]).
+//!   `storyboard.resize` when the drag ends (one undo step). With snapping on (S) the clip's end
+//!   snaps to the song's beats, bars, sections, the playhead and earlier cuts within 9 pt
+//!   ([`snap_resize`], cut-editing.md C5), with a labelled line; snapping off or Shift drags free
+//!   in tenths of a second. The Inspector's Duration field runs the same command. The card
+//!   follows the pointer while dragging ([`ResizeDrag`]).
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
 //! listing: the UI never reads the disk), with the Organizer's thumbnail keys.
@@ -80,20 +82,47 @@ const TOAST_SECS: f64 = 3.8;
 pub(crate) struct ResizeDrag {
     pub(crate) clip: u32,
     pub(crate) secs: f64,
+    /// Where the clip's end snapped (seconds in the Cut), for the snap line (C5).
+    pub(crate) snapped: Option<f64>,
 }
 
-/// The length a drag of `secs` lands on: whole beats of the track when there is one (unless
-/// `free`), else tenths of a second; never under the engine's minimum.
-pub(crate) fn snap_length(board: &Storyboard, secs: f64, free: bool) -> f64 {
+/// The snap line's colour: apart from the selection blue and the playhead.
+const SNAP_LINE: Color32 = Color32::from_rgb(0xff, 0xc8, 0x3d);
+
+/// Where a resize drag of the clip at `index` to `want` seconds lands (cut-editing.md C5): with
+/// snapping on and Shift not held, the clip's **end** goes to the nearest cut, playhead, song
+/// section, bar or beat of the track within reach (`assetcraft_storyboard::snap`, the song's
+/// detected beats when the board has them); otherwise, or with nothing in reach, tenths of a
+/// second. Never under the engine's minimum. The cuts after the clip move with it, so they are
+/// not candidates.
+pub(crate) fn snap_resize(
+    board: &Storyboard,
+    index: usize,
+    want: f64,
+    playhead: Ticks,
+    snapping: bool,
+) -> (f64, Option<assetcraft_storyboard::Snapped>) {
     let min = assetcraft_engine::MIN_CLIP_SECS;
-    match board.track.as_ref().filter(|_| !free) {
-        Some(t) => {
-            let beat = t.bpm.beat().as_secs_f64();
-            let beats = (secs / beat).round().max(1.0);
-            (beats * beat).max(min)
-        }
-        None => ((secs * 10.0).round() / 10.0).max(min),
+    let free = ((want * 10.0).round() / 10.0).max(min);
+    let starts = board.starts();
+    let Some(start) = starts.get(index).copied().filter(|_| snapping) else { return (free, None) };
+    let mut moving: Vec<Ticks> = starts.get(index + 1..).unwrap_or_default().to_vec();
+    moving.push(board.total());
+    let o = assetcraft_storyboard::SnapOptions {
+        px_per_sec: PX_PER_SEC,
+        playhead: Some(playhead),
+        exclude: &moving,
+        music: true,
+    };
+    let end = start.as_secs_f64() + want.max(0.0);
+    let Some(snapped) = Ticks::from_secs_f64(end).and_then(|t| assetcraft_storyboard::snap(board, t, &o)) else {
+        return (free, None);
+    };
+    let len = snapped.at.as_secs_f64() - start.as_secs_f64();
+    if len < min {
+        return (free, None);
     }
+    (len, Some(snapped))
 }
 
 /// What an asset drag carries: the file path, as the Organizer lists it.
@@ -119,6 +148,8 @@ pub(crate) struct SbUi {
     /// A clip's length mid-drag (SR1: a card's edge or the Inspector's Duration), committed as
     /// one `storyboard.resize` when the drag ends.
     pub(crate) resize_drag: Option<ResizeDrag>,
+    /// The snap line's label while a resize drag is snapped ("bar 17 · beat 3").
+    pub(crate) snap_label: Option<String>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
     pub(crate) motion_player: Option<crate::motion_view::MotionPlayer>,
 }
@@ -850,6 +881,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let mut inset_cmds: Vec<(&'static str, serde_json::Value)> = Vec::new();
     let mut switch: Option<(Clip, assetcraft_storyboard::TextKind)> = None;
     let mut resize: Option<ResizeDrag> = nav.state.storyboard.resize_drag;
+    let snapping = nav.session.snapping_on();
+    let mut snap_label: Option<String> = nav.state.storyboard.snap_label.clone();
     let mut resized: Option<ResizeDrag> = None;
     let ctx = ui.ctx().clone();
     // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
@@ -930,19 +963,21 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 let handle = Rect::from_min_max(pos2(rect.right() - HANDLE_W, rect.top() + 4.0), rect.max);
                 let grip = ui.interact(handle, strip_clip_id(id).with("resize"), Sense::drag());
                 let grip =
-                    grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(if board.track.is_some() {
-                        "Drag to set the clip's length (snaps to beats; Shift for tenths of a second)"
+                    grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(if snapping {
+                        "Drag to set the clip's length (its end snaps to the song's beats, sections and cuts; Shift for a free drag; S turns snapping off)"
                     } else {
-                        "Drag to set the clip's length"
+                        "Drag to set the clip's length (snapping is off: S turns it on)"
                     });
                 if grip.drag_started() {
-                    resize = Some(ResizeDrag { clip: id.0, secs: clip.duration.as_secs_f64() });
+                    resize = Some(ResizeDrag { clip: id.0, secs: clip.duration.as_secs_f64(), snapped: None });
                 }
                 if grip.dragged()
                     && let Some(pointer) = grip.interact_pointer_pos()
                 {
                     let want = f64::from((pointer.x - x) / PX_PER_SEC);
-                    resize = Some(ResizeDrag { clip: id.0, secs: snap_length(board, want, shift) });
+                    let (secs, snapped) = snap_resize(board, n, want, at, snapping && !shift);
+                    snap_label = snapped.as_ref().map(|s| s.label.clone());
+                    resize = Some(ResizeDrag { clip: id.0, secs, snapped: snapped.map(|s| s.at.as_secs_f64()) });
                 }
                 if grip.drag_stopped() {
                     resized = resize.take().filter(|d| d.clip == id.0);
@@ -950,6 +985,20 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 if grip.hovered() || grip.dragged() || resize.is_some_and(|d| d.clip == id.0) {
                     let edge = Rect::from_min_max(pos2(rect.right() - 3.0, rect.top() + 4.0), rect.max);
                     ui.painter().rect_filled(edge, 0, SELECT);
+                }
+            }
+            // The snap line (C5): where the dragged end snapped, labelled in the marker row.
+            if let Some(secs) = resize.and_then(|d| d.snapped) {
+                let x = left + secs as f32 * PX_PER_SEC;
+                painter.vline(x, area.top()..=area.bottom(), Stroke::new(1.5, SNAP_LINE));
+                if let Some(label) = &snap_label {
+                    painter.text(
+                        pos2(x + 4.0, area.top() + RULER_H + 2.0),
+                        egui::Align2::LEFT_TOP,
+                        label,
+                        egui::FontId::proportional(10.0),
+                        SNAP_LINE,
+                    );
                 }
             }
             let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
@@ -964,6 +1013,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             }
         });
     nav.state.storyboard.resize_drag = resize;
+    nav.state.storyboard.snap_label = snap_label.filter(|_| resize.is_some_and(|d| d.snapped.is_some()));
     if let Some((secs, how)) = scrub {
         scrub_to(nav, secs, how, playing);
     }
@@ -1419,11 +1469,11 @@ pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboar
     // of at least half a step is the user's (as the MOTION sliders).
     let moved = r.changed() && (value - before).abs() >= 0.05;
     if moved {
-        nav.state.storyboard.resize_drag = Some(ResizeDrag { clip: id, secs: value });
+        nav.state.storyboard.resize_drag = Some(ResizeDrag { clip: id, secs: value, snapped: None });
     }
     if r.drag_stopped() || (moved && !r.dragged()) {
         let secs = if moved { value } else { before };
-        commit_resize(nav, ResizeDrag { clip: id, secs });
+        commit_resize(nav, ResizeDrag { clip: id, secs, snapped: None });
     }
     ui.add_space(4.0);
 }

@@ -1121,7 +1121,7 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
 
 #[test]
 fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
-    use crate::strip_view::{PX_PER_SEC, ResizeDrag, commit_resize, snap_length};
+    use crate::strip_view::{PX_PER_SEC, ResizeDrag, commit_resize, snap_resize};
     use assetcraft_storyboard::ClipId;
     let ctx = Context::default();
     let mut nav = nav();
@@ -1138,7 +1138,10 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     let left = 8.4 + 8.0;
     let edge = left + first as f32 * PX_PER_SEC - 1.0;
     let from = Pos2::new(edge - 3.0, strip_y);
-    let to = Pos2::new(left + 5.0 * PX_PER_SEC, strip_y);
+    // Aim 0.05 s past the beat nearest 5 s: inside the snap's reach (9 pt is 0.2 s at 44 pt/s).
+    let beat = board.track.as_ref().unwrap().bpm.beat().as_secs_f64();
+    let want = (5.0 / beat).round() * beat;
+    let to = Pos2::new(left + (want + 0.05) as f32 * PX_PER_SEC, strip_y);
     let press = |pos, pressed| Event::PointerButton {
         pos,
         button: PointerButton::Primary,
@@ -1166,10 +1169,10 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     }
     assert!(nav.state.storyboard.resize_drag.is_none());
     let clip = nav.session().storyboard().unwrap().clip(ClipId(1)).unwrap().clone();
-    let want = snap_length(&board, 5.0, false);
+    // The sample's track has no detected grid, so its beats run from 0:00 at its tempo.
     assert!(
         (clip.duration.as_secs_f64() - want).abs() < 0.01,
-        "snapped to beats: {} vs {want}",
+        "the end snapped to a beat: {} vs {want}",
         clip.duration.as_secs_f64()
     );
     assert!(want > first, "longer than before");
@@ -1183,17 +1186,26 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     nav.run("storyboard.redo", json!({}));
     assert_eq!(nav.session().storyboard().unwrap(), &board);
 
-    // The snap: beats on a track, tenths without one, never under the minimum.
-    let beat = board.track.as_ref().unwrap().bpm.beat().as_secs_f64();
-    assert!((snap_length(&board, 2.0 * beat + 0.01, false) - 2.0 * beat).abs() < 1e-9);
-    assert!((snap_length(&board, 2.04, true) - 2.0).abs() < 1e-9, "Shift: tenths");
-    assert_eq!(snap_length(&board, 0.0, false), beat.max(assetcraft_engine::MIN_CLIP_SECS));
+    // The snap (C5): the clip's end on a beat of the song, counted on the Cut.
+    let far = assetcraft_storyboard::Ticks(u64::MAX / 2); // a playhead nowhere near
+    let start1 = board.starts()[1].as_secs_f64();
+    let (len, snapped) = snap_resize(&board, 1, 2.0 * beat + 0.05, far, true);
+    let end = start1 + len;
+    assert!(((end / beat).round() * beat - end).abs() < 1e-6, "clip #02 ends on a beat: {end}");
+    assert!(snapped.is_some_and(|s| s.label.starts_with("bar ")), "labelled with its bar");
+    let (len, snapped) = snap_resize(&board, 1, 2.04, far, false);
+    assert!((len - 2.0).abs() < 1e-9 && snapped.is_none(), "snapping off (or Shift): tenths");
+    assert_eq!(snap_resize(&board, 1, 0.0, far, true).0, assetcraft_engine::MIN_CLIP_SECS, "never under the minimum");
+    // The playhead pulls the end too.
+    let ph = assetcraft_storyboard::Ticks::from_secs_f64(start1 + 2.27).unwrap();
+    let (len, snapped) = snap_resize(&board, 1, 2.3, ph, true);
+    assert!((len - 2.27).abs() < 1e-6, "{len}");
+    assert_eq!(snapped.map(|s| s.kind), Some(assetcraft_storyboard::SnapKind::Playhead));
     let mut no_track = board.clone();
     no_track.track = None;
-    assert!((snap_length(&no_track, 2.04, false) - 2.0).abs() < 1e-9);
-    assert_eq!(snap_length(&no_track, 0.0, false), assetcraft_engine::MIN_CLIP_SECS);
+    assert!((snap_resize(&no_track, 1, 2.04, far, true).0 - 2.0).abs() < 1e-9, "no track, no cut near: tenths");
     // A drag that ends where it started runs nothing (the redo step would be lost otherwise).
-    commit_resize(&mut nav, ResizeDrag { clip: 1, secs: first });
+    commit_resize(&mut nav, ResizeDrag { clip: 1, secs: first, snapped: None });
     assert_eq!(nav.run("storyboard.state", json!({})).unwrap()["canRedo"], json!(true));
     // The Inspector draws the Duration field for the selected clip without changing anything.
     nav.run("storyboard.select", json!({ "clip": 2 }));
