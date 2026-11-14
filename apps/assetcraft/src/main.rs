@@ -20,6 +20,7 @@ use assetcraft_ui_egui::{Navigator, PrefsStore, prefs_file};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Reverse-DNS app id: Linux hicolor icon name and Wayland app id (`assets/app-icon/hicolor/`).
 const APP_ID: &str = "ai.storyteller.assetcraft";
@@ -38,6 +39,11 @@ fn app_icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(ICON_PNG).unwrap_or_default()
 }
 
+mod diag;
+
+/// A frame slower than this is noted in the log (the window looks frozen at that point).
+const SLOW_FRAME: Duration = Duration::from_millis(500);
+
 struct App {
     navigator: Navigator,
     store: PrefsStore,
@@ -45,7 +51,20 @@ struct App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let started = Instant::now();
         self.navigator.ui(ui);
+        let took = started.elapsed();
+        if took > SLOW_FRAME {
+            let size = ui.ctx().content_rect().size();
+            log::warn!(
+                target: "assetcraft",
+                "slow frame: {} ms in {:?} mode at {:.0}×{:.0}",
+                took.as_millis(),
+                self.navigator.session().mode(),
+                size.x,
+                size.y
+            );
+        }
         if !self.store.maybe_save(&self.navigator.session().prefs())
             && let Some(error) = self.store.last_error().map(str::to_owned)
             && self.navigator.message().is_none()
@@ -63,8 +82,33 @@ impl eframe::App for App {
     }
 }
 
+/// eframe's wgpu settings with one change: a surface error eframe would skip (a timeout, or
+/// anything it doesn't name) reconfigures the surface and asks for another frame instead, so a
+/// window that stopped presenting after a resize recovers (Paul, 2026-11-14: frozen after a
+/// resize while the Cut played). Every such error goes in the log.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{SurfaceErrorAction, wgpu::CurrentSurfaceTexture};
+    eframe::egui_wgpu::WgpuConfiguration {
+        on_surface_status: Arc::new(|status| match status {
+            CurrentSurfaceTexture::Outdated => SurfaceErrorAction::Reconfigure,
+            CurrentSurfaceTexture::Lost => {
+                log::warn!(target: "assetcraft", "window surface lost: making a new one");
+                SurfaceErrorAction::RecreateSurface
+            }
+            CurrentSurfaceTexture::Occluded => SurfaceErrorAction::SkipFrame,
+            other => {
+                log::warn!(target: "assetcraft", "window surface: {other:?}; reconfiguring");
+                SurfaceErrorAction::Reconfigure
+            }
+        }),
+        ..Default::default()
+    }
+}
+
 fn main() -> ExitCode {
     let path = prefs_file::config_path();
+    // The log beside prefs.json (`diag`): frame and surface trouble, panics.
+    let _ = diag::install(path.as_deref().and_then(std::path::Path::parent));
     let prefs = path.as_deref().map(prefs_file::load).unwrap_or_default();
     // In-app track analyses live beside prefs.json (macOS: ~/Library/Application Support/AssetCraft/analysis),
     // never beside the user's music.
@@ -106,7 +150,7 @@ fn main() -> ExitCode {
     let viewport = viewport.with_titlebar_shown(false).with_title_shown(false).with_fullsize_content_view(true);
     #[cfg(not(target_os = "macos"))]
     let viewport = viewport.with_decorations(false);
-    let options = eframe::NativeOptions { viewport, ..eframe::NativeOptions::default() };
+    let options = eframe::NativeOptions { viewport, wgpu_options: wgpu_options(), ..eframe::NativeOptions::default() };
     let mut app = App { navigator, store };
     let create = move |cc: &eframe::CreationContext<'_>| -> Result<Box<dyn eframe::App>, _> {
         // Folder events arrive on the watcher's thread; wake the UI so they show without input.

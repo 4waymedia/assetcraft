@@ -292,6 +292,7 @@ dependencies = [
  "assetcraft-watch",
  "eframe",
  "egui",
+ "log",
  "winresource",
 ]
 

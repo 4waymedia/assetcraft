@@ -21,6 +21,7 @@ assetcraft-watch = { workspace = true }
 assetcraft-playback = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
 egui = { workspace = true }
+log = { workspace = true }
 
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
