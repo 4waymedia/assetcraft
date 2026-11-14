@@ -74,7 +74,9 @@ pub(crate) fn track_analyze(s: &mut Session, p: &Value) -> CmdResult {
 /// `track.preview {path | null, from?, cut?: {cueMap, seconds?, fit?}}`: play a track from the
 /// Start screen (null stops). Without `cut`: the whole song, `from` in song seconds (Song mode).
 /// With `cut`: the song through the edit the cue map's fit for `seconds` gives (the same one
-/// `storyboard.generate` puts on the board), `from` in cut seconds (Cut mode).
+/// `storyboard.generate` puts on the board), `from` in cut seconds (Cut mode). A `cut` with
+/// `template` or `pacing` takes `storyboard.preview`'s params and plays that board's edit: the
+/// music the Start timeline draws (a template's intro, a chorus per point, outro).
 pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
     let path = match p.get("path") {
         None => return Err(CmdError::BadParams("need `path` (an audio file, or null to stop)".into())),
@@ -101,6 +103,14 @@ pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
     };
     let (mode, edit) = match p.get("cut") {
         None | Some(Value::Null) => (PreviewMode::Song, None),
+        // The plan the Start timeline draws (`storyboard.preview`'s params: a template, or a preset
+        // with its pacing): play the edit of that same board, so what is heard is what is shown.
+        Some(c @ Value::Object(o)) if o.contains_key("template") || o.contains_key("pacing") => {
+            let cue_path = crate::generate_cmd::cue_map_param(c)?;
+            let cue = crate::generate_cmd::read_cue(s, &cue_path)?;
+            let (board, ..) = crate::library_cmd::preview_board(s, c, &cue, &cue_path)?;
+            (PreviewMode::Cut, board.track.and_then(|t| t.edit))
+        }
         Some(c @ Value::Object(_)) => {
             let cue_path = crate::generate_cmd::cue_map_param(c)?;
             let cue = crate::generate_cmd::read_cue(s, &cue_path)?;

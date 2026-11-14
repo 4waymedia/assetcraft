@@ -64,8 +64,10 @@ pub(crate) struct StartUi {
     pace: usize,
     /// Shape overrides on top of the style (cleared when a preset is picked).
     shape: Shape,
-    /// `storyboard.preview` results by `cue|pacing|seconds|density|shape`.
+    /// `storyboard.preview` results by their params.
     pub(crate) previews: HashMap<String, Option<Value>>,
+    /// The plan (its params) the playing Cut preview was started with: a change pauses it.
+    pub(crate) playing_plan: Option<String>,
     /// The timeline's waveform: `(audio path, track.peaks answer)` once ready or failed.
     pub(crate) waveform: Option<(String, Value)>,
     /// A scrub drag held on the timeline: where, in cut seconds.
@@ -171,6 +173,7 @@ impl Default for StartUi {
             voiceover: None,
             shape: Shape::default(),
             previews: HashMap::new(),
+            playing_plan: None,
             waveform: None,
             scrub: None,
             cursor: 0.0,
@@ -337,10 +340,21 @@ fn cut_playing(nav: &Navigator, audio: &str) -> bool {
 pub(crate) fn play_cut(nav: &mut Navigator, from: f64) {
     let Some(track) = selected_track(nav) else { return };
     let (Some(audio), Some(cue)) = (track["audio"].as_str(), track["cueMap"].as_str()) else { return };
-    let start = &mut nav.state.storyboard.start;
-    start.cursor = from.max(0.0);
-    let cut = json!({ "cueMap": cue, "seconds": start.length });
+    // The timeline's plan (template or preset), so the music heard is the music drawn.
+    let cut =
+        plan_params(nav, cue).unwrap_or_else(|| json!({ "cueMap": cue, "seconds": nav.state.storyboard.start.length }));
+    nav.state.storyboard.start.cursor = from.max(0.0);
+    nav.state.storyboard.start.playing_plan = Some(cut.to_string());
     nav.run("track.preview", json!({ "path": audio, "from": from.max(0.0), "cut": cut }));
+}
+
+/// Pause the Cut preview of `audio`, resting the playhead where it was heard.
+fn pause_cut(nav: &mut Navigator, audio: &str) {
+    if let Some(at) = nav.session.preview_heard(audio, PreviewMode::Cut) {
+        nav.state.storyboard.start.cursor = at;
+    }
+    nav.state.storyboard.start.playing_plan = None;
+    nav.run("track.preview", json!({ "path": null }));
 }
 
 /// ▶ / ⏸ on the timeline, and Space on the Start screen: play the selected track's cut from the
@@ -348,10 +362,7 @@ pub(crate) fn play_cut(nav: &mut Navigator, from: f64) {
 pub(crate) fn toggle_play(nav: &mut Navigator) {
     let Some(audio) = selected_track(nav).and_then(|t| t["audio"].as_str().map(str::to_owned)) else { return };
     if cut_playing(nav, &audio) {
-        if let Some(at) = nav.session.preview_heard(&audio, PreviewMode::Cut) {
-            nav.state.storyboard.start.cursor = at;
-        }
-        nav.run("track.preview", json!({ "path": null }));
+        pause_cut(nav, &audio);
         return;
     }
     // From the end: start over.
@@ -416,6 +427,16 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui) {
         return;
     };
     let audio = track["audio"].as_str().unwrap_or_default().to_owned();
+    // A plan change while the cut plays (a preset, template, points, step length, length, inset,
+    // credits…) pauses it where it was heard: the music under it is changing (Paul, 2026-11-14:
+    // "when the user changes a preset, or duration, the song should be paused").
+    if cut_playing(nav, &audio) {
+        let now = track["cueMap"].as_str().and_then(|cue| plan_params(nav, cue)).map(|v| v.to_string());
+        if now != nav.state.storyboard.start.playing_plan {
+            pause_cut(nav, &audio);
+            nav.notify("Paused: the plan changed. ▶ plays the new one".to_owned());
+        }
+    }
     let preview = match (nav.state.storyboard.start.style, track["cueMap"].as_str()) {
         (Style::Pacing(p), Some(cue)) => {
             let secs = nav.state.storyboard.start.length;
@@ -862,48 +883,62 @@ fn legend(ui: &mut Ui) {
     });
 }
 
-/// Fetch (once) and return the preview for a card.
-fn preview(nav: &mut Navigator, cue: &str, pacing: Pacing, secs: Option<u32>) -> Option<Value> {
+/// `storyboard.preview`'s params for a preset card: the pacing, length, density and shape.
+fn pacing_params(nav: &Navigator, cue: &str, pacing: Pacing, secs: Option<u32>) -> Value {
     let start = &nav.state.storyboard.start;
-    let (density, shape) = (start.density(), start.shape);
-    let shape_json = serde_json::to_value(shape).unwrap_or(Value::Null);
-    let key = format!("{cue}|{}|{secs:?}|{density:.2}|{shape_json}", pacing.id());
+    let shape_json = serde_json::to_value(start.shape).unwrap_or(Value::Null);
+    json!({ "cueMap": cue, "pacing": pacing.id(), "seconds": secs, "density": start.density(), "shape": shape_json })
+}
+
+/// `storyboard.preview`'s params for a template: its steps, step length, credits and inset.
+fn template_params(nav: &Navigator, cue: &str, index: usize) -> Option<Value> {
+    let t = BUNDLED.get(index)?;
+    let start = &nav.state.storyboard.start;
+    Some(json!({
+        "cueMap": cue,
+        "template": t.id,
+        "steps": start.steps.unwrap_or(t.steps),
+        "stepSeconds": start.step_secs,
+        "credits": nav.session.credits_on(),
+        "inset": start.inset.param(),
+    }))
+}
+
+/// The plan the timeline shows for the chosen style: the same params go to `storyboard.preview`
+/// (what is drawn) and to `track.preview {cut}` (what is heard), so the two can't disagree
+/// (Paul, 2026-11-14: "the last half of this audio track had no volume"; "the second chorus does
+/// not play correctly").
+pub(crate) fn plan_params(nav: &Navigator, cue: &str) -> Option<Value> {
+    match nav.state.storyboard.start.style {
+        Style::Pacing(p) => Some(pacing_params(nav, cue, p, nav.state.storyboard.start.length)),
+        Style::Template(i) => template_params(nav, cue, i),
+        _ => None,
+    }
+}
+
+/// `storyboard.preview` for `params`, fetched once per distinct params.
+fn cached_preview(nav: &mut Navigator, params: Value) -> Option<Value> {
+    let key = params.to_string();
     if let Some(v) = nav.state.storyboard.start.previews.get(&key) {
         return v.clone();
     }
-    let v = nav
-        .session
-        .execute(
-            "storyboard.preview",
-            &json!({ "cueMap": cue, "pacing": pacing.id(), "seconds": secs, "density": density, "shape": shape_json }),
-        )
-        .ok();
+    let v = nav.session.execute("storyboard.preview", &params).ok();
     nav.state.storyboard.start.previews.insert(key, v.clone());
     v
+}
+
+/// Fetch (once) and return the preview for a card.
+fn preview(nav: &mut Navigator, cue: &str, pacing: Pacing, secs: Option<u32>) -> Option<Value> {
+    let params = pacing_params(nav, cue, pacing, secs);
+    cached_preview(nav, params)
 }
 
 /// `storyboard.preview {template}` for the chosen template, steps, credits and length, cached
 /// as [`preview`] is (Paul, 2026-11-06: "When I click on a template… I want to see the cuts in
 /// the storyboard, and the inset section").
 fn template_preview(nav: &mut Navigator, cue: &str, index: usize) -> Option<Value> {
-    let t = BUNDLED.get(index)?;
-    let steps = nav.state.storyboard.start.steps.unwrap_or(t.steps);
-    let step_secs = nav.state.storyboard.start.step_secs;
-    let credits = nav.session.credits_on();
-    let inset = nav.state.storyboard.start.inset.param();
-    let key = format!("{cue}|template:{}|{steps}|{step_secs}|{credits}|{inset}", t.id);
-    if let Some(v) = nav.state.storyboard.start.previews.get(&key) {
-        return v.clone();
-    }
-    let v = nav
-        .session
-        .execute(
-            "storyboard.preview",
-            &json!({ "cueMap": cue, "template": t.id, "steps": steps, "stepSeconds": step_secs, "credits": credits, "inset": inset }),
-        )
-        .ok();
-    nav.state.storyboard.start.previews.insert(key, v.clone());
-    v
+    let params = template_params(nav, cue, index)?;
+    cached_preview(nav, params)
 }
 
 fn cards(nav: &mut Navigator, ui: &mut Ui) {

@@ -421,6 +421,11 @@ pub struct MusicSpan {
     pub length: Ticks,
     /// Opening, a section, or the close.
     pub part: ScenePart,
+    /// The title card(s) a section opens with (zero when it opens on a shot): the music leads
+    /// in under them and the chorus hits where the first shot starts (B-R3; Paul, 2026-11-14:
+    /// "Titles should be softer and lead into the content, and then after a title the music
+    /// should shift, or hit with impact").
+    pub lead_in: Ticks,
 }
 
 impl Storyboard {
@@ -442,11 +447,23 @@ impl Storyboard {
                 .checked_add(self.clips[last].duration)
                 .unwrap_or(Ticks::ZERO);
             let length = Ticks(end.0.saturating_sub(start.0));
+            // The title cards a section opens with, short of the whole section.
+            let lead_in = if scene.part == ScenePart::Section {
+                let titles: u64 = clips
+                    .iter()
+                    .map(|&i| &self.clips[i])
+                    .take_while(|c| c.shot_type == ShotType::Ttl)
+                    .map(|c| c.duration.0)
+                    .fold(0u64, u64::saturating_add);
+                Ticks(if titles < length.0 { titles } else { 0 })
+            } else {
+                Ticks::ZERO
+            };
             match out.last_mut() {
                 Some(prev) if prev.part == scene.part && scene.part != ScenePart::Section => {
                     prev.length = Ticks(prev.length.0.saturating_add(length.0));
                 }
-                _ => out.push(MusicSpan { start, length, part: scene.part }),
+                _ => out.push(MusicSpan { start, length, part: scene.part, lead_in }),
             }
         }
         out
@@ -526,10 +543,12 @@ fn fill_from(segments: &mut Vec<[u64; 2]>, source: &[[u64; 2]], want: u64, beat:
     have
 }
 
-/// The music by the piece's parts (SR3b): the intro under the opening span, a chorus starting
-/// at every section span (rotating through the song's choruses), the outro under the closing
-/// span — each cut or looped to its span's length, every splice a one-beat crossfade, a
-/// two-second fade at the end. `None` when the song gives nothing to work with.
+/// The music by the piece's parts (SR3b): the intro under the opening span, a chorus for every
+/// section span (rotating through the song's choruses), the outro under the closing span — each
+/// cut or looped to its span's length, every splice a one-beat crossfade, a two-second fade at
+/// the end. A section that opens on a title card leads in: the title plays the bars before the
+/// chorus and the chorus hits on the first shot ([`MusicSpan::lead_in`], B-R3). `None` when the
+/// song gives nothing to work with.
 pub fn structured_fit(cue: &CueMap, spans: &[MusicSpan]) -> Option<Fit> {
     let parts = song_parts(cue)?;
     if spans.is_empty() {
@@ -558,6 +577,20 @@ pub fn structured_fit(cue: &CueMap, spans: &[MusicSpan]) -> Option<Fit> {
             ScenePart::Section => {
                 let c = parts.choruses[chorus_i % parts.choruses.len()];
                 chorus_i += 1;
+                // Under the section's title card: the bars just before the chorus in the song,
+                // so the chorus hits on the first shot (B-R3). A chorus too near the song's start
+                // to lead in to keeps today's start on the title.
+                // One piece from the lead-in through the chorus (no splice inside the song);
+                // a longer section repeats the chorus itself after it.
+                let lead = cue.frames(span.lead_in).min(want);
+                if lead > 0 && lead < want && c[0] >= lead {
+                    let first = [c[0] - lead, c[1]];
+                    let got =
+                        fill_from(&mut segments, &[first], want.min(first[1] - first[0]), beat, cue.duration_frames);
+                    have += got;
+                    have += fill_from(&mut segments, &[c], want - got, beat, cue.duration_frames);
+                    continue;
+                }
                 vec![c]
             }
         };

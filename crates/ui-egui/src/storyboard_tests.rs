@@ -1091,7 +1091,9 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
         .start
         .previews
         .iter()
-        .find(|(k, _)| k.contains("template:review|2|20|"))
+        .find(|(k, _)| {
+            k.contains(r#""template":"review""#) && k.contains(r#""steps":2,"#) && k.contains(r#""stepSeconds":20"#)
+        })
         .and_then(|(_, v)| v.clone())
         .expect("the timeline previewed the template");
     assert!(preview["count"].as_u64().unwrap() >= 2 + 2 + 2 * 4, "{preview}");
@@ -1367,7 +1369,7 @@ fn the_start_screens_inset_panel_presets_the_slots_of_the_new_board() {
         .start
         .previews
         .iter()
-        .find(|(k, _)| k.contains("template:tutorial|2|20|") && k.contains("graphic"))
+        .find(|(k, _)| k.contains(r#""template":"tutorial""#) && k.contains(r#""steps":2,"#) && k.contains("graphic"))
         .and_then(|(_, v)| v.clone())
         .expect("previewed with the panel's inset");
     let sections = preview["sections"].as_array().unwrap();
@@ -1717,4 +1719,33 @@ fn s_toggles_snapping_and_ctrl_k_splits_at_the_playhead() {
     assert_eq!(after.clips.len(), board.clips.len() + 1, "Ctrl+K split a clip");
     assert!((after.clips[i].duration.as_secs_f64() - 1.0).abs() < 1e-6, "at the playhead");
     assert_eq!(after.clips[i + 1].shot_type, board.clips[i].shot_type);
+}
+
+/// B-R2 (Paul, 2026-11-14: "when the user changes a preset, or duration, the song should be
+/// paused"): a plan change while the timeline's cut plays pauses it where it was heard.
+#[test]
+fn changing_the_plan_while_the_cut_plays_pauses_it() {
+    use assetcraft_engine::PreviewMode;
+    let ctx = Context::default();
+    let (mut nav, _player, [(cue_a, audio_a), _]) = two_songs("plan");
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    crate::start_view::pick_track(&mut nav, cue_a.clone());
+    crate::start_view::set_length(&mut nav, None);
+    crate::start_view::play_cut(&mut nav, 5.0);
+    assert!(
+        frames_until(&ctx, &mut nav, &mut t, |n| n.session().preview_heard(&audio_a, PreviewMode::Cut).is_some()),
+        "the cut plays"
+    );
+    // Frames with the same plan keep it playing.
+    t += 0.05;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert_eq!(nav.session().preview_mode(), Some(PreviewMode::Cut));
+    // A template is picked: the music under the timeline changes, so it pauses.
+    nav.state.storyboard.start.choose_template(0, Some(2), Some(&cue_a), 20);
+    t += 0.05;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert!(nav.session().preview_state().is_none(), "paused");
+    assert!(nav.message().is_some_and(|m| m.contains("Paused")), "{:?}", nav.message());
+    assert!(nav.state.storyboard.start.cursor >= 5.0, "the playhead rests where it was heard");
 }

@@ -16,7 +16,7 @@ use crate::generate_cmd::{
 };
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
-use assetcraft_storyboard::{GenerateOptions, Pacing, ShotType, generate};
+use assetcraft_storyboard::{CueMap, GenerateOptions, Pacing, ShotType, Storyboard, Ticks, generate};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -214,9 +214,13 @@ pub(crate) fn sb_tracks(s: &mut Session, _: &Value) -> CmdResult {
 /// `storyboard.preview {cueMap, pacing?, seconds?, density?, shape?}` → `{clips: [{shot, seconds}],
 /// count, titleCards, scenes, length, avgSeconds, avgBeats, fitChanges}`. The open storyboard is
 /// untouched.
-pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
-    let path = cue_map_param(p)?;
-    let cue = read_cue(s, &path)?;
+/// What `storyboard.preview` builds for `p`, before it is described: the board, its clip,
+/// title-card and scene counts, its length and the music's fit note. `track.preview {cut}` plays
+/// this board's track edit, so the Start screen hears the music its timeline draws (Paul,
+/// 2026-11-14: "the last half of this audio track had no volume").
+pub(crate) type PreviewBoard = (Storyboard, usize, usize, usize, Ticks, Option<String>);
+
+pub(crate) fn preview_board(s: &mut Session, p: &Value, cue: &CueMap, path: &Path) -> Result<PreviewBoard, CmdError> {
     // A template (Paul, 2026-11-06: "When I click on a template… I want to see the cuts in the
     // storyboard, and the inset section"): the board `storyboard.new {template}` would make —
     // the steps, the credits clip, the song as the track, re-cut to the length.
@@ -245,18 +249,25 @@ pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
             let shape = shape_param(p, assetcraft_storyboard::Shape::default())?;
             let opts = GenerateOptions {
                 name: cue.track.title.clone(),
-                track_path: track_path(s, &path, &cue).to_string_lossy().into_owned(),
+                track_path: track_path(s, path, cue).to_string_lossy().into_owned(),
                 pacing,
                 seconds,
                 fit_mode: None,
                 density,
                 shape,
             };
-            let (board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+            let (board, report) = generate(cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
             (board, report.clips, report.title_cards, report.scenes, report.length, report.fit_changes)
         }
         Some(_) => return Err(CmdError::BadParams("`template` must be a bundled id or a file path".into())),
     };
+    Ok((board, clips_n, title_cards, scenes_n, length, fit_changes))
+}
+
+pub(crate) fn sb_preview(s: &mut Session, p: &Value) -> CmdResult {
+    let path = cue_map_param(p)?;
+    let cue = read_cue(s, &path)?;
+    let (board, clips_n, title_cards, scenes_n, length, fit_changes) = preview_board(s, p, &cue, &path)?;
     let avg = if clips_n > 0 { length.as_secs_f64() / clips_n as f64 } else { 0.0 };
     let r2 = |v: f64| (v * 100.0).round() / 100.0;
     let scene_index: std::collections::HashMap<_, usize> =

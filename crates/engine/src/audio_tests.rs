@@ -372,3 +372,42 @@ fn the_listening_volume_and_song_level_change_a_playing_cut() {
     );
     assert!((s2.listen_volume() - 0.5).abs() < 1e-6);
 }
+
+/// B-R2 (Paul, 2026-11-14: "the last half of this audio track had no volume"; "the second chorus
+/// does not play correctly"): a cut preview given the timeline's plan (`storyboard.preview`'s
+/// params) plays that plan's music, not the plain length's fit.
+#[test]
+fn a_cut_preview_of_a_template_plays_the_music_the_timeline_draws() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    let song = music("track.wav");
+    let plan = json!({ "cueMap": music("track.cuemap.json"), "template": "review", "steps": 2, "stepSeconds": 20, "credits": false });
+    let drawn = run(&mut s, "storyboard.preview", plan.clone());
+    let drawn_secs: f64 = drawn["edit"]["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g[1].as_f64().unwrap() - g[0].as_f64().unwrap())
+        .sum();
+    let mut r = json!(null);
+    for _ in 0..2000 {
+        r = run(&mut s, "track.preview", json!({ "path": song, "cut": plan }));
+        if r["preview"] == "playing" || s.preview_heard(&song, crate::PreviewMode::Cut).is_some() {
+            break;
+        }
+        s.poll_audio(Ticks::ZERO);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(r["mode"], "cut", "{r}");
+    let last = player.log().last().cloned().unwrap_or_default();
+    let heard: f64 = last.trim_start_matches("play ").split('s').next().unwrap().parse().unwrap();
+    assert!((heard - drawn_secs).abs() < 0.1, "heard {heard} s, drawn {drawn_secs} s ({last})");
+    assert_ne!(last, "play 10.0s from 0.0", "not the plain length's 10 s fit");
+    // The plain form still plays the length's fit.
+    run(
+        &mut s,
+        "track.preview",
+        json!({ "path": song, "cut": { "cueMap": music("track.cuemap.json"), "seconds": 30 } }),
+    );
+    assert_eq!(player.log().last().map(String::as_str), Some("play 10.0s from 0.0"));
+}

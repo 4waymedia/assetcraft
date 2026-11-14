@@ -1124,7 +1124,8 @@ fn the_chorus_loops_under_a_cut_longer_than_the_song_and_the_track_carries_it() 
 }
 
 #[test]
-fn structured_music_puts_the_intro_under_the_opening_a_chorus_on_every_section_title_and_the_outro_under_the_close() {
+fn structured_music_puts_the_intro_under_the_opening_a_chorus_hit_after_every_section_title_and_the_outro_under_the_close()
+ {
     use cue::{BAR, BEAT, SR};
     let m = cue::map();
     // A Tutorial with two 20 s steps: Goal + Setup (opening) · Step 1 · Step 2 · Result (close).
@@ -1157,10 +1158,17 @@ fn structured_music_puts_the_intro_under_the_opening_a_chorus_on_every_section_t
     let at = |t: u64| {
         starts.iter().find(|(o, s)| *o <= t && t < *o + (s[1] - s[0])).map(|(o, s)| (s[0] + (t - o), s)).unwrap()
     };
-    let (src1, piece1) = at(frames(opening));
-    assert_eq!(src1, 24 * BAR, "step 1's title lands on the chorus start: {piece1:?}");
-    let (src2, piece2) = at(frames(opening + 20.0));
-    assert_eq!(src2, 24 * BAR, "step 2's title lands on the chorus start again (one chorus rotates): {piece2:?}");
+    // B-R3: each step opens on its title card; the title plays the bars before the chorus and
+    // the chorus hits where the step's first shot starts.
+    let lead = spans[1].lead_in.as_secs_f64();
+    assert!(lead > 0.0 && lead < 20.0, "the step opens with a title card: {lead}");
+    assert_eq!(spans[0].lead_in, Ticks::ZERO, "the opening has no lead-in");
+    let (title1, piece1) = at(frames(opening));
+    assert_eq!(title1, 24 * BAR - frames(lead), "step 1's title leads in to the chorus: {piece1:?}");
+    let (src1, same) = at(frames(opening + lead));
+    assert_eq!((src1, same), (24 * BAR, piece1), "the chorus hits on the first shot, inside one piece");
+    let (src2, piece2) = at(frames(opening + 20.0 + lead));
+    assert_eq!(src2, 24 * BAR, "step 2's first shot hits the chorus again (one chorus rotates): {piece2:?}");
     let close_at = frames(opening + 40.0);
     let (src3, _) = at(close_at);
     assert_eq!(src3, 56 * BAR, "the outro under the close");
@@ -1186,9 +1194,27 @@ fn structured_music_puts_the_intro_under_the_opening_a_chorus_on_every_section_t
     let src =
         |t: u64| starts.iter().find(|(o, s)| *o <= t && t < *o + (s[1] - s[0])).map(|(o, s)| s[0] + (t - o)).unwrap();
     let o = t3.music_spans()[0].length.as_secs_f64();
-    assert_eq!(src(frames(o)), 24 * BAR);
-    assert_eq!(src(frames(o + 20.0)), 40 * BAR);
-    assert_eq!(src(frames(o + 40.0)), 24 * BAR);
+    let lead = t3.music_spans()[1].lead_in.as_secs_f64();
+    assert_eq!(src(frames(o + lead)), 24 * BAR);
+    assert_eq!(src(frames(o + 20.0 + lead)), 40 * BAR);
+    assert_eq!(src(frames(o + 40.0 + lead)), 24 * BAR);
+    // A chorus at the very top of the song has no bars before it: the title starts on it.
+    let mut top = m.clone();
+    for sec in &mut top.sections {
+        if sec.label.to_ascii_lowercase().contains("chorus") {
+            sec.label = "Verse".into();
+        }
+    }
+    top.sections[0].label = "Chorus".into();
+    let fit = structured_fit(&top, &spans).unwrap();
+    let mut off = 0u64;
+    let mut placed = Vec::new();
+    for g in &fit.segments {
+        placed.push((off, *g));
+        off += g[1] - g[0];
+    }
+    let src0 = |t: u64| placed.iter().find(|(o, g)| *o <= t && t < *o + (g[1] - g[0])).map(|(o, g)| g[0] + (t - o));
+    assert_eq!(src0(frames(opening)), Some(top.sections[0].start), "no lead-in to take");
     // A song without intro / outro labels: the stretch before the first chorus and after the
     // last stand in; no chorus at all → the loudest section; no sections → nothing.
     let mut bare = m.clone();

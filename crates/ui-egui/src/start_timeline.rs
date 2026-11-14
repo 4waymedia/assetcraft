@@ -16,7 +16,9 @@
 //!   track.
 //!
 //! The timeline plays the **cut** (Paul, 2026-10-17, "two modes"): ▶ / Space play the song
-//! through the chosen length's edit from the playhead (`track.preview {cut}`), a click plays the
+//! through the plan's own edit from the playhead (`track.preview {cut}` with the same params as
+//! `storyboard.preview`, `start_view::plan_params`, so a template's intro, choruses and outro are
+//! what is heard; B-R2), and a plan change while it plays pauses it. A click plays the
 //! cut from there, and dragging there or dragging the playhead scrubs (the cut plays from where
 //! the drag ends). Everything here is in cut time, so the playhead runs straight across the
 //! splices. The track column's ▶ and section clicks play the **song** instead; starting either
