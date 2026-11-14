@@ -317,6 +317,44 @@ pub struct Track {
     /// "volume for the sound track").
     #[serde(default, skip_serializing_if = "is_zero_db")]
     pub level_db: i8,
+    /// The music under title cards, in dB against the song level ([`TITLE_DB_RANGE`];
+    /// [`TITLE_DB_DEFAULT`] when the file doesn't say): softer under a title, back to full by the
+    /// first shot (B-R3; Paul, 2026-11-14: "Titles should be softer and lead into the content").
+    /// 0 = no dip.
+    #[serde(default = "title_db_default", skip_serializing_if = "is_default_title_db")]
+    pub title_db: i8,
+}
+
+/// The title level's range in dB.
+pub const TITLE_DB_RANGE: (i8, i8) = (-30, 0);
+/// The title level until the user sets one.
+pub const TITLE_DB_DEFAULT: i8 = -6;
+
+fn title_db_default() -> i8 {
+    TITLE_DB_DEFAULT
+}
+
+fn is_default_title_db(db: &i8) -> bool {
+    *db == TITLE_DB_DEFAULT
+}
+
+impl Storyboard {
+    /// Where the title cards sit in the Cut, as `(start, end)`, cards that touch merged into one
+    /// stretch (the music dips under them, B-R3).
+    pub fn title_windows(&self) -> Vec<(Ticks, Ticks)> {
+        let mut out: Vec<(Ticks, Ticks)> = Vec::new();
+        for (c, at) in self.clips.iter().zip(self.starts()) {
+            if c.shot_type != ShotType::Ttl {
+                continue;
+            }
+            let end = Ticks(at.0.saturating_add(c.duration.0));
+            match out.last_mut() {
+                Some(last) if last.1 == at => last.1 = end,
+                _ => out.push((at, end)),
+            }
+        }
+        out
+    }
 }
 
 /// The song level's range in dB: a little louder, or down to almost silent.

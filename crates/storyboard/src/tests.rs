@@ -45,6 +45,7 @@ fn sample() -> Storyboard {
         song_sections: vec![],
         edit: None,
         level_db: 0,
+        title_db: crate::model::TITLE_DB_DEFAULT,
         credit: None,
     });
     board
@@ -1592,4 +1593,33 @@ fn a_theme_sets_the_moves_and_a_clip_can_override_each() {
     theme.motion.title_seconds = Some(4.0);
     let look = Theme::parse(theme.to_json().as_bytes(), false).unwrap().0.look();
     assert_eq!((look.motion.exit, look.motion.duration_ms), (TextExit::Sink, Some(4000)));
+}
+
+/// B-R3: where the title cards sit (touching cards are one stretch), and the title level's
+/// default, file form and range.
+#[test]
+fn title_windows_and_the_title_level() {
+    let mut b = Storyboard::new("T");
+    b.scenes.push(Scene::new(SceneId(1), None));
+    for (i, (shot, secs)) in
+        [(ShotType::Ttl, 2), (ShotType::Ttl, 1), (ShotType::Ms, 5), (ShotType::Ttl, 3), (ShotType::Cu, 4)]
+            .iter()
+            .enumerate()
+    {
+        b.clips.push(Clip::new(ClipId(i as u32 + 1), SceneId(1), *shot, Ticks::from_secs(*secs).unwrap()));
+    }
+    let s = |n: u64| Ticks::from_secs(n).unwrap();
+    assert_eq!(b.title_windows(), vec![(s(0), s(3)), (s(8), s(11))]);
+    // An old file without the field gets the default; the default isn't written back.
+    let mut with = sample();
+    let text = serde_json::to_string(&with).unwrap();
+    assert!(!text.contains("titleDb"));
+    assert_eq!(Storyboard::from_json(text.as_bytes()).unwrap().track.unwrap().title_db, TITLE_DB_DEFAULT);
+    with.track.as_mut().unwrap().title_db = 0;
+    let text = serde_json::to_string(&with).unwrap();
+    assert!(text.contains("\"titleDb\":0"), "a set level is saved");
+    assert!(
+        Storyboard::from_json(text.replace("\"titleDb\":0", "\"titleDb\":3").as_bytes()).is_err(),
+        "above 0 dB is refused"
+    );
 }

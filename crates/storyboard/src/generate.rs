@@ -365,6 +365,7 @@ pub fn track_from_cue(
             .collect(),
         edit: edit_of(cue, fit, &tl),
         level_db: 0,
+        title_db: crate::model::TITLE_DB_DEFAULT,
         credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
     })
 }
@@ -742,6 +743,7 @@ pub fn track_under(cue: &CueMap, track_path: &str, board: &Storyboard, music: Mu
             .collect(),
         edit: edit_of(cue, fit.as_ref(), &tl),
         level_db: 0,
+        title_db: crate::model::TITLE_DB_DEFAULT,
         credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
     };
     (track, what)
@@ -971,6 +973,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             .collect(),
         edit: edit_of(cue, fit, &tl),
         level_db: 0,
+        title_db: crate::model::TITLE_DB_DEFAULT,
         credit: Some(cue.track.credit.trim()).filter(|c| !c.is_empty()).map(str::to_owned),
     });
     board.validate(&Limits::default()).map_err(|e| GenerateError::Invalid(e.to_string()))?;

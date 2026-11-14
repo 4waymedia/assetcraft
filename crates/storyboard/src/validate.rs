@@ -217,6 +217,10 @@ impl Storyboard {
             if !(lo..=hi).contains(&track.level_db) {
                 return Err(BoardError::Invalid(format!("the song level must be {lo} to {hi} dB")));
             }
+            let (lo, hi) = crate::model::TITLE_DB_RANGE;
+            if !(lo..=hi).contains(&track.title_db) {
+                return Err(BoardError::Invalid(format!("the title level must be {lo} to {hi} dB")));
+            }
             count("beats", track.beat_grid.len(), l.max_beats)?;
             if track.beat_grid.windows(2).any(|w| w[0] >= w[1])
                 || track.beat_grid.last().is_some_and(|b| *b > track.duration)

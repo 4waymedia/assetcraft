@@ -109,6 +109,7 @@ pub fn sample() -> Storyboard {
         song_sections: Vec::new(),
         edit: None,
         level_db: 0,
+        title_db: crate::model::TITLE_DB_DEFAULT,
         credit: None,
     });
     board

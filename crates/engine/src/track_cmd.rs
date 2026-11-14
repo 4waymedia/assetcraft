@@ -101,15 +101,17 @@ pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
             .filter(|f| f.is_finite() && *f >= 0.0)
             .ok_or_else(|| CmdError::BadParams("`from` must be seconds, 0 or more".into()))?,
     };
-    let (mode, edit) = match p.get("cut") {
-        None | Some(Value::Null) => (PreviewMode::Song, None),
+    let (mode, edit, dips) = match p.get("cut") {
+        None | Some(Value::Null) => (PreviewMode::Song, None, Vec::new()),
         // The plan the Start timeline draws (`storyboard.preview`'s params: a template, or a preset
         // with its pacing): play the edit of that same board, so what is heard is what is shown.
         Some(c @ Value::Object(o)) if o.contains_key("template") || o.contains_key("pacing") => {
             let cue_path = crate::generate_cmd::cue_map_param(c)?;
             let cue = crate::generate_cmd::read_cue(s, &cue_path)?;
             let (board, ..) = crate::library_cmd::preview_board(s, c, &cue, &cue_path)?;
-            (PreviewMode::Cut, board.track.and_then(|t| t.edit))
+            // Its title cards dip the music as the board will (B-R3).
+            let dips = crate::export_job::title_dips(&board);
+            (PreviewMode::Cut, board.track.and_then(|t| t.edit), dips)
         }
         Some(c @ Value::Object(_)) => {
             let cue_path = crate::generate_cmd::cue_map_param(c)?;
@@ -118,11 +120,11 @@ pub(crate) fn track_preview(s: &mut Session, p: &Value) -> CmdResult {
             let fit_mode = crate::generate_cmd::fit_mode_param(c)?;
             let fit = assetcraft_storyboard::fit_for(&cue, seconds, fit_mode)
                 .map_err(|e| CmdError::Unavailable(e.to_string()))?;
-            (PreviewMode::Cut, assetcraft_storyboard::track_edit(&cue, fit))
+            (PreviewMode::Cut, assetcraft_storyboard::track_edit(&cue, fit), Vec::new())
         }
         Some(_) => return Err(CmdError::BadParams("`cut` must be {cueMap, seconds?, fit?}".into())),
     };
-    let status = s.preview_start(path.clone(), from, mode, edit);
+    let status = s.preview_start(path.clone(), from, mode, edit, dips);
     let mode = match mode {
         PreviewMode::Song => "song",
         PreviewMode::Cut => "cut",

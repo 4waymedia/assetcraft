@@ -553,6 +553,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.titleLevel",
+        "Title Level",
+        "Storyboard",
+        None,
+        "{db: integer} → {db, message} (how far the music dips under title cards, -30..=0 dB, default -6, 0 = no dip; it eases down after the card starts and is back to full by the first shot; playback, the Start preview and the export use it; one undo step)",
+        crate::inset_cmd::sb_title_level
+    ),
+    cmd!(
+        EDIT,
         "storyboard.trackLevel",
         "Song Level",
         "Storyboard",

@@ -45,6 +45,38 @@ pub struct Program {
     layers: Vec<Layer>,
     /// The music's level (the storyboard's song level; 1 = as decoded).
     music_gain: f32,
+    /// Stretches where the music dips (title cards, B-R3).
+    dips: Vec<Dip>,
+}
+
+/// How long a [`Dip`] takes to go down after its start and to come back up by its end.
+pub const DIP_RAMP_SECS: f64 = 0.25;
+
+/// A stretch of program time where the music plays at `gain` (B-R3; Paul, 2026-11-14: "Titles
+/// should be softer and lead into the content"): it eases down over [`DIP_RAMP_SECS`] after
+/// `start` and is back at full by `end`, so the hit after a title card lands at full level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Dip {
+    /// Program seconds it starts at.
+    pub start: f64,
+    /// Program seconds it is back at full level by.
+    pub end: f64,
+    /// Linear gain at the bottom.
+    pub gain: f32,
+}
+
+impl Dip {
+    /// The gain this dip puts on program second `t` (1 outside it).
+    pub fn at(&self, t: f64) -> f32 {
+        if !(t >= self.start && t < self.end) || !self.gain.is_finite() {
+            return 1.0;
+        }
+        let ramp = DIP_RAMP_SECS.min((self.end - self.start) / 2.0).max(1e-6);
+        let down = ((t - self.start) / ramp).min(1.0);
+        let up = ((self.end - t) / ramp).min(1.0);
+        let x = down.min(up) as f32;
+        1.0 + (self.gain.clamp(0.0, 4.0) - 1.0) * x
+    }
 }
 
 /// A voice over the program (SR4): a section's inset video sound, from `start` for `length`
@@ -89,6 +121,7 @@ impl Program {
                 length: total,
                 layers: Vec::new(),
                 music_gain: 1.0,
+                dips: Vec::new(),
             };
         };
         let r = |f: u64| rescale(f, edit.rate, rate);
@@ -106,7 +139,16 @@ impl Program {
         let shortest = segments.iter().map(|(a, b, _)| b - a).min().unwrap_or(0);
         let half_crossfade = (r(edit.crossfade) / 2).min(shortest / 2);
         let fade_out = edit.fade_out.map(|(s, n)| (r(s), r(n).max(1)));
-        Program { audio, segments, half_crossfade, fade_out, length, layers: Vec::new(), music_gain: 1.0 }
+        Program {
+            audio,
+            segments,
+            half_crossfade,
+            fade_out,
+            length,
+            layers: Vec::new(),
+            music_gain: 1.0,
+            dips: Vec::new(),
+        }
     }
 
     /// Sample rate of the program (the audio's).
@@ -166,7 +208,18 @@ impl Program {
             let g = (x * FRAC_PI_2).cos() as f32;
             out = (out.0 * g, out.1 * g);
         }
-        (out.0 * self.music_gain, out.1 * self.music_gain)
+        let mut g = self.music_gain;
+        if !self.dips.is_empty() {
+            let secs = t as f64 / f64::from(self.rate().max(1));
+            g *= self.dips.iter().map(|d| d.at(secs)).product::<f32>();
+        }
+        (out.0 * g, out.1 * g)
+    }
+
+    /// This program with the music dipping over `dips` (title cards, B-R3).
+    pub fn with_dips(mut self, dips: Vec<Dip>) -> Program {
+        self.dips = dips;
+        self
     }
 
     /// This program with its music at `gain` (linear; see [`crate::mix::db`]). A gain that isn't

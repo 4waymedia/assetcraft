@@ -507,7 +507,8 @@ impl Job {
                 let level = track.level_db;
                 Some(
                     Program::new(Arc::new(decoded), edit.as_ref())
-                        .with_music_gain(assetcraft_audio::mix::db(f64::from(level))),
+                        .with_music_gain(assetcraft_audio::mix::db(f64::from(level)))
+                        .with_dips(title_dips(&self.board)),
                 )
             }
             None => None,
@@ -593,6 +594,18 @@ pub(crate) struct Voice {
     pub(crate) voice_db: i8,
     /// A voiceover: duck only while it speaks (an inset ducks its whole section).
     pub(crate) speech: bool,
+}
+
+/// Where the music dips under the board's title cards, at its title level (B-R3): one dip per
+/// stretch of title cards, back to full by the first shot. None at 0 dB or without a song.
+pub(crate) fn title_dips(board: &Storyboard) -> Vec<assetcraft_audio::Dip> {
+    let Some(db) = board.track.as_ref().map(|t| t.title_db).filter(|db| *db < 0) else { return Vec::new() };
+    let gain = assetcraft_audio::mix::db(f64::from(db));
+    board
+        .title_windows()
+        .into_iter()
+        .map(|(a, b)| assetcraft_audio::Dip { start: a.as_secs_f64(), end: b.as_secs_f64(), gain })
+        .collect()
 }
 
 /// The voiceover (SR4b, from the top, the length of the Cut) and every section whose inset is

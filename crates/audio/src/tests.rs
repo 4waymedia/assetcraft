@@ -233,3 +233,23 @@ fn a_programs_music_gain_scales_the_song() {
         assert_eq!(p.frame(500), (0.5, 0.5), "{bad} is taken as unity");
     }
 }
+
+/// B-R3: a title dip eases down after its start, sits at its gain, and is back to full by its
+/// end, so the hit after a title card plays at full level.
+#[test]
+fn a_title_dip_eases_down_and_is_back_to_full_by_the_first_shot() {
+    use crate::{DIP_RAMP_SECS, Dip};
+    let d = Dip { start: 1.0, end: 3.0, gain: 0.5 };
+    assert_eq!((d.at(0.99), d.at(3.0), d.at(5.0)), (1.0, 1.0, 1.0), "outside it");
+    assert!((d.at(2.0) - 0.5).abs() < 1e-6, "the middle sits at its gain");
+    assert!((d.at(1.0 + DIP_RAMP_SECS / 2.0) - 0.75).abs() < 1e-3, "halfway down the ramp");
+    assert!(d.at(3.0 - 1e-4) > 0.99, "back to full by its end");
+    // A dip shorter than two ramps still reaches part way and comes back.
+    let short = Dip { start: 0.0, end: 0.2, gain: 0.0 };
+    assert!((short.at(0.1) - 0.0).abs() < 1e-6 && short.at(0.0) == 1.0);
+    // On the program: the music under the dip, at the program rate (8 kHz here).
+    let p = Program::new(ramp(8_000, 40_000), None).with_dips(vec![Dip { start: 1.0, end: 3.0, gain: 0.5 }]);
+    let plain = Program::new(ramp(8_000, 40_000), None);
+    assert!((p.frame(16_000).0 - plain.frame(16_000).0 * 0.5).abs() < 1e-4, "2 s in: half");
+    assert_eq!(p.frame(4_000), plain.frame(4_000), "0.5 s in: untouched");
+}

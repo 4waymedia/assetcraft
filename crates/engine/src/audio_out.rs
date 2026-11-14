@@ -67,6 +67,8 @@ pub enum PreviewMode {
 struct Preview {
     path: PathBuf,
     edit: Option<TrackEdit>,
+    /// The title dips of the plan it plays (B-R3), when it plays a plan.
+    dips: Vec<assetcraft_audio::Dip>,
     mode: PreviewMode,
     from: f64,
     started: bool,
@@ -132,7 +134,9 @@ impl Session {
         let mut layers = Vec::new();
         // The song level (V1) is part of the key, so a change rebuilds the program.
         let level = board.track.as_ref().map_or(0, |t| t.level_db);
-        let mut key = format!("level {level};");
+        // So are the title dips (B-R3): the title level and where the cards sit.
+        let dips = crate::export_job::title_dips(&board);
+        let mut key = format!("level {level}; dips {dips:?};");
         for v in &wanted {
             let p = PathBuf::from(&v.path);
             self.load_slot(&p);
@@ -159,7 +163,8 @@ impl Session {
         let prog = Arc::new(
             Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref())
                 .with_layers(layers)
-                .with_music_gain(assetcraft_audio::mix::db(f64::from(level))),
+                .with_music_gain(assetcraft_audio::mix::db(f64::from(level)))
+                .with_dips(dips),
         );
         self.audio.program = Some((path, edit_now, key, Arc::clone(&prog)));
         Some(prog)
@@ -243,12 +248,13 @@ impl Session {
         from: f64,
         mode: PreviewMode,
         edit: Option<TrackEdit>,
+        dips: Vec<assetcraft_audio::Dip>,
     ) -> String {
         self.preview_stop();
         self.audio_stop();
         self.load_slot(&path);
         let from = if from.is_finite() { from.max(0.0) } else { 0.0 };
-        self.audio.preview = Some(Preview { path, edit, mode, from, started: false });
+        self.audio.preview = Some(Preview { path, edit, dips, mode, from, started: false });
         let path = self.audio.preview.as_ref().map(|p| p.path.clone());
         self.poll_preview();
         self.preview_status(path.as_deref())
@@ -271,7 +277,10 @@ impl Session {
         }
         match self.load_state(&p.path) {
             Some(Load::Ready(decoded)) => {
-                let program = Arc::new(Program::new(Arc::clone(&decoded.audio), p.edit.as_ref().map(edit).as_ref()));
+                let program = Arc::new(
+                    Program::new(Arc::clone(&decoded.audio), p.edit.as_ref().map(edit).as_ref())
+                        .with_dips(p.dips.clone()),
+                );
                 self.audio.player.set_volume(volume_gain(self.preview_volume));
                 let ok = self.audio.player.play(program, p.from).is_ok();
                 match &mut self.audio.preview {

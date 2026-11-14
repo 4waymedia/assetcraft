@@ -434,3 +434,23 @@ pub(crate) fn sb_track_level(s: &mut Session, p: &Value) -> CmdResult {
     }
     Ok(json!({ "db": db, "message": message }))
 }
+
+/// `storyboard.titleLevel {db}` (B-R3; Paul, 2026-11-14: "the RED title should have softer
+/// music… we should allow the user to adjust it"): how far the music dips under title cards, in
+/// whole dB within `TITLE_DB_RANGE` (0 = no dip), against the song level. Playback, the Start
+/// preview and the export all use it. One undo step; the same level again is none. Replies
+/// `{db, message}`.
+pub(crate) fn sb_title_level(s: &mut Session, p: &Value) -> CmdResult {
+    let db = level(p, "db", assetcraft_storyboard::TITLE_DB_RANGE)?
+        .ok_or_else(|| CmdError::BadParams("`db` is required".into()))?;
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let track = board.track.as_mut().ok_or_else(|| CmdError::Unavailable("the storyboard has no song".into()))?;
+    let message =
+        if db == 0 { "Titles: the music doesn't dip".to_owned() } else { format!("Titles: the music dips {db} dB") };
+    if track.title_db != db {
+        track.title_db = db;
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({ "db": db, "message": message }))
+}

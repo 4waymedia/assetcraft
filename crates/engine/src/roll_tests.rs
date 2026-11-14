@@ -215,3 +215,28 @@ fn the_song_level_is_one_undo_step_and_saved_with_the_board() {
     s.boards.board.as_mut().unwrap().track = None;
     assert!(matches!(s.execute("storyboard.trackLevel", &json!({ "db": -3 })), Err(CmdError::Unavailable(_))));
 }
+
+/// `storyboard.titleLevel` (B-R3): the dip under title cards, one undo step, 0 = none.
+#[test]
+fn the_title_level_dips_the_music_under_title_cards() {
+    let mut s = session();
+    let default = assetcraft_storyboard::TITLE_DB_DEFAULT;
+    assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().title_db, default);
+    let windows = s.storyboard().unwrap().title_windows();
+    assert!(!windows.is_empty(), "the sample has title cards");
+    let dips = crate::export_job::title_dips(s.storyboard().unwrap());
+    assert_eq!(dips.len(), windows.len(), "a dip per stretch of title cards");
+    assert!((dips[0].gain - assetcraft_audio::mix::db(f64::from(default))).abs() < 1e-6);
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.titleLevel", json!({ "db": 0 }));
+    assert_eq!(r["db"], 0, "{r}");
+    assert!(crate::export_job::title_dips(s.storyboard().unwrap()).is_empty(), "0 dB: no dip");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    run(&mut s, "storyboard.titleLevel", json!({ "db": 0 }));
+    assert_eq!(s.boards.undo_len(), undo + 1, "the same level is no step");
+    for bad in [json!({}), json!({ "db": 1 }), json!({ "db": -31 }), json!({ "db": "soft" })] {
+        assert!(matches!(s.execute("storyboard.titleLevel", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().title_db, default);
+}

@@ -30,7 +30,8 @@
 //!   follows the pointer while dragging ([`ResizeDrag`]).
 //! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
 //!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
-//!   Beside it, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
+//!   Titles (B-R3, `storyboard.titleLevel`) sets how far the music dips under title cards.
+//!   Beside them, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
 //!   here, at once and saved; the export doesn't use it.
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
@@ -212,11 +213,18 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
     }
     ui.label(RichText::new(format!("{} / {}", at.timecode(), total.timecode())).font(FontId::monospace(12.0)));
     // The song's level in the mix (V1): one `storyboard.trackLevel` when the slider is let go.
-    if let Some(level) = nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| t.level_db) {
+    if let Some((level, titles)) =
+        nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| (t.level_db, t.title_db))
+    {
         ui.separator();
         let range = assetcraft_storyboard::TRACK_DB_RANGE;
         if let Some(db) = crate::inset_view::level_slider(ui, ("song", 0), "Song", level, range) {
             nav.run("storyboard.trackLevel", json!({ "db": db }));
+        }
+        // The dip under title cards (B-R3).
+        let range = assetcraft_storyboard::TITLE_DB_RANGE;
+        if let Some(db) = crate::inset_view::level_slider(ui, ("titles", 0), "Titles", titles, range) {
+            nav.run("storyboard.titleLevel", json!({ "db": db }));
         }
     }
     // The listening volume (V2): how loud it plays here, at once and saved; not exported.

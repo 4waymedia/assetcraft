@@ -160,6 +160,7 @@ mod tests {
             song_sections: vec![SongSection { name: "Chorus".into(), start: secs(10.0), end: secs(20.0) }],
             edit: None,
             level_db: 0,
+            title_db: crate::model::TITLE_DB_DEFAULT,
             credit: None,
         });
         b

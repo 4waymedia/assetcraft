@@ -181,6 +181,7 @@ fn a_small_cut_exports_to_a_playable_file_and_reports() {
         song_sections: Vec::new(),
         edit: None,
         level_db: 0,
+        title_db: assetcraft_storyboard::TITLE_DB_DEFAULT,
         credit: None,
     });
     let mov = dir.join("Cut.mov");
@@ -304,6 +305,7 @@ fn an_inset_video_with_mix_audio_is_heard_and_the_music_ducks_under_it() {
         song_sections: Vec::new(),
         edit: None,
         level_db: 0,
+        title_db: assetcraft_storyboard::TITLE_DB_DEFAULT,
         credit: None,
     });
     let export = |s: &mut Session, name: &str| -> PathBuf {
@@ -389,6 +391,7 @@ fn a_voiceover_ducks_the_song_only_while_it_speaks() {
         song_sections: Vec::new(),
         edit: None,
         level_db: 0,
+        title_db: assetcraft_storyboard::TITLE_DB_DEFAULT,
         credit: None,
     });
     let export = |s: &mut Session, name: &str| -> PathBuf {
