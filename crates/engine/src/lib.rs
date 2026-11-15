@@ -40,6 +40,7 @@ mod working_cmd;
 
 pub use analyse_job::{AnalyseProgress, AnalyseState};
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
+pub use assetcraft_media::{Frame as VideoFrame, Lookup as VideoLookup, is_video};
 pub use assetcraft_thumbs::DiskCache;
 pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
@@ -231,6 +232,8 @@ pub struct Session {
     snapping: bool,
     /// The Strip's zoom (`storyboard.zoom`, Z1): 1 = 44 pt a second.
     strip_zoom: f32,
+    /// Video frames for the Viewer (P1), started on first use.
+    video: std::sync::OnceLock<assetcraft_media::VideoFrames>,
 }
 
 impl Session {
@@ -285,6 +288,7 @@ impl Session {
             credits: prefs.credits,
             snapping: prefs.snapping,
             strip_zoom: 1.0,
+            video: std::sync::OnceLock::new(),
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -570,6 +574,26 @@ impl Session {
     /// Whether the Start screen adds the credits clip (the checkbox; remembered).
     pub fn credits_on(&self) -> bool {
         self.credits
+    }
+
+    /// The frame of the video at `path` shown `secs` into it, at most `max_side` pixels a side,
+    /// for the Viewer (P1): answers at once, decoding in the background
+    /// (`assetcraft_media::VideoFrames`).
+    pub fn video_frame(&self, path: &std::path::Path, secs: f64, max_side: u32) -> assetcraft_media::Lookup {
+        self.video.get_or_init(assetcraft_media::VideoFrames::new).frame(path, secs, max_side)
+    }
+
+    /// While playing (P2): decode `seconds` of `path` from `from` ahead of the playhead, on the
+    /// idle cores. Cheap to call every frame.
+    pub fn video_ahead(&self, path: &std::path::Path, from: f64, seconds: f64, max_side: u32) {
+        self.video.get_or_init(assetcraft_media::VideoFrames::new).ahead(path, from, seconds, max_side);
+    }
+
+    /// Paused or scrubbing (P2): stop reading ahead.
+    pub fn video_stop_ahead(&self) {
+        if let Some(v) = self.video.get() {
+            v.stop_ahead();
+        }
     }
 
     /// The Strip's zoom (Z1): 1 = 44 pt a second, from [`STRIP_ZOOM_RANGE`].

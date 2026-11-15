@@ -1959,3 +1959,82 @@ fn the_volume_line_on_the_audio_row() {
     }
     assert_eq!(track(&nav).volume.len(), 1, "the double-clicked point is gone");
 }
+
+/// P1 (Paul, 2026-11-15: "mp4 videos do not display/play in the preview"): a clip whose shot is
+/// an MP4 shows the video's own frame in the Viewer — the first at rest, the one under the
+/// playhead when parked inside the clip.
+#[test]
+fn the_viewer_shows_a_video_clips_own_frames() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let lib = lib.canonicalize().unwrap_or(lib);
+    assert!(nav.open_folder(&lib));
+    let video = lib.join("snow_clearing_flythrough.mp4");
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let (i, clip) =
+        board.clips.iter().enumerate().find(|(_, c)| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap();
+    nav.run("storyboard.place", json!({ "asset": video.to_string_lossy(), "clip": clip.id.0 }));
+    nav.run("storyboard.select", json!({ "clip": clip.id.0 }));
+    let mut t = 0.0;
+    let shown = |nav: &Navigator| nav.state.storyboard.video_tex.0.get(&video).map(|(i, _)| *i);
+    let mut wait = |nav: &mut Navigator, want: u64| {
+        for _ in 0..400 {
+            t += 0.016;
+            frame(&ctx, nav, Vec::new(), t);
+            if shown(nav) == Some(want) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    };
+    assert!(wait(&mut nav, 0), "at rest: the first frame, got {:?}", shown(&nav));
+    // Parked a second into the clip (12 fps): frame 12.
+    let start = board.starts()[i].as_secs_f64();
+    nav.run("storyboard.seek", json!({ "seconds": start + 1.0 }));
+    assert!(wait(&mut nav, 12), "a second in, got {:?}", shown(&nav));
+}
+
+/// P2: playing across a video clip, the Viewer's frame keeps up with the playhead (read ahead on
+/// the idle cores), and pausing stops the read-ahead.
+#[test]
+fn playing_a_video_clip_keeps_its_frames_with_the_playhead() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let lib = lib.canonicalize().unwrap_or(lib);
+    assert!(nav.open_folder(&lib));
+    let video = lib.join("snow_clearing_flythrough.mp4");
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let (i, clip) = board
+        .clips
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.shot_type != assetcraft_storyboard::ShotType::Ttl && c.duration.as_secs_f64() >= 1.5)
+        .unwrap();
+    nav.run("storyboard.place", json!({ "asset": video.to_string_lossy(), "clip": clip.id.0 }));
+    let start = board.starts()[i].as_secs_f64();
+    nav.run("storyboard.seek", json!({ "seconds": start }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    nav.run("storyboard.play", json!({}));
+    // A second and a quarter of playback at 60 frames a second, the decoders given real time.
+    let mut shown = Vec::new();
+    for _ in 0..75 {
+        t += 1.0 / 60.0;
+        frame(&ctx, &mut nav, Vec::new(), t);
+        std::thread::sleep(std::time::Duration::from_millis(4));
+        shown.push(nav.state.storyboard.video_tex.0.get(&video).map_or(0, |(i, _)| *i));
+    }
+    let at = crate::strip_view::playhead(&mut nav, &ctx).as_secs_f64() - start;
+    let want = (at * 12.0).floor() as u64;
+    let last = *shown.last().unwrap_or(&0);
+    assert!(last + 2 >= want && last <= want, "the frame keeps up: showing {last}, playhead at frame {want}");
+    assert!(shown.windows(2).all(|w| w[0] <= w[1]), "frames only move forward while playing: {shown:?}");
+    nav.run("storyboard.pause", json!({}));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.05);
+    assert!(!nav.session().transport().playing);
+}

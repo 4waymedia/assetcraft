@@ -1,0 +1,17 @@
+[package]
+name = "assetcraft-media"
+description = "Video frames from media files, decoded in the background with FilmCraft's codecs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+filmcraft-codecs = { workspace = true }
+filmcraft-media = { workspace = true }
+filmcraft-time = { workspace = true }

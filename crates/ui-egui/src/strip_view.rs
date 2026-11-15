@@ -184,6 +184,16 @@ pub(crate) fn free_step(secs: f64, px: f32) -> f64 {
     (secs * per).round() / per
 }
 
+/// The Viewer's video textures (P1): per file, the frame number shown and its texture.
+#[derive(Default)]
+pub(crate) struct VideoTextures(pub(crate) std::collections::HashMap<std::path::PathBuf, (u64, egui::TextureHandle)>);
+
+impl std::fmt::Debug for VideoTextures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VideoTextures({} files)", self.0.len())
+    }
+}
+
 /// The snap line's colour: apart from the selection blue and the playhead.
 const SNAP_LINE: Color32 = Color32::from_rgb(0xff, 0xc8, 0x3d);
 
@@ -257,6 +267,8 @@ pub(crate) struct SbUi {
     pub(crate) fine_scrub: Option<f64>,
     /// A volume-line drag in progress (V3).
     pub(crate) vol_drag: Option<VolDrag>,
+    /// The Viewer's video frames (P1): the frame number shown per file, and its texture.
+    pub(crate) video_tex: VideoTextures,
     /// The zoomed waveform's last window per music piece: `(key, peaks)` (Z1).
     pub(crate) wave_windows: std::collections::HashMap<usize, (String, Vec<(f32, f32)>)>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
@@ -700,10 +712,16 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
         if let Some(clip) = board.clip_at(at).cloned() {
             let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
             let elapsed = at.as_secs_f64() - start.as_secs_f64();
+            if playing {
+                read_ahead(nav, ui, frame, board, &clip, elapsed);
+            } else {
+                nav.session.video_stop_ahead();
+            }
             show_section(nav, ui, frame, board, &clip, index, elapsed);
         }
         return;
     }
+    nav.session.video_stop_ahead();
     if fill {
         fill_brief(nav, ui, frame, board);
         return;
@@ -882,6 +900,10 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
         return;
     }
     match clip.asset_ids.first() {
+        // A video plays its own frames (P1): the frame `elapsed` seconds in, the first at rest.
+        Some(hero)
+            if assetcraft_engine::is_video(Path::new(&hero.0))
+                && show_video(nav, ui, frame, Path::new(&hero.0), elapsed) => {}
         Some(hero) => {
             let still = match thumb(nav, ui, Path::new(&hero.0), 512.0, index) {
                 Cell::Ready(texture, size) => Some((texture, size)),
@@ -915,6 +937,75 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
         }
     }
     crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
+}
+
+/// How far ahead of the playhead playback decodes video (P2).
+const READ_AHEAD_SECS: f64 = 3.0;
+
+/// While playing (P2): read ahead in the video under the playhead, and in its last second switch
+/// to the next clip's opening so the first frame after the cut is ready.
+fn read_ahead(nav: &Navigator, ui: &Ui, frame: Rect, board: &Storyboard, clip: &Clip, elapsed: f64) {
+    let side = video_side(ui, frame);
+    let video = |c: &Clip| {
+        c.asset_ids.first().map(|a| Path::new(a.0.as_str()).to_path_buf()).filter(|p| assetcraft_engine::is_video(p))
+    };
+    let left = clip.duration.as_secs_f64() - elapsed;
+    let next = board.index_of(clip.id).and_then(|i| board.clips.get(i + 1));
+    match (video(clip), next.and_then(video)) {
+        (_, Some(next)) if left <= 1.0 => nav.session.video_ahead(&next, 0.0, 1.0, side),
+        (Some(this), _) => {
+            nav.session.video_ahead(&this, elapsed.max(0.0), READ_AHEAD_SECS.min(left.max(0.0) + 0.1), side)
+        }
+        _ => nav.session.video_stop_ahead(),
+    }
+}
+
+/// The size video frames are decoded at for the Viewer `frame` (its longest side in pixels).
+fn video_side(ui: &Ui, frame: Rect) -> u32 {
+    (frame.width().max(frame.height()) * ui.ctx().pixels_per_point()).clamp(64.0, 1920.0) as u32
+}
+
+/// The video at `path`, `elapsed` seconds in (`f64::INFINITY`: at rest, its first frame), into
+/// `frame` (P1): the decoded frame if ready, else the nearest one decoded so far while the
+/// worker catches up. `false` when there is nothing to show yet (the caller shows the poster) or
+/// the file can't be played.
+fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, elapsed: f64) -> bool {
+    let secs = if elapsed.is_finite() { elapsed.max(0.0) } else { 0.0 };
+    let side = video_side(ui, frame);
+    let shown = match nav.session.video_frame(path, secs, side) {
+        assetcraft_engine::VideoLookup::Ready(f) => Some(f),
+        assetcraft_engine::VideoLookup::Pending(near) => {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(15));
+            near
+        }
+        assetcraft_engine::VideoLookup::Failed(_) => None,
+    };
+    let Some(f) = shown else { return false };
+    let size = [f.width as usize, f.height as usize];
+    let key = path.to_path_buf();
+    let texture = match nav.state.storyboard.video_tex.0.get_mut(&key) {
+        Some((index, tex)) if *index == f.index && tex.size() == size => tex.clone(),
+        Some((index, tex)) => {
+            tex.set(egui::ColorImage::from_rgba_unmultiplied(size, &f.rgba), egui::TextureOptions::LINEAR);
+            *index = f.index;
+            tex.clone()
+        }
+        None => {
+            if nav.state.storyboard.video_tex.0.len() >= 8 {
+                nav.state.storyboard.video_tex.0.clear();
+            }
+            let tex = ui.ctx().load_texture(
+                format!("sb-video-{}", key.display()),
+                egui::ColorImage::from_rgba_unmultiplied(size, &f.rgba),
+                egui::TextureOptions::LINEAR,
+            );
+            nav.state.storyboard.video_tex.0.insert(key, (f.index, tex.clone()));
+            tex
+        }
+    };
+    let target = contain(frame, vec2(f.width as f32, f.height as f32));
+    ui.painter().image(texture.id(), target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    true
 }
 
 /// Quick fill Viewer: the target clip's brief in a dashed frame, or "All n clips filled" with
