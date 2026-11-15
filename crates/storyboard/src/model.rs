@@ -301,6 +301,14 @@ pub struct Track {
     /// Detected beats, ascending (may be empty: then beats are `bpm` from zero).
     #[serde(default)]
     pub beat_grid: Vec<Ticks>,
+    /// Bar starts on the Cut, ascending, from the cue map (R-C6). Empty on boards made before
+    /// them: then bars are counted in 4/4 from the first beat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub downbeats: Vec<Ticks>,
+    /// The song's hits on the Cut (drops, accents, bass hits…), ascending, from the cue map
+    /// (R-C6): the cut tools snap to the strong ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hits: Vec<TrackHit>,
     /// Song sections, ascending and non-overlapping.
     #[serde(default)]
     pub song_sections: Vec<SongSection>,
@@ -355,6 +363,18 @@ impl Storyboard {
         }
         out
     }
+}
+
+/// A hit in the song, on the Cut (R-C6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrackHit {
+    /// Where.
+    pub at: Ticks,
+    /// The cue map's kind (`drop`, `hit`, `accent`, `bassHit`, `swellPeak`, …).
+    pub kind: String,
+    /// Strength, 0..=1.
+    pub strength: f32,
 }
 
 /// The song level's range in dB: a little louder, or down to almost silent.

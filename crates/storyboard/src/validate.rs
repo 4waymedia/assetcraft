@@ -227,6 +227,22 @@ impl Storyboard {
             {
                 return Err(BoardError::Invalid("beat grid is not ascending within the track".into()));
             }
+            count("downbeats", track.downbeats.len(), l.max_beats)?;
+            if track.downbeats.windows(2).any(|w| w[0] >= w[1])
+                || track.downbeats.last().is_some_and(|b| *b > track.duration)
+            {
+                return Err(BoardError::Invalid("downbeats are not ascending within the track".into()));
+            }
+            count("hits", track.hits.len(), l.max_beats)?;
+            for h in &track.hits {
+                text("hit kind", &h.kind, l)?;
+                if h.at > track.duration || !(0.0..=1.0).contains(&h.strength) {
+                    return Err(BoardError::Invalid("a hit is outside the track or its strength isn't 0..1".into()));
+                }
+            }
+            if track.hits.windows(2).any(|w| w[0].at > w[1].at) {
+                return Err(BoardError::Invalid("hits are not in order".into()));
+            }
             count("song sections", track.song_sections.len(), l.max_song_sections)?;
             let mut prev_end = Ticks::ZERO;
             for s in &track.song_sections {

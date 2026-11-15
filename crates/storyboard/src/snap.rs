@@ -1,7 +1,8 @@
 //! Snapping for the cut tools (`docs/design/cut-editing.md` C5): where a dragged cut, clip edge or
 //! playhead lands. Shaped like FilmCraft's timeline snapping (`filmcraft` `crates/ui-egui/src/
 //! panels/timeline/snap.rs` at `v0.20.1`: candidates within `SNAP_PX` on screen, nearest wins, ties
-//! keep candidate order), widened with the music under the Cut: song sections, bars and beats.
+//! keep candidate order), widened with the music under the Cut: song sections, the song's strong
+//! hits, bars and beats (R-C6: bars from the cue map's downbeats when the board has them).
 //!
 //! Pure: the Strip calls it while dragging, tests call it without a UI. Only candidates near the
 //! asked time are looked at, so a six-hour track costs the same as a short one.
@@ -13,9 +14,12 @@ use crate::time::{TICKS_PER_SECOND, Ticks};
 pub const SNAP_PX: f32 = 9.0;
 /// Beats are candidates only when at least this far apart on screen; closer, only bars are.
 pub const BEAT_MIN_PX: f32 = 18.0;
-/// Beats in a bar. The board's track keeps beats and sections but not the cue map's downbeats or
-/// meter yet (cut-editing.md R-C6), so bars are counted in 4/4 from the first beat.
+/// Beats in a bar on a board without the cue map's downbeats (made before R-C6): bars are counted
+/// in 4/4 from the first beat.
 pub const BEATS_PER_BAR: u64 = 4;
+/// The weakest hit that is a candidate (the cue map's strength, 0..=1): drops and big hits, not
+/// every accent.
+pub const HIT_MIN_STRENGTH: f32 = 0.5;
 
 /// What a time snapped to. The order is the tie order: on equal distance the earlier kind wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -26,6 +30,8 @@ pub enum SnapKind {
     Playhead,
     /// The start of a song section.
     Section,
+    /// A strong hit in the song (a drop, a hit, a bass hit…).
+    Hit,
     /// The first beat of a bar.
     Bar,
     /// A beat.
@@ -39,7 +45,7 @@ pub struct Snapped {
     pub at: Ticks,
     /// What it snapped to.
     pub kind: SnapKind,
-    /// "cut", "playhead", "Chorus", "bar 17", "bar 17 · beat 3".
+    /// "cut", "playhead", "Chorus", "drop", "bar 17", "bar 17 · beat 3".
     pub label: String,
 }
 
@@ -52,7 +58,7 @@ pub struct SnapOptions<'a> {
     pub playhead: Option<Ticks>,
     /// Cuts that are not candidates: the one being dragged, or every cut a resize moves.
     pub exclude: &'a [Ticks],
-    /// Whether the music (sections, bars, beats) is a candidate.
+    /// Whether the music (sections, hits, bars, beats) is a candidate.
     pub music: bool,
 }
 
@@ -115,9 +121,46 @@ pub fn snap(board: &Storyboard, t: Ticks, o: &SnapOptions<'_>) -> Option<Snapped
         for s in &track.song_sections {
             n.offer(s.start, SnapKind::Section, || s.name.clone());
         }
+        // The strong hits near `t` (ascending by time).
+        let hits = &track.hits;
+        let at = hits.partition_point(|h| h.at.0 < t.0);
+        for h in &hits[at.saturating_sub(8)..at.saturating_add(8).min(hits.len())] {
+            if h.strength >= HIT_MIN_STRENGTH {
+                n.offer(h.at, SnapKind::Hit, || hit_label(&h.kind));
+            }
+        }
         let beat = track.bpm.beat().0;
         let beats_too = beat as f64 / tps * f64::from(o.px_per_sec) >= f64::from(BEAT_MIN_PX);
-        if track.beat_grid.is_empty() {
+        if !track.downbeats.is_empty() {
+            // The song's own bars (R-C6), and its beats numbered within them.
+            let downs = &track.downbeats;
+            let at = downs.partition_point(|d| d.0 < t.0);
+            for (i, d) in
+                downs.iter().enumerate().take(at.saturating_add(2).min(downs.len())).skip(at.saturating_sub(2))
+            {
+                n.offer(*d, SnapKind::Bar, || format!("bar {}", i + 1));
+            }
+            let grid = &track.beat_grid;
+            if beats_too {
+                let at = grid.partition_point(|b| b.0 < t.0);
+                let to = at.saturating_add(BEATS_PER_BAR as usize).min(grid.len());
+                for (i, b) in grid.iter().enumerate().take(to).skip(at.saturating_sub(BEATS_PER_BAR as usize)) {
+                    if downs.binary_search(b).is_ok() {
+                        continue;
+                    }
+                    n.offer(*b, SnapKind::Beat, || {
+                        let bar = downs.partition_point(|d| d.0 <= b.0);
+                        match bar.checked_sub(1).and_then(|k| downs.get(k)) {
+                            Some(d) => {
+                                let first = grid.partition_point(|x| x.0 < d.0);
+                                format!("bar {bar} · beat {}", i.saturating_sub(first) + 1)
+                            }
+                            None => format!("beat {}", i + 1),
+                        }
+                    });
+                }
+            }
+        } else if track.beat_grid.is_empty() {
             // Beats every `beat` from zero: only the ones around `t` can be in reach.
             let near = t.0 / beat;
             for i in near.saturating_sub(BEATS_PER_BAR)..=near.saturating_add(BEATS_PER_BAR) {
@@ -135,6 +178,20 @@ pub fn snap(board: &Storyboard, t: Ticks, o: &SnapOptions<'_>) -> Option<Snapped
         }
     }
     n.best.map(|(_, kind, at, label)| Snapped { at, kind, label })
+}
+
+/// A hit's label from the cue map's kind: `bassHit` → "bass hit", `drop` → "drop".
+fn hit_label(kind: &str) -> String {
+    let mut out = String::with_capacity(kind.len() + 2);
+    for c in kind.chars() {
+        if c.is_uppercase() {
+            out.push(' ');
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    if out.is_empty() { "hit".into() } else { out }
 }
 
 #[cfg(test)]
@@ -159,6 +216,8 @@ mod tests {
             beat_grid: Vec::new(),
             song_sections: vec![SongSection { name: "Chorus".into(), start: secs(10.0), end: secs(20.0) }],
             edit: None,
+            downbeats: Vec::new(),
+            hits: Vec::new(),
             level_db: 0,
             title_db: crate::model::TITLE_DB_DEFAULT,
             credit: None,
@@ -237,5 +296,38 @@ mod tests {
         let cut = first_cut(&b);
         let o = SnapOptions { exclude: &[cut], music: false, ..opts(44.0) };
         assert_eq!(snap(&b, Ticks(cut.0 + secs(0.05).0), &o), None);
+    }
+
+    /// R-C6: with the cue map's downbeats, bars are the song's own (here 3/4, which counting in
+    /// 4/4 would get wrong) and beats are numbered within them; strong hits are candidates, weak
+    /// ones aren't, and a hit wins a tie with a beat.
+    #[test]
+    fn the_songs_own_bars_and_strong_hits() {
+        use crate::model::TrackHit;
+        let mut b = music_board();
+        let t = b.track.as_mut().unwrap();
+        t.song_sections.clear();
+        // 3/4 at 0.5 s a beat: beats every 0.5 s from 0, bars every 1.5 s.
+        t.beat_grid = (0..40).map(|i| secs(f64::from(i) * 0.5)).collect();
+        t.downbeats = (0..13).map(|i| secs(f64::from(i) * 1.5)).collect();
+        t.hits = vec![
+            TrackHit { at: secs(5.25), kind: "drop".into(), strength: 0.9 },
+            TrackHit { at: secs(7.0), kind: "bassHit".into(), strength: 0.8 },
+            TrackHit { at: secs(8.25), kind: "accent".into(), strength: 0.2 },
+        ];
+        let s = snap(&b, secs(4.55), &opts(44.0)).unwrap();
+        assert_eq!((s.at, s.kind, s.label.as_str()), (secs(4.5), SnapKind::Bar, "bar 4"), "3/4: bar 4 at 4.5 s");
+        let s = snap(&b, secs(5.05), &opts(44.0)).unwrap();
+        assert_eq!((s.at, s.label.as_str()), (secs(5.0), "bar 4 · beat 2"));
+        // A drop between beats pulls the cut to it.
+        let s = snap(&b, secs(5.3), &opts(44.0)).unwrap();
+        assert_eq!((s.at, s.kind, s.label.as_str()), (secs(5.25), SnapKind::Hit, "drop"));
+        // On a beat, the hit wins the tie (bar 5 · beat 2 at 7.0 s), labelled from its kind.
+        let s = snap(&b, secs(7.05), &opts(44.0)).unwrap();
+        assert_eq!((s.kind, s.label.as_str()), (SnapKind::Hit, "bass hit"));
+        // A weak accent is not a candidate: the beat at 8.0 s is nearer than nothing.
+        let s = snap(&b, secs(8.2), &opts(44.0)).unwrap();
+        assert_eq!((s.at, s.kind), (secs(8.0), SnapKind::Beat));
+        assert_eq!(hit_label(""), "hit");
     }
 }

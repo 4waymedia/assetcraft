@@ -44,6 +44,8 @@ fn sample() -> Storyboard {
         beat_grid: vec![],
         song_sections: vec![],
         edit: None,
+        downbeats: Vec::new(),
+        hits: Vec::new(),
         level_db: 0,
         title_db: crate::model::TITLE_DB_DEFAULT,
         credit: None,
@@ -1622,4 +1624,29 @@ fn title_windows_and_the_title_level() {
         Storyboard::from_json(text.replace("\"titleDb\":0", "\"titleDb\":3").as_bytes()).is_err(),
         "above 0 dB is refused"
     );
+}
+
+/// R-C6: a board made from a song carries the cue map's downbeats and hits on the Cut, through
+/// its edit (a looped chorus carries its drop every time round), and keeps them in the file.
+#[test]
+fn a_song_board_carries_the_songs_downbeats_and_hits() {
+    use cue::{BAR, SR};
+    let m = cue::map();
+    let tk = |f: u64| Ticks::from_secs_f64(f as f64 / SR as f64).unwrap();
+    let (board, _) = generate(&m, &cue::opts(Pacing::Trailer, None)).unwrap();
+    let track = board.track.as_ref().unwrap();
+    assert_eq!(track.downbeats.len(), 64, "every bar of the whole song");
+    assert_eq!(track.downbeats[24], tk(24 * BAR));
+    assert_eq!(track.hits.len(), 2);
+    assert_eq!((track.hits[0].at, track.hits[0].kind.as_str()), (tk(24 * BAR), "drop"));
+    let back = Storyboard::from_json(serde_json::to_string(&board).unwrap().as_bytes()).unwrap();
+    assert_eq!(back.track.unwrap().hits, track.hits, "kept in the file");
+    // The chorus looped under 100 s: its drop lands at the top of every loop.
+    let mut b = Storyboard::new("Loop");
+    b.scenes.push(Scene::new(SceneId(1), None));
+    b.clips.push(Clip::new(ClipId(1), SceneId(1), ShotType::Ms, Ticks::from_secs(100).unwrap()));
+    let (looped, _) = track_under(&m, "/music/song.wav", &b, MusicMode::ChorusLoop);
+    let drops: Vec<f64> = looped.hits.iter().filter(|h| h.kind == "drop").map(|h| h.at.as_secs_f64()).collect();
+    assert!(drops.len() >= 3 && drops[0] == 0.0, "a drop each time round: {drops:?}");
+    assert!(looped.downbeats.windows(2).all(|w| w[0] < w[1]));
 }

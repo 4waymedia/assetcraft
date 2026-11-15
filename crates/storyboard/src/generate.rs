@@ -22,7 +22,8 @@ use std::fmt;
 
 use crate::cuemap::{CueMap, Fit, FitMode, Timeline};
 use crate::model::{
-    AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Storyboard, Track, TrackEdit, Transition,
+    AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Storyboard, Track, TrackEdit, TrackHit,
+    Transition,
 };
 use crate::shape::{ResolvedShape, SceneTransition, Shape, Titles, pick_shot};
 use crate::text::{TextAnimation, TextKind, TextPosition, TextStyle, TextTheme, set_text_kind};
@@ -335,6 +336,14 @@ pub fn fit_for(cue: &CueMap, seconds: Option<u32>, mode: Option<FitMode>) -> Res
     }
 }
 
+/// The cue map's hits on the Cut, as the board keeps them (R-C6).
+fn track_hits(cue: &CueMap, tl: &crate::cuemap::Timeline) -> Vec<TrackHit> {
+    tl.hits
+        .iter()
+        .map(|h| TrackHit { at: cue.ticks(h.frame), kind: h.kind.clone(), strength: h.strength.clamp(0.0, 1.0) })
+        .collect()
+}
+
 /// The audio edit that plays `fit` of the track (`None` = the whole track, unedited).
 pub fn track_edit(cue: &CueMap, fit: Option<&Fit>) -> Option<TrackEdit> {
     edit_of(cue, fit, &cue.timeline(fit))
@@ -358,6 +367,8 @@ pub fn track_from_cue(
         bpm: Bpm::new(cue.bpm).unwrap_or(Bpm::DEFAULT),
         duration: cue.ticks(tl.length),
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
+        downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
+        hits: track_hits(cue, &tl),
         song_sections: tl
             .sections
             .iter()
@@ -736,6 +747,8 @@ pub fn track_under(cue: &CueMap, track_path: &str, board: &Storyboard, music: Mu
         bpm: Bpm::new(cue.bpm).unwrap_or(Bpm::DEFAULT),
         duration: cue.ticks(tl.length),
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
+        downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
+        hits: track_hits(cue, &tl),
         song_sections: tl
             .sections
             .iter()
@@ -967,6 +980,8 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         bpm: Bpm::new(cue.bpm).unwrap_or(Bpm::DEFAULT),
         duration: cue.ticks(tl.length),
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
+        downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
+        hits: track_hits(cue, &tl),
         song_sections: scenes
             .iter()
             .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })

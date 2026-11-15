@@ -53,7 +53,7 @@ pub use generate::{
 pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_RANGE, VOICE_DB_RANGE};
 pub use model::{
     AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard, TITLE_DB_DEFAULT,
-    TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, Transition, Voiceover,
+    TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition, Voiceover,
 };
 pub use motion::{
     Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, STILL_PAN_TRAVEL,
@@ -62,7 +62,7 @@ pub use motion::{
 pub use recut::{RecutOptions, RecutReport, recut};
 pub use sample::sample;
 pub use shape::{ResolvedShape, SceneTransition, Shape, Titles};
-pub use snap::{BEAT_MIN_PX, BEATS_PER_BAR, SNAP_PX, SnapKind, SnapOptions, Snapped, snap};
+pub use snap::{BEAT_MIN_PX, BEATS_PER_BAR, HIT_MIN_STRENGTH, SNAP_PX, SnapKind, SnapOptions, Snapped, snap};
 pub use template::{
     BUNDLED, CREDITS_NAME, STEP_PATTERN, STEP_SECS, STEP_SECS_RANGE, STEPS_RANGE, TITLE_SECS, TemplateInfo,
     bundled as bundled_template, bundled_sized as bundled_template_sized, bundled_with as bundled_template_with,

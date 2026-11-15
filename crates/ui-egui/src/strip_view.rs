@@ -30,8 +30,8 @@
 //!   follows the pointer while dragging ([`ResizeDrag`]).
 //! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
 //!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
-//!   Titles (B-R3, `storyboard.titleLevel`) sets how far the music dips under title cards.
-//!   Beside them, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
+//!   The dip under title cards (B-R3) keeps its default here; `storyboard.titleLevel` sets it.
+//!   Beside it, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
 //!   here, at once and saved; the export doesn't use it.
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
@@ -89,6 +89,54 @@ pub(crate) struct ResizeDrag {
     pub(crate) secs: f64,
     /// Where the clip's end snapped (seconds in the Cut), for the snap line (C5).
     pub(crate) snapped: Option<f64>,
+}
+
+/// A cut being dragged (C1b): the clip on its left, where the cut was, and where it would go
+/// (seconds in the Cut), with whether that place is a snap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CutDrag {
+    pub(crate) left: u32,
+    pub(crate) from: f64,
+    pub(crate) to: f64,
+    pub(crate) snapped: bool,
+}
+
+/// Width of a cut's grab handle in the marker row.
+const CUT_HANDLE_W: f32 = 10.0;
+
+/// Where a dragged cut lands (cut-editing.md C1b + C5): `want` seconds, snapped (unless
+/// `snapping` is off) to the nearest cut, playhead, section, bar or beat within reach — not to
+/// itself — and kept 0.5 s inside both neighbours, as `storyboard.roll` would limit it.
+pub(crate) fn snap_cut(
+    board: &Storyboard,
+    left: usize,
+    want: f64,
+    playhead: Ticks,
+    snapping: bool,
+) -> (f64, Option<assetcraft_storyboard::Snapped>) {
+    let starts = board.starts();
+    let min = assetcraft_engine::MIN_CLIP_SECS;
+    let (Some(a), Some(right)) = (starts.get(left), board.clips.get(left + 1)) else { return (want, None) };
+    let cut = starts.get(left + 1).copied().unwrap_or(Ticks::ZERO);
+    let lo = a.as_secs_f64() + min;
+    let hi = cut.as_secs_f64() + right.duration.as_secs_f64() - min;
+    if hi < lo {
+        return (cut.as_secs_f64(), None);
+    }
+    let free = ((want * 100.0).round() / 100.0).clamp(lo, hi);
+    if !snapping {
+        return (free, None);
+    }
+    let o = assetcraft_storyboard::SnapOptions {
+        px_per_sec: PX_PER_SEC,
+        playhead: Some(playhead),
+        exclude: &[cut],
+        music: true,
+    };
+    match Ticks::from_secs_f64(want.max(0.0)).and_then(|t| assetcraft_storyboard::snap(board, t, &o)) {
+        Some(s) if (lo..=hi).contains(&s.at.as_secs_f64()) => (s.at.as_secs_f64(), Some(s)),
+        _ => (free, None),
+    }
 }
 
 /// The snap line's colour: apart from the selection blue and the playhead.
@@ -155,6 +203,8 @@ pub(crate) struct SbUi {
     pub(crate) resize_drag: Option<ResizeDrag>,
     /// The snap line's label while a resize drag is snapped ("bar 17 · beat 3").
     pub(crate) snap_label: Option<String>,
+    /// A cut mid-drag on the marker row (C1b), committed as one `storyboard.roll` on release.
+    pub(crate) cut_drag: Option<CutDrag>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
     pub(crate) motion_player: Option<crate::motion_view::MotionPlayer>,
 }
@@ -213,18 +263,14 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
     }
     ui.label(RichText::new(format!("{} / {}", at.timecode(), total.timecode())).font(FontId::monospace(12.0)));
     // The song's level in the mix (V1): one `storyboard.trackLevel` when the slider is let go.
-    if let Some((level, titles)) =
-        nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| (t.level_db, t.title_db))
-    {
+    // Editing needs two levels only (Paul, 2026-11-14): the song's volume and the listening
+    // volume. The dip under title cards stays at its default; `storyboard.titleLevel` sets it
+    // from the CLI/MCP.
+    if let Some(level) = nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| t.level_db) {
         ui.separator();
         let range = assetcraft_storyboard::TRACK_DB_RANGE;
         if let Some(db) = crate::inset_view::level_slider(ui, ("song", 0), "Song", level, range) {
             nav.run("storyboard.trackLevel", json!({ "db": db }));
-        }
-        // The dip under title cards (B-R3).
-        let range = assetcraft_storyboard::TITLE_DB_RANGE;
-        if let Some(db) = crate::inset_view::level_slider(ui, ("titles", 0), "Titles", titles, range) {
-            nav.run("storyboard.titleLevel", json!({ "db": db }));
         }
     }
     // The listening volume (V2): how loud it plays here, at once and saved; not exported.
@@ -915,6 +961,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let snapping = nav.session.snapping_on();
     let mut snap_label: Option<String> = nav.state.storyboard.snap_label.clone();
     let mut resized: Option<ResizeDrag> = None;
+    let mut cut_drag: Option<CutDrag> = nav.state.storyboard.cut_drag;
+    let mut rolled: Option<CutDrag> = None;
     let ctx = ui.ctx().clone();
     // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
@@ -1017,6 +1065,59 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                     let edge = Rect::from_min_max(pos2(rect.right() - 3.0, rect.top() + 4.0), rect.max);
                     ui.painter().rect_filled(edge, 0, SELECT);
                 }
+                // The cut after this clip (C1b): a handle in the marker row; dragging it moves the
+                // cut, the clips either side trading length (FilmCraft's roll), nothing after it.
+                if n + 1 < board.clips.len() && resize.is_none() {
+                    let cx = x + w;
+                    let handle = Rect::from_center_size(
+                        pos2(cx, area.top() + RULER_H + MARKER_H / 2.0),
+                        vec2(CUT_HANDLE_W, MARKER_H),
+                    );
+                    let r = ui.interact(handle, strip_clip_id(id).with("cut"), Sense::drag());
+                    let r = r.on_hover_cursor(egui::CursorIcon::ResizeColumn).on_hover_text(if snapping {
+                        "Drag to move this cut: the clips either side trade length, nothing after it moves (snaps to the song's beats; Shift for a free drag)"
+                    } else {
+                        "Drag to move this cut: the clips either side trade length (snapping is off: S turns it on)"
+                    });
+                    let from = f64::from((cx - left) / PX_PER_SEC);
+                    if r.drag_started() {
+                        cut_drag = Some(CutDrag { left: id.0, from, to: from, snapped: false });
+                    }
+                    if r.dragged()
+                        && let Some(pointer) = r.interact_pointer_pos()
+                    {
+                        let want = f64::from((pointer.x - left) / PX_PER_SEC);
+                        let (to, snapped) = snap_cut(board, n, want, at, snapping && !shift);
+                        snap_label = snapped.as_ref().map(|s| s.label.clone());
+                        cut_drag = Some(CutDrag { left: id.0, from, to, snapped: snapped.is_some() });
+                    }
+                    if r.drag_stopped() {
+                        rolled = cut_drag.take().filter(|d| d.left == id.0);
+                    }
+                    let active = r.hovered() || cut_drag.is_some_and(|d| d.left == id.0);
+                    let tip = handle.center_bottom();
+                    let tri = vec![tip, tip + vec2(-4.0, -7.0), tip + vec2(4.0, -7.0)];
+                    let fill = if active { SELECT } else { weak };
+                    painter.add(egui::Shape::convex_polygon(tri, fill, Stroke::NONE));
+                }
+            }
+            // A cut being dragged: where it would go, across the strip, with how far it moves.
+            if let Some(d) = cut_drag {
+                let x = left + d.to as f32 * PX_PER_SEC;
+                let color = if d.snapped { SNAP_LINE } else { SELECT };
+                painter.vline(x, area.top()..=strip_top + STRIP_H, Stroke::new(2.0, color));
+                let moved = d.to - d.from;
+                let text = match (&snap_label, d.snapped) {
+                    (Some(l), true) => format!("{l} · {moved:+.2} s"),
+                    _ => format!("{moved:+.2} s"),
+                };
+                painter.text(
+                    pos2(x + 4.0, area.top() + RULER_H + 2.0),
+                    Align2::LEFT_TOP,
+                    text,
+                    FontId::proportional(10.0),
+                    color,
+                );
             }
             // The snap line (C5): where the dragged end snapped, labelled in the marker row.
             if let Some(secs) = resize.and_then(|d| d.snapped) {
@@ -1044,12 +1145,17 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             }
         });
     nav.state.storyboard.resize_drag = resize;
-    nav.state.storyboard.snap_label = snap_label.filter(|_| resize.is_some_and(|d| d.snapped.is_some()));
+    nav.state.storyboard.cut_drag = cut_drag;
+    nav.state.storyboard.snap_label =
+        snap_label.filter(|_| resize.is_some_and(|d| d.snapped.is_some()) || cut_drag.is_some_and(|d| d.snapped));
     if let Some((secs, how)) = scrub {
         scrub_to(nav, secs, how, playing);
     }
     if let Some(d) = resized {
         commit_resize(nav, d);
+    }
+    if let Some(d) = rolled {
+        commit_roll(nav, d);
     }
     for (cmd, params) in inset_cmds {
         nav.run(cmd, params);
@@ -1455,6 +1561,15 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
             Stroke::new(1.5, Color32::from_gray(0xcc)),
         );
     }
+}
+
+/// A cut drag released (C1b): one `storyboard.roll {left, to}` — one undo step — unless it ends
+/// where it started.
+pub(crate) fn commit_roll(nav: &mut Navigator, d: CutDrag) {
+    if (d.to - d.from).abs() < 1e-3 {
+        return;
+    }
+    nav.run("storyboard.roll", json!({ "left": d.left, "to": d.to }));
 }
 
 /// End a length drag (SR1): one `storyboard.resize` when the length moved, nothing otherwise.

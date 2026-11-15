@@ -338,9 +338,6 @@ impl CueMap {
             at = at.saturating_add(s[1].saturating_sub(s[0]));
         }
         let length = fit.map_or(at, |f| f.length_frames.min(at).max(1));
-        let map = |src: u64| -> Option<u64> {
-            segments.iter().zip(&offsets).find(|(s, _)| src >= s[0] && src < s[1]).map(|(s, o)| o + (src - s[0]))
-        };
         // Every segment maps its own points, so a source range played twice (a chorus loop,
         // SR3) carries its beats both times.
         let pts = |v: &[u64]| -> Vec<u64> {
@@ -381,11 +378,19 @@ impl CueMap {
         if let Some(last) = merged.last_mut() {
             last.end = length;
         }
-        let hits = self
-            .hits
-            .iter()
-            .filter_map(|h| map(h.frame).filter(|f| *f < length).map(|f| CueHit { frame: f, ..h.clone() }))
-            .collect();
+        // Hits per segment too, so a chorus played twice carries its drop both times (R-C6).
+        let mut hits: Vec<CueHit> = Vec::new();
+        for (s, o) in segments.iter().zip(&offsets) {
+            hits.extend(
+                self.hits
+                    .iter()
+                    .filter(|h| h.frame >= s[0] && h.frame < s[1])
+                    .map(|h| CueHit { frame: o + (h.frame - s[0]), ..h.clone() })
+                    .filter(|h| h.frame < length),
+            );
+        }
+        hits.sort_by_key(|h| h.frame);
+        hits.dedup_by_key(|h| h.frame);
         Timeline {
             length,
             beats: pts(&self.beats),

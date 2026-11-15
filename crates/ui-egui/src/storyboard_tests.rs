@@ -1749,3 +1749,51 @@ fn changing_the_plan_while_the_cut_plays_pauses_it() {
     assert!(nav.message().is_some_and(|m| m.contains("Paused")), "{:?}", nav.message());
     assert!(nav.state.storyboard.start.cursor >= 5.0, "the playhead rests where it was heard");
 }
+
+/// F3b-2 / C1b: dragging a cut's handle in the marker row is one `storyboard.roll`: the clips
+/// either side trade length, nothing after the cut moves; with snapping on it lands on a beat.
+#[test]
+fn dragging_a_cut_handle_moves_the_cut_and_snaps_to_the_beat() {
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    frame(&ctx, &mut nav, Vec::new(), t);
+    let lengths = |nav: &Navigator| -> Vec<f64> {
+        nav.session().storyboard().unwrap().clips.iter().map(|c| c.duration.as_secs_f64()).collect()
+    };
+    // The cards animate to new lengths a frame-step at a time: let them settle before aiming.
+    let settle = |nav: &mut Navigator, t: &mut f64| {
+        for _ in 0..30 {
+            *t += 0.05;
+            frame(&ctx, nav, Vec::new(), *t);
+        }
+    };
+    let px = crate::strip_view::PX_PER_SEC;
+    let before = lengths(&nav);
+    // Snapping off: the cut after clip #02 moves exactly the dragged distance (to 0.01 s).
+    nav.run("storyboard.snapping", json!({ "on": false }));
+    let c2 = strip_rect(&ctx, 2);
+    let handle = Pos2::new(c2.right() + 1.0, c2.top() - 9.0);
+    drag(&ctx, &mut nav, handle, handle + egui::vec2(px, 0.0), &mut t);
+    let after = lengths(&nav);
+    assert!((after[1] - before[1] - 1.0).abs() < 0.02, "clip #02 grew a second: {} → {}", before[1], after[1]);
+    assert!((before[2] - after[2] - 1.0).abs() < 0.02, "clip #03 gave it up");
+    assert_eq!(after[3..], before[3..], "nothing after the cut moved");
+    assert!(nav.state.storyboard.cut_drag.is_none(), "the drag ended");
+    nav.run("storyboard.undo", json!({}));
+    assert_eq!(lengths(&nav), before, "one undo step puts it back");
+    // Snapping on: aimed just past a beat, the cut lands on it (the sample's tempo from 0:00).
+    nav.run("storyboard.snapping", json!({ "on": true }));
+    settle(&mut nav, &mut t);
+    let board = nav.session().storyboard().unwrap().clone();
+    let beat = board.track.as_ref().unwrap().bpm.beat().as_secs_f64();
+    let cut = board.starts()[2].as_secs_f64();
+    let target = ((cut + 1.0) / beat).round() * beat;
+    let c2 = strip_rect(&ctx, 2);
+    let handle = Pos2::new(c2.right() + 1.0, c2.top() - 9.0);
+    let aim = handle + egui::vec2(((target + 0.05 - cut) as f32) * px, 0.0);
+    drag(&ctx, &mut nav, handle, aim, &mut t);
+    let moved = nav.session().storyboard().unwrap().starts()[2].as_secs_f64();
+    assert!((moved - target).abs() < 1e-6, "on the beat: {moved} vs {target}");
+}
