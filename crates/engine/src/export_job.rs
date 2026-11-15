@@ -504,10 +504,10 @@ impl Job {
                     fade_out: e.fade_out.map(|[s, n]| (s, n)),
                     length: e.length_frames,
                 });
-                let level = track.level_db;
                 Some(
                     Program::new(Arc::new(decoded), edit.as_ref())
-                        .with_music_gain(assetcraft_audio::mix::db(f64::from(level)))
+                        .with_music_gain(song_gain(&self.board))
+                        .with_envelope(song_envelope(&self.board))
                         .with_dips(title_dips(&self.board)),
                 )
             }
@@ -594,6 +594,22 @@ pub(crate) struct Voice {
     pub(crate) voice_db: i8,
     /// A voiceover: duck only while it speaks (an inset ducks its whole section).
     pub(crate) speech: bool,
+}
+
+/// The song's volume line (V3) as the audio crate plays it: `None` when the board has no points
+/// (the song plays at its `level_db`), otherwise the points in Cut seconds, which then set the
+/// level everywhere.
+pub(crate) fn song_envelope(board: &Storyboard) -> Option<assetcraft_audio::Envelope> {
+    let track = board.track.as_ref().filter(|t| !t.volume.is_empty())?;
+    Some(assetcraft_audio::Envelope::new(track.volume.iter().map(|v| (v.at.as_secs_f64(), v.db))))
+}
+
+/// The song's level as a gain (V1), unless a volume line sets it (V3).
+pub(crate) fn song_gain(board: &Storyboard) -> f32 {
+    match &board.track {
+        Some(t) if t.volume.is_empty() => assetcraft_audio::mix::db(f64::from(t.level_db)),
+        _ => 1.0,
+    }
 }
 
 /// Where the music dips under the board's title cards, at its title level (B-R3): one dip per

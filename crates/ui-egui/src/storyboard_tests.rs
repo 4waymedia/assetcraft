@@ -1896,3 +1896,66 @@ fn zooming_the_strip_and_scrubbing_finely() {
     let moved = pos(&nav) - pressed;
     assert!((moved - 2.0 / FINE_SCRUB).abs() < 0.03, "a quarter speed: moved {moved} s for 2 s of drag");
 }
+
+/// V3 (Paul, 2026-11-15: "a horizontal line on the track where you can shift+click to add a
+/// point and then click the point and move up/down for volume"): the AUDIO row's volume line.
+#[test]
+fn the_volume_line_on_the_audio_row() {
+    use crate::strip_view::{PX_PER_SEC, line_db, vol_db, vol_y, volume_line_id};
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    for _ in 0..10 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    let row = ctx.read_response(volume_line_id()).expect("the volume line is drawn").rect;
+    let left = strip_rect(&ctx, 1).left() - 1.0;
+    let track = |nav: &Navigator| nav.session().storyboard().unwrap().track.clone().unwrap();
+    // The scale: 0 dB about two-thirds up, round trips, the floor is silence.
+    assert!((vol_db(vol_y(-6.0, row), row) + 6.0).abs() < 0.05);
+    assert!(vol_y(0.0, row) < row.center().y);
+    assert_eq!(vol_db(row.bottom(), row), -60.0);
+    // No points: dragging the line sets the song level.
+    let x = left + 3.0 * PX_PER_SEC;
+    let on = Pos2::new(x, vol_y(0.0, row));
+    drag(&ctx, &mut nav, on, Pos2::new(x, vol_y(-6.0, row)), &mut t);
+    assert_eq!(track(&nav).level_db, -6, "the song level");
+    assert!(track(&nav).volume.is_empty());
+    // Shift+click on the line: a point there, at the line's level.
+    let at = Pos2::new(left + 2.0 * PX_PER_SEC, vol_y(-6.0, row));
+    click_with(&ctx, &mut nav, at, Modifiers::SHIFT, &mut t);
+    let v = track(&nav).volume;
+    assert_eq!(v.len(), 1, "a point");
+    assert!((v[0].at.as_secs_f64() - 2.0).abs() < 0.05 && (v[0].db + 6.0).abs() < 0.01, "{v:?}");
+    let at2 = Pos2::new(left + 6.0 * PX_PER_SEC, vol_y(-6.0, row));
+    click_with(&ctx, &mut nav, at2, Modifiers::SHIFT, &mut t);
+    // Drag the second point down: a fade from -6 dB at 2 s to about -20 dB at 6 s.
+    drag(&ctx, &mut nav, at2, Pos2::new(at2.x, vol_y(-20.0, row)), &mut t);
+    let v = track(&nav).volume;
+    assert_eq!(v.len(), 2);
+    assert!((v[1].db + 20.0).abs() < 1.0, "pulled down: {v:?}");
+    let pts: Vec<(f64, f32)> = v.iter().map(|p| (p.at.as_secs_f64(), p.db)).collect();
+    assert!((line_db(&pts, 0.0, 4.0) - (v[0].db + v[1].db) / 2.0).abs() < 0.01, "a straight line between");
+    // Double-click the first point: gone.
+    let first = Pos2::new(left + v[0].at.as_secs_f64() as f32 * PX_PER_SEC, vol_y(v[0].db, row));
+    let press = |pressed| Event::PointerButton {
+        pos: first,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    for events in [
+        vec![Event::PointerMoved(first)],
+        vec![press(true)],
+        vec![press(false)],
+        vec![press(true)],
+        vec![press(false)],
+        vec![],
+    ] {
+        t += 0.05;
+        frame(&ctx, &mut nav, events, t);
+    }
+    assert_eq!(track(&nav).volume.len(), 1, "the double-clicked point is gone");
+}

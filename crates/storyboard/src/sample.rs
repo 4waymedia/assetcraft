@@ -110,6 +110,7 @@ pub fn sample() -> Storyboard {
         edit: None,
         downbeats: Vec::new(),
         hits: Vec::new(),
+        volume: Vec::new(),
         level_db: 0,
         title_db: crate::model::TITLE_DB_DEFAULT,
         credit: None,

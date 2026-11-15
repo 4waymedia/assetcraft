@@ -369,6 +369,7 @@ pub fn track_from_cue(
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
         downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
         hits: track_hits(cue, &tl),
+        volume: Vec::new(),
         song_sections: tl
             .sections
             .iter()
@@ -749,6 +750,7 @@ pub fn track_under(cue: &CueMap, track_path: &str, board: &Storyboard, music: Mu
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
         downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
         hits: track_hits(cue, &tl),
+        volume: Vec::new(),
         song_sections: tl
             .sections
             .iter()
@@ -982,6 +984,7 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         beat_grid: tl.beats.iter().map(|f| cue.ticks(*f)).collect(),
         downbeats: tl.downbeats.iter().map(|f| cue.ticks(*f)).collect(),
         hits: track_hits(cue, &tl),
+        volume: Vec::new(),
         song_sections: scenes
             .iter()
             .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })

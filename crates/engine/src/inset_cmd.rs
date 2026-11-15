@@ -454,3 +454,51 @@ pub(crate) fn sb_title_level(s: &mut Session, p: &Value) -> CmdResult {
     }
     Ok(json!({ "db": db, "message": message }))
 }
+
+/// `storyboard.volume {points: [[seconds, dB], …]}` (V3; Paul, 2026-11-15: "a horizontal line on
+/// the track where you can shift+click to add a point and then click the point and move up/down
+/// for volume"): the song's whole volume line, replacing the last one — sorted by time, a point
+/// at a time already taken replacing it, each level within `VOLUME_DB_RANGE` (the bottom is
+/// silence). `[]` clears it, back to the song level. One undo step; the same line again is none.
+/// Replies `{points, message}`.
+pub(crate) fn sb_volume(s: &mut Session, p: &Value) -> CmdResult {
+    let raw = p
+        .get("points")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CmdError::BadParams("`points` must be a list of [seconds, dB]".into()))?;
+    if raw.len() > assetcraft_storyboard::MAX_VOLUME_POINTS {
+        return Err(CmdError::BadParams(format!("at most {} points", assetcraft_storyboard::MAX_VOLUME_POINTS)));
+    }
+    let (lo, hi) = assetcraft_storyboard::VOLUME_DB_RANGE;
+    let mut points: Vec<assetcraft_storyboard::VolumePoint> = Vec::with_capacity(raw.len());
+    for q in raw {
+        let pair = q.as_array().filter(|a| a.len() == 2);
+        let (Some(t), Some(db)) = (pair.and_then(|a| a[0].as_f64()), pair.and_then(|a| a[1].as_f64())) else {
+            return Err(CmdError::BadParams("each point is [seconds, dB]".into()));
+        };
+        if !(t.is_finite() && t >= 0.0 && db.is_finite()) {
+            return Err(CmdError::BadParams("a point needs seconds from 0 and a level".into()));
+        }
+        let at = Ticks::from_secs_f64(t).ok_or_else(|| CmdError::BadParams("a point is too far along".into()))?;
+        let db = (db as f32).clamp(lo, hi);
+        match points.iter_mut().find(|v| v.at == at) {
+            Some(v) => v.db = db,
+            None => points.push(assetcraft_storyboard::VolumePoint { at, db }),
+        }
+    }
+    points.sort_by_key(|v| v.at);
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let track = board.track.as_mut().ok_or_else(|| CmdError::Unavailable("the storyboard has no song".into()))?;
+    let message = match points.len() {
+        0 => "Volume line cleared: the song plays at its level".to_owned(),
+        1 => "Volume line: 1 point".to_owned(),
+        n => format!("Volume line: {n} points"),
+    };
+    if track.volume != points {
+        track.volume = points.clone();
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    let shown: Vec<[f64; 2]> = points.iter().map(|v| [v.at.as_secs_f64(), f64::from(v.db)]).collect();
+    Ok(json!({ "points": shown, "message": message }))
+}

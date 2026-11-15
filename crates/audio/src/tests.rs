@@ -253,3 +253,19 @@ fn a_title_dip_eases_down_and_is_back_to_full_by_the_first_shot() {
     assert!((p.frame(16_000).0 - plain.frame(16_000).0 * 0.5).abs() < 1e-4, "2 s in: half");
     assert_eq!(p.frame(4_000), plain.frame(4_000), "0.5 s in: untouched");
 }
+
+/// V3: the volume line glides in dB between points, holds past the ends, and is silent at the
+/// floor; the program applies it to the music.
+#[test]
+fn a_volume_line_glides_between_points() {
+    use crate::{ENVELOPE_FLOOR_DB, Envelope};
+    let e = Envelope::new([(3.0, -12.0), (1.0, 0.0)]);
+    assert_eq!((e.db_at(0.0), e.db_at(1.0), e.db_at(2.0), e.db_at(3.0), e.db_at(9.0)), (0.0, 0.0, -6.0, -12.0, -12.0));
+    assert!((e.gain_at(2.0) - 0.501_187).abs() < 1e-4, "-6 dB at the midpoint");
+    let fade = Envelope::new([(0.0, ENVELOPE_FLOOR_DB), (1.0, 0.0)]);
+    assert_eq!(fade.gain_at(0.0), 0.0, "the floor is silence");
+    assert_eq!(Envelope::new([(f64::NAN, 0.0)]).db_at(1.0), 0.0, "bad points are dropped");
+    let p = Program::new(ramp(8_000, 40_000), None).with_envelope(Some(Envelope::new([(0.0, -6.0)])));
+    let plain = Program::new(ramp(8_000, 40_000), None);
+    assert!((p.frame(8_000).0 - plain.frame(8_000).0 * 0.501_187).abs() < 1e-4);
+}

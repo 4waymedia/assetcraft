@@ -553,6 +553,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.volume",
+        "Volume Line",
+        "Storyboard",
+        None,
+        "{points: [[seconds, dB], …]} → {points, message} (the song's volume line on the Cut: straight lines in dB between points, held before the first and after the last; -60 dB is silence, +6 the top; [] clears it back to the song level; playback and the export use it; one undo step)",
+        crate::inset_cmd::sb_volume
+    ),
+    cmd!(
+        EDIT,
         "storyboard.titleLevel",
         "Title Level",
         "Storyboard",

@@ -243,6 +243,13 @@ impl Storyboard {
             if track.hits.windows(2).any(|w| w[0].at > w[1].at) {
                 return Err(BoardError::Invalid("hits are not in order".into()));
             }
+            count("volume points", track.volume.len(), crate::model::MAX_VOLUME_POINTS)?;
+            let (lo, hi) = crate::model::VOLUME_DB_RANGE;
+            if track.volume.iter().any(|v| !(lo..=hi).contains(&v.db))
+                || track.volume.windows(2).any(|w| w[0].at >= w[1].at)
+            {
+                return Err(BoardError::Invalid(format!("volume points must be in order, {lo} to {hi} dB")));
+            }
             count("song sections", track.song_sections.len(), l.max_song_sections)?;
             let mut prev_end = Ticks::ZERO;
             for s in &track.song_sections {

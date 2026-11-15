@@ -32,10 +32,11 @@
 //!   the bar). The waveform is measured for the visible window (`track.peaks {from, to}`).
 //! - **Fine scrub (Z2):** Shift-drag on the ruler at a quarter speed; ← / → a frame, Shift+← / →
 //!   a beat; frame timecode from 2×.
-//! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
-//!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
-//!   The dip under title cards (B-R3) keeps its default here; `storyboard.titleLevel` sets it.
-//!   Beside it, 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
+//! - **Volume line (V3, replacing V1's Song slider):** a line over the AUDIO row. With no points,
+//!   dragging it sets `Track.level_db` (`storyboard.trackLevel`); Shift+click adds a point, a
+//!   point drags, a double-click removes it (`storyboard.volume`); one undo step each; playback
+//!   and the export both follow it. The dip under title cards (B-R3) stays on top of it.
+//!   The bar's 🔊 is the listening volume (V2, `storyboard.listenVolume`): how loud the Cut plays
 //!   here, at once and saved; the export doesn't use it.
 //!
 //! The Content panel lists the files of the folder open in the Organizer (from the session's
@@ -254,6 +255,8 @@ pub(crate) struct SbUi {
     /// Where a ruler drag is anchored for Shift's quarter-speed scrub (Z2): the time it last
     /// moved at full speed.
     pub(crate) fine_scrub: Option<f64>,
+    /// A volume-line drag in progress (V3).
+    pub(crate) vol_drag: Option<VolDrag>,
     /// The zoomed waveform's last window per music piece: `(key, peaks)` (Z1).
     pub(crate) wave_windows: std::collections::HashMap<usize, (String, Vec<(f32, f32)>)>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
@@ -320,16 +323,8 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
     };
     ui.label(RichText::new(time).font(FontId::monospace(12.0)));
     // The song's level in the mix (V1): one `storyboard.trackLevel` when the slider is let go.
-    // Editing needs two levels only (Paul, 2026-11-14): the song's volume and the listening
-    // volume. The dip under title cards stays at its default; `storyboard.titleLevel` sets it
-    // from the CLI/MCP.
-    if let Some(level) = nav.session.storyboard().and_then(|b| b.track.as_ref()).map(|t| t.level_db) {
-        ui.separator();
-        let range = assetcraft_storyboard::TRACK_DB_RANGE;
-        if let Some(db) = crate::inset_view::level_slider(ui, ("song", 0), "Song", level, range) {
-            nav.run("storyboard.trackLevel", json!({ "db": db }));
-        }
-    }
+    // The song's volume lives on the AUDIO row as its volume line (V3; Paul, 2026-11-15: "move the
+    // volume control onto the audio track"); the bar keeps the listening volume.
     // The listening volume (V2): how loud it plays here, at once and saved; not exported.
     ui.separator();
     let mut v = nav.session.listen_volume();
@@ -1724,6 +1719,198 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
         painter.line_segment(
             [pos2(x_of(s as f64 / sr), rect.top() + 2.0), pos2(x_of((s + n) as f64 / sr), rect.bottom() - 2.0)],
             Stroke::new(1.5, Color32::from_gray(0xcc)),
+        );
+    }
+    volume_line(nav, ui, board, rect, left, px);
+}
+
+/// The top of the volume line's scale in dB (V3).
+const VOL_TOP_DB: f32 = 6.0;
+
+/// Where a level sits in the AUDIO row (V3): on the square root of its gain against the top, so
+/// the useful range (−20 to +6 dB) takes most of the height; the floor is silence.
+pub(crate) fn vol_y(db: f32, rect: Rect) -> f32 {
+    let (lo, _) = assetcraft_storyboard::VOLUME_DB_RANGE;
+    let norm = if db <= lo { 0.0 } else { (10f32.powf((db - VOL_TOP_DB) / 20.0)).sqrt().clamp(0.0, 1.0) };
+    rect.bottom() - 3.0 - norm * (rect.height() - 6.0)
+}
+
+/// The level at height `y` in the AUDIO row: [`vol_y`]'s inverse, within the range.
+pub(crate) fn vol_db(y: f32, rect: Rect) -> f32 {
+    let (lo, hi) = assetcraft_storyboard::VOLUME_DB_RANGE;
+    let norm = ((rect.bottom() - 3.0 - y) / (rect.height() - 6.0)).clamp(0.0, 1.0);
+    if norm <= 0.0 { lo } else { (VOL_TOP_DB + 40.0 * norm.log10()).clamp(lo, hi) }
+}
+
+/// The volume line's level at `t` seconds: `level` with no points, else straight lines in dB
+/// between them, held past the ends (as `assetcraft_audio::Envelope` plays it).
+pub(crate) fn line_db(points: &[(f64, f32)], level: f32, t: f64) -> f32 {
+    let (Some(first), Some(last)) = (points.first(), points.last()) else { return level };
+    if t <= first.0 {
+        return first.1;
+    }
+    if t >= last.0 {
+        return last.1;
+    }
+    let i = points.partition_point(|q| q.0 <= t);
+    let (a, b) = (points[i - 1], points[i]);
+    if b.0 > a.0 { a.1 + (b.1 - a.1) * ((t - a.0) / (b.0 - a.0)) as f32 } else { b.1 }
+}
+
+/// The volume line's widget (there is one AUDIO row).
+pub(crate) fn volume_line_id() -> egui::Id {
+    egui::Id::new("sb-volume-line")
+}
+
+/// A volume-line drag in progress (V3): the line as it is being edited, and what is held — a
+/// point by index, or (`None`) the whole line while it has no points.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VolDrag {
+    pub(crate) points: Vec<(f64, f32)>,
+    pub(crate) level: f32,
+    pub(crate) held: Option<usize>,
+}
+
+/// The song's volume line over the AUDIO row (V3; Paul, 2026-11-15: "a horizontal line on the
+/// track where you can shift+click to add a point and then click the point and move up/down"):
+/// with no points, dragging the line sets the song level (`storyboard.trackLevel`); Shift+click
+/// adds a point on the line, a point drags up / down (level) and sideways (between its
+/// neighbours), a double-click removes it (`storyboard.volume`). One undo step per change.
+fn volume_line(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, rect: Rect, left: f32, px: f32) {
+    let Some(track) = &board.track else { return };
+    let saved: Vec<(f64, f32)> = track.volume.iter().map(|v| (v.at.as_secs_f64(), v.db)).collect();
+    let level = f32::from(track.level_db);
+    let mut drag = nav.state.storyboard.vol_drag.clone();
+    let (points, line_level) = match &drag {
+        Some(d) => (d.points.clone(), d.level),
+        None => (saved.clone(), level),
+    };
+    let x_of = |t: f64| left + t as f32 * px;
+    let t_of = |x: f32| f64::from((x - left) / px).max(0.0);
+    let resp = ui.interact(rect, volume_line_id(), Sense::click_and_drag());
+    let pointer = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+    let near_point = |p: egui::Pos2| {
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, (t, db))| (i, pos2(x_of(*t), vol_y(*db, rect)).distance(p)))
+            .filter(|(_, d)| *d <= 7.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
+    let on_line = |p: egui::Pos2| (vol_y(line_db(&points, line_level, t_of(p.x)), rect) - p.y).abs() <= 6.0;
+    let hover_point = pointer.filter(|p| rect.contains(*p)).and_then(near_point);
+    let hover_line = pointer.is_some_and(|p| rect.contains(p) && on_line(p));
+    let shift = ui.input(|i| i.modifiers.shift);
+    // Start: a point, or the whole line while there are none.
+    if resp.drag_started()
+        && let Some(p) = ui.input(|i| i.pointer.press_origin())
+    {
+        drag = match near_point(p) {
+            Some(i) => Some(VolDrag { points: points.clone(), level: line_level, held: Some(i) }),
+            None if points.is_empty() && on_line(p) => {
+                Some(VolDrag { points: Vec::new(), level: line_level, held: None })
+            }
+            None => None,
+        };
+    }
+    if resp.dragged()
+        && let (Some(d), Some(p)) = (drag.as_mut(), pointer)
+    {
+        match d.held {
+            Some(i) => {
+                let lo = if i == 0 { 0.0 } else { d.points[i - 1].0 + 0.01 };
+                let hi = d.points.get(i + 1).map_or(f64::MAX, |q| q.0 - 0.01);
+                if let Some(q) = d.points.get_mut(i) {
+                    *q = (t_of(p.x).clamp(lo, hi.max(lo)), (vol_db(p.y, rect) * 2.0).round() / 2.0);
+                }
+            }
+            None => {
+                let (lo, hi) = assetcraft_storyboard::TRACK_DB_RANGE;
+                d.level = vol_db(p.y, rect).round().clamp(f32::from(lo), f32::from(hi));
+            }
+        }
+    }
+    if resp.drag_stopped()
+        && let Some(d) = drag.take()
+    {
+        match d.held {
+            Some(_) if d.points != saved => {
+                let pts: Vec<[f64; 2]> = d.points.iter().map(|(t, db)| [*t, f64::from(*db)]).collect();
+                nav.run("storyboard.volume", json!({ "points": pts }));
+            }
+            None if (d.level - level).abs() > 0.01 => {
+                nav.run("storyboard.trackLevel", json!({ "db": d.level as i64 }));
+            }
+            _ => {}
+        }
+    }
+    // Shift+click on the line adds a point there; a double-click on a point removes it.
+    if resp.double_clicked()
+        && let Some(i) = ui.input(|i| i.pointer.interact_pos()).and_then(near_point)
+    {
+        let pts: Vec<[f64; 2]> =
+            saved.iter().enumerate().filter(|(k, _)| *k != i).map(|(_, (t, db))| [*t, f64::from(*db)]).collect();
+        nav.run("storyboard.volume", json!({ "points": pts }));
+    } else if resp.clicked()
+        && shift
+        && let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| on_line(*p) && near_point(*p).is_none())
+    {
+        let t = t_of(p.x);
+        let mut pts: Vec<[f64; 2]> = saved.iter().map(|(t, db)| [*t, f64::from(*db)]).collect();
+        pts.push([t, f64::from((line_db(&saved, level, t) * 2.0).round() / 2.0)]);
+        nav.run("storyboard.volume", json!({ "points": pts }));
+    }
+    nav.state.storyboard.vol_drag = drag.clone();
+    // Hover help and cursor.
+    if hover_point.is_some() || drag.as_ref().is_some_and(|d| d.held.is_some()) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    } else if hover_line && points.is_empty() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    if drag.is_none() && (hover_line || hover_point.is_some()) {
+        resp.on_hover_text(if points.is_empty() {
+            "The song's volume: drag the line up or down · Shift+click adds a point"
+        } else {
+            "Volume line: drag a point · Shift+click the line adds one · double-click a point removes it"
+        });
+    }
+    // Draw: the line across the visible stretch, then its points.
+    let painter = ui.painter().with_clip_rect(rect);
+    let line = Color32::from_rgb(0xf2, 0xc1, 0x4e);
+    let visible = ui.clip_rect().intersect(rect);
+    let mut xs: Vec<egui::Pos2> = Vec::new();
+    let mut x = visible.left();
+    while x <= visible.right() + 3.0 {
+        xs.push(pos2(x, vol_y(line_db(&points, line_level, t_of(x)), rect)));
+        x += 3.0;
+    }
+    painter.add(egui::Shape::line(xs, Stroke::new(1.5, line)));
+    let held = drag.as_ref().and_then(|d| d.held);
+    for (i, (t, db)) in points.iter().enumerate() {
+        let c = pos2(x_of(*t), vol_y(*db, rect));
+        let hot = held == Some(i) || hover_point == Some(i);
+        let r = if hot { 4.5 } else { 3.5 };
+        painter.rect_filled(
+            Rect::from_center_size(c, vec2(r * 2.0, r * 2.0)),
+            1,
+            if hot { Color32::WHITE } else { line },
+        );
+        if hot {
+            let (lo, _) = assetcraft_storyboard::VOLUME_DB_RANGE;
+            let text = if *db <= lo { "silent".to_owned() } else { format!("{db:+.1} dB") };
+            painter.text(c + vec2(7.0, -4.0), Align2::LEFT_BOTTOM, text, FontId::monospace(9.0), Color32::WHITE);
+        }
+    }
+    if let Some(d) = drag.as_ref().filter(|d| d.held.is_none())
+        && let Some(p) = pointer
+    {
+        painter.text(
+            p + vec2(10.0, -6.0),
+            Align2::LEFT_BOTTOM,
+            format!("Song {:+.0} dB", d.level),
+            FontId::monospace(9.0),
+            Color32::WHITE,
         );
     }
 }

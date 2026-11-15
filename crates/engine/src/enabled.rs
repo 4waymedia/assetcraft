@@ -48,6 +48,7 @@ impl Session {
             | "storyboard.split"
             | "storyboard.trackLevel"
             | "storyboard.titleLevel"
+            | "storyboard.volume"
             | "storyboard.inset"
             | "storyboard.insetClear"
             | "storyboard.voiceover"

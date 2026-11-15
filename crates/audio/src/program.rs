@@ -47,6 +47,50 @@ pub struct Program {
     music_gain: f32,
     /// Stretches where the music dips (title cards, B-R3).
     dips: Vec<Dip>,
+    /// The song's volume line (V3), on top of `music_gain`.
+    envelope: Option<Envelope>,
+}
+
+/// The quietest level a volume point can hold: at or below it the song is silent.
+pub const ENVELOPE_FLOOR_DB: f32 = -60.0;
+
+/// The song's volume line (V3; Paul, 2026-11-15: "control the volume at any point in the
+/// timeline using a simple timeline mark"): points of `(program seconds, dB)`, a straight line in
+/// dB between them, level before the first and after the last.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Envelope {
+    points: Vec<(f64, f32)>,
+}
+
+impl Envelope {
+    /// A line through `points` (any order; points that aren't finite are dropped).
+    pub fn new(points: impl IntoIterator<Item = (f64, f32)>) -> Envelope {
+        let mut points: Vec<(f64, f32)> = points.into_iter().filter(|(t, d)| t.is_finite() && d.is_finite()).collect();
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Envelope { points }
+    }
+
+    /// The level in dB at program second `t` (0 dB with no points).
+    pub fn db_at(&self, t: f64) -> f32 {
+        let p = &self.points;
+        let (Some(first), Some(last)) = (p.first(), p.last()) else { return 0.0 };
+        if t <= first.0 {
+            return first.1;
+        }
+        if t >= last.0 {
+            return last.1;
+        }
+        let i = p.partition_point(|q| q.0 <= t);
+        let (a, b) = (p[i - 1], p[i]);
+        let x = if b.0 > a.0 { ((t - a.0) / (b.0 - a.0)) as f32 } else { 1.0 };
+        a.1 + (b.1 - a.1) * x
+    }
+
+    /// The linear gain at program second `t`: silent at or below [`ENVELOPE_FLOOR_DB`].
+    pub fn gain_at(&self, t: f64) -> f32 {
+        let db = self.db_at(t);
+        if db <= ENVELOPE_FLOOR_DB { 0.0 } else { 10f32.powf(db / 20.0) }
+    }
 }
 
 /// How long a [`Dip`] takes to go down after its start and to come back up by its end.
@@ -122,6 +166,7 @@ impl Program {
                 layers: Vec::new(),
                 music_gain: 1.0,
                 dips: Vec::new(),
+                envelope: None,
             };
         };
         let r = |f: u64| rescale(f, edit.rate, rate);
@@ -148,6 +193,7 @@ impl Program {
             layers: Vec::new(),
             music_gain: 1.0,
             dips: Vec::new(),
+            envelope: None,
         }
     }
 
@@ -209,11 +255,20 @@ impl Program {
             out = (out.0 * g, out.1 * g);
         }
         let mut g = self.music_gain;
-        if !self.dips.is_empty() {
+        if !self.dips.is_empty() || self.envelope.is_some() {
             let secs = t as f64 / f64::from(self.rate().max(1));
             g *= self.dips.iter().map(|d| d.at(secs)).product::<f32>();
+            if let Some(e) = &self.envelope {
+                g *= e.gain_at(secs);
+            }
         }
         (out.0 * g, out.1 * g)
+    }
+
+    /// This program with the music following a volume line (V3).
+    pub fn with_envelope(mut self, envelope: Option<Envelope>) -> Program {
+        self.envelope = envelope;
+        self
     }
 
     /// This program with the music dipping over `dips` (title cards, B-R3).

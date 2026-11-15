@@ -136,7 +136,10 @@ impl Session {
         let level = board.track.as_ref().map_or(0, |t| t.level_db);
         // So are the title dips (B-R3): the title level and where the cards sit.
         let dips = crate::export_job::title_dips(&board);
-        let mut key = format!("level {level}; dips {dips:?};");
+        // And the volume line (V3).
+        let envelope = crate::export_job::song_envelope(&board);
+        let gain = crate::export_job::song_gain(&board);
+        let mut key = format!("level {level}; dips {dips:?}; volume {envelope:?};");
         for v in &wanted {
             let p = PathBuf::from(&v.path);
             self.load_slot(&p);
@@ -163,7 +166,8 @@ impl Session {
         let prog = Arc::new(
             Program::new(Arc::clone(&decoded.audio), edit_now.as_ref().map(edit).as_ref())
                 .with_layers(layers)
-                .with_music_gain(assetcraft_audio::mix::db(f64::from(level)))
+                .with_music_gain(gain)
+                .with_envelope(envelope)
                 .with_dips(dips),
         );
         self.audio.program = Some((path, edit_now, key, Arc::clone(&prog)));

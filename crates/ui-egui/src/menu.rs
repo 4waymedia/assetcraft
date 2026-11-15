@@ -73,6 +73,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // The title dip (B-R3): CLI/MCP only (Paul, 2026-11-14: editing needs the song and
     // listening levels only).
     "storyboard.titleLevel",
+    // The volume line on the AUDIO row drives it (V3).
+    "storyboard.volume",
     // The speaker slider beside it (V2).
     "storyboard.listenVolume",
     // The Strip's INSET row and the Inspector's INSET section drive these (SR2).

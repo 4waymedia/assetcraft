@@ -257,3 +257,34 @@ fn the_strip_zoom_is_set_or_multiplied_within_its_range() {
     }
     assert_eq!(s.boards.undo_len(), undo, "no undo step");
 }
+
+/// `storyboard.volume` (V3): the whole line in one undo step; points sorted, a repeated time
+/// replaced, levels clamped; with points the line sets the level, `[]` returns to the song level.
+#[test]
+fn the_volume_line_is_set_whole_and_overrides_the_song_level() {
+    let mut s = session();
+    run(&mut s, "storyboard.trackLevel", json!({ "db": -6 }));
+    assert!(crate::export_job::song_envelope(s.storyboard().unwrap()).is_none());
+    assert!((crate::export_job::song_gain(s.storyboard().unwrap()) - assetcraft_audio::mix::db(-6.0)).abs() < 1e-6);
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.volume", json!({ "points": [[4.0, -3], [1.0, 0], [4.0, -9], [2.0, -99]] }));
+    assert_eq!(r["points"], json!([[1.0, 0.0], [2.0, -60.0], [4.0, -9.0]]), "sorted, 4 s replaced, -99 clamped");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    let b = s.storyboard().unwrap();
+    assert_eq!(crate::export_job::song_gain(b), 1.0, "the line sets the level now");
+    let e = crate::export_job::song_envelope(b).unwrap();
+    assert_eq!(e.db_at(3.0), -34.5, "halfway from -60 to -9");
+    // Saved, and checked on load.
+    let text = serde_json::to_string(b).unwrap();
+    assert!(text.contains("\"volume\""));
+    assert!(assetcraft_storyboard::Storyboard::from_json(text.as_bytes()).is_ok());
+    let loud = text.replace("\"db\":-9.0", "\"db\":40.0");
+    assert!(assetcraft_storyboard::Storyboard::from_json(loud.as_bytes()).is_err(), "+40 dB is refused on load");
+    run(&mut s, "storyboard.volume", json!({ "points": [] }));
+    assert!(crate::export_job::song_envelope(s.storyboard().unwrap()).is_none(), "cleared: back to the song level");
+    for bad in [json!({}), json!({ "points": [[1.0]] }), json!({ "points": [[-1, 0]] }), json!({ "points": "flat" })] {
+        assert!(matches!(s.execute("storyboard.volume", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().volume.len(), 3, "undo brings the line back");
+}

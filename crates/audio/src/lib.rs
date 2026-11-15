@@ -28,7 +28,9 @@ use std::path::Path;
 pub mod mix;
 pub mod program;
 
-pub use program::{DIP_RAMP_SECS, Dip, Edit, Layer, Player, Program, RecordingPlayer, SilentPlayer};
+pub use program::{
+    DIP_RAMP_SECS, Dip, ENVELOPE_FLOOR_DB, Edit, Envelope, Layer, Player, Program, RecordingPlayer, SilentPlayer,
+};
 pub use sio::peaks::Peaks;
 
 /// Longest track, in seconds (20 minutes).

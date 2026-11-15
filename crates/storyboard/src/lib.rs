@@ -52,8 +52,9 @@ pub use generate::{
 };
 pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_RANGE, VOICE_DB_RANGE};
 pub use model::{
-    AssetId, Clip, ClipId, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard, TITLE_DB_DEFAULT,
-    TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition, Voiceover,
+    AssetId, Clip, ClipId, MAX_VOLUME_POINTS, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard,
+    TITLE_DB_DEFAULT, TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition,
+    VOLUME_DB_RANGE, Voiceover, VolumePoint,
 };
 pub use motion::{
     Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, STILL_PAN_TRAVEL,

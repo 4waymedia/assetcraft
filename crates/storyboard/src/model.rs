@@ -309,6 +309,11 @@ pub struct Track {
     /// (R-C6): the cut tools snap to the strong ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hits: Vec<TrackHit>,
+    /// The song's volume line on the Cut (V3), ascending by time: the level glides in a straight
+    /// line (in dB) between points and holds before the first and after the last. Empty: the song
+    /// plays at `level_db` throughout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volume: Vec<VolumePoint>,
     /// Song sections, ascending and non-overlapping.
     #[serde(default)]
     pub song_sections: Vec<SongSection>,
@@ -376,6 +381,22 @@ pub struct TrackHit {
     /// Strength, 0..=1.
     pub strength: f32,
 }
+
+/// A point on the song's volume line (V3).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VolumePoint {
+    /// Where on the Cut.
+    pub at: Ticks,
+    /// The level there in dB ([`VOLUME_DB_RANGE`]; the bottom is silence).
+    pub db: f32,
+}
+
+/// A volume point's range in dB: silence (the bottom) to a little louder.
+pub const VOLUME_DB_RANGE: (f32, f32) = (-60.0, 6.0);
+
+/// The most points a volume line holds.
+pub const MAX_VOLUME_POINTS: usize = 1000;
 
 /// The song level's range in dB: a little louder, or down to almost silent.
 pub const TRACK_DB_RANGE: (i8, i8) = (-30, 6);
