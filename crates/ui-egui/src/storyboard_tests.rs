@@ -23,6 +23,18 @@ fn frame(ctx: &Context, nav: &mut Navigator, events: Vec<Event>, t: f64) {
     output.textures_delta.clear();
 }
 
+/// [`frame`] with modifier keys held through it (egui reads held keys from the frame's input).
+fn frame_held(ctx: &Context, nav: &mut Navigator, events: Vec<Event>, t: f64, modifiers: Modifiers) {
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1360.0, 860.0))),
+        time: Some(t),
+        events: std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect(),
+        ..RawInput::default()
+    };
+    let mut output = ctx.run_ui(input, |ui| nav.ui(ui));
+    output.textures_delta.clear();
+}
+
 fn find_entry<'a>(menus: &'a [Menu], title: &str, label: &str) -> Option<&'a MenuEntry> {
     menus
         .iter()
@@ -1191,21 +1203,28 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     // The snap (C5): the clip's end on a beat of the song, counted on the Cut.
     let far = assetcraft_storyboard::Ticks(u64::MAX / 2); // a playhead nowhere near
     let start1 = board.starts()[1].as_secs_f64();
-    let (len, snapped) = snap_resize(&board, 1, 2.0 * beat + 0.05, far, true);
+    let (len, snapped) = snap_resize(&board, 1, 2.0 * beat + 0.05, far, true, PX_PER_SEC);
     let end = start1 + len;
     assert!(((end / beat).round() * beat - end).abs() < 1e-6, "clip #02 ends on a beat: {end}");
     assert!(snapped.is_some_and(|s| s.label.starts_with("bar ")), "labelled with its bar");
-    let (len, snapped) = snap_resize(&board, 1, 2.04, far, false);
+    let (len, snapped) = snap_resize(&board, 1, 2.04, far, false, PX_PER_SEC);
     assert!((len - 2.0).abs() < 1e-9 && snapped.is_none(), "snapping off (or Shift): tenths");
-    assert_eq!(snap_resize(&board, 1, 0.0, far, true).0, assetcraft_engine::MIN_CLIP_SECS, "never under the minimum");
+    assert_eq!(
+        snap_resize(&board, 1, 0.0, far, true, PX_PER_SEC).0,
+        assetcraft_engine::MIN_CLIP_SECS,
+        "never under the minimum"
+    );
     // The playhead pulls the end too.
     let ph = assetcraft_storyboard::Ticks::from_secs_f64(start1 + 2.27).unwrap();
-    let (len, snapped) = snap_resize(&board, 1, 2.3, ph, true);
+    let (len, snapped) = snap_resize(&board, 1, 2.3, ph, true, PX_PER_SEC);
     assert!((len - 2.27).abs() < 1e-6, "{len}");
     assert_eq!(snapped.map(|s| s.kind), Some(assetcraft_storyboard::SnapKind::Playhead));
     let mut no_track = board.clone();
     no_track.track = None;
-    assert!((snap_resize(&no_track, 1, 2.04, far, true).0 - 2.0).abs() < 1e-9, "no track, no cut near: tenths");
+    assert!(
+        (snap_resize(&no_track, 1, 2.04, far, true, PX_PER_SEC).0 - 2.0).abs() < 1e-9,
+        "no track, no cut near: tenths"
+    );
     // A drag that ends where it started runs nothing (the redo step would be lost otherwise).
     commit_resize(&mut nav, ResizeDrag { clip: 1, secs: first, snapped: None });
     assert_eq!(nav.run("storyboard.state", json!({})).unwrap()["canRedo"], json!(true));
@@ -1777,8 +1796,11 @@ fn dragging_a_cut_handle_moves_the_cut_and_snaps_to_the_beat() {
     let handle = Pos2::new(c2.right() + 1.0, c2.top() - 9.0);
     drag(&ctx, &mut nav, handle, handle + egui::vec2(px, 0.0), &mut t);
     let after = lengths(&nav);
-    assert!((after[1] - before[1] - 1.0).abs() < 0.02, "clip #02 grew a second: {} → {}", before[1], after[1]);
-    assert!((before[2] - after[2] - 1.0).abs() < 0.02, "clip #03 gave it up");
+    // Free at 1×: the cut lands on the tenths nearest a second on (Z2: frames from 2×).
+    let cut = nav.session().storyboard().unwrap().starts()[2].as_secs_f64();
+    assert!((cut * 10.0 - (cut * 10.0).round()).abs() < 1e-6, "on a tenth: {cut}");
+    assert!((after[1] - before[1] - 1.0).abs() < 0.06, "clip #02 grew a second: {} → {}", before[1], after[1]);
+    assert!(((before[2] - after[2]) - (after[1] - before[1])).abs() < 1e-6, "clip #03 gave the same up");
     assert_eq!(after[3..], before[3..], "nothing after the cut moved");
     assert!(nav.state.storyboard.cut_drag.is_none(), "the drag ended");
     nav.run("storyboard.undo", json!({}));
@@ -1796,4 +1818,81 @@ fn dragging_a_cut_handle_moves_the_cut_and_snaps_to_the_beat() {
     drag(&ctx, &mut nav, handle, aim, &mut t);
     let moved = nav.session().storyboard().unwrap().starts()[2].as_secs_f64();
     assert!((moved - target).abs() < 1e-6, "on the beat: {moved} vs {target}");
+}
+
+/// Z1 + Z2 (Paul, 2026-11-15: "zoom in on the play section so that they can clearly see the
+/// audio as well as slowly scrub the video for positioning"): Ctrl+wheel zooms around the
+/// pointer, the buttons and Fit set it, ← / → step a frame, Shift+← / → a beat, and a Shift-drag
+/// on the ruler scrubs at a quarter speed.
+#[test]
+fn zooming_the_strip_and_scrubbing_finely() {
+    use crate::strip_view::{FINE_SCRUB, FPS, PX_PER_SEC, fit_zoom, frame_timecode};
+    let ctx = Context::default();
+    let (mut nav, _) = reaper_nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    let settle = |nav: &mut Navigator, t: &mut f64| {
+        for _ in 0..30 {
+            *t += 0.05;
+            frame(&ctx, nav, Vec::new(), *t);
+        }
+    };
+    settle(&mut nav, &mut t);
+    // Ctrl+wheel over the cut after clip #02: twice the zoom, and that cut stays under the pointer.
+    let c2 = strip_rect(&ctx, 2);
+    let at = Pos2::new(c2.right() + 1.0, c2.center().y);
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![Event::PointerMoved(at), Event::Zoom(2.0)], t);
+    assert!((nav.session().strip_zoom() - 2.0).abs() < 1e-6);
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![Event::PointerMoved(at)], t);
+    let c2z = strip_rect(&ctx, 2);
+    assert!((c2z.right() - c2.right()).abs() < 2.0, "the cut stayed put: {} → {}", c2.right(), c2z.right());
+    assert!(
+        (c2z.width() - (c2.width() + 2.0) * 2.0 + 2.0).abs() < 2.0,
+        "the card doubled: {} → {}",
+        c2.width(),
+        c2z.width()
+    );
+    // The scale's limits, and Fit's arithmetic.
+    nav.run("storyboard.zoom", json!({ "zoom": 100.0 }));
+    assert!((nav.session().strip_zoom() - 16.0).abs() < 1e-6, "clamped to 16×");
+    assert!((fit_zoom(1288.0, 60.0) - 1200.0 / (60.0 * PX_PER_SEC)).abs() < 1e-4);
+    assert_eq!(fit_zoom(1288.0, 600.0), 0.25, "a long Cut fits as far as the range allows");
+    // Zoomed to frames: the transport shows m:ss:ff.
+    assert_eq!(frame_timecode(61.5), "1:01:12");
+    // ← / →: a frame; Shift+→: the next beat (the sample's tempo from 0:00).
+    nav.run("storyboard.seek", json!({ "seconds": 2.0 }));
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::ArrowRight, Modifiers::NONE)], t);
+    let pos = |nav: &Navigator| nav.session().transport().position.as_secs_f64();
+    assert!((pos(&nav) - (2.0 + 1.0 / FPS)).abs() < 1e-6, "one frame on: {}", pos(&nav));
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::ArrowLeft, Modifiers::NONE)], t);
+    assert!((pos(&nav) - 2.0).abs() < 1e-6, "and back");
+    let beat = nav.session().storyboard().unwrap().track.as_ref().unwrap().bpm.beat().as_secs_f64();
+    t += 0.05;
+    frame(&ctx, &mut nav, vec![key(egui::Key::ArrowRight, Modifiers::SHIFT)], t);
+    assert!((pos(&nav) - (2.0 / beat).floor().mul_add(beat, beat)).abs() < 1e-6, "the next beat: {}", pos(&nav));
+    // Shift-drag on the ruler at 1×: 88 points is 2 s at full speed, half a second at a quarter.
+    nav.run("storyboard.zoom", json!({ "zoom": 1.0 }));
+    settle(&mut nav, &mut t);
+    let c1 = strip_rect(&ctx, 1);
+    let from = Pos2::new(c1.left() + 40.0, c1.top() - 24.0);
+    let to = from + egui::vec2(2.0 * PX_PER_SEC, 0.0);
+    let shift = Modifiers::SHIFT;
+    let press = |pos, pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: shift };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        steps.push(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 8.0))]);
+    }
+    steps.push(vec![press(to, false)]);
+    for events in steps {
+        t += 0.05;
+        frame_held(&ctx, &mut nav, events, t, shift);
+    }
+    // From the time under the press (clip #01 starts the Cut, its card inset a point).
+    let pressed = f64::from((from.x - (c1.left() - 1.0)) / PX_PER_SEC);
+    let moved = pos(&nav) - pressed;
+    assert!((moved - 2.0 / FINE_SCRUB).abs() < 0.03, "a quarter speed: moved {moved} s for 2 s of drag");
 }

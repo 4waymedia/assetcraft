@@ -204,3 +204,32 @@ pub(crate) fn sb_snapping(s: &mut Session, p: &Value) -> CmdResult {
     let message = if on { "Snapping on · cuts snap to cuts, the playhead and the music" } else { "Snapping off" };
     Ok(json!({ "on": on, "message": message }))
 }
+
+/// The Strip's zoom range (Z1): a quarter (whole Cuts at a glance) to sixteen times (single
+/// frames and the waveform's detail).
+pub const STRIP_ZOOM_RANGE: (f32, f32) = (0.25, 16.0);
+
+/// `storyboard.zoom {zoom? | by?}` (Z1; Paul, 2026-11-15: "zoom in on the play section so that
+/// they can clearly see the audio"): set the Strip's zoom (1 = 44 pt a second) or multiply it,
+/// kept within `STRIP_ZOOM_RANGE`. A view setting: no undo step. Replies `{zoom, message}`.
+pub(crate) fn sb_zoom(s: &mut Session, p: &Value) -> CmdResult {
+    let num = |k: &str| -> Result<Option<f64>, CmdError> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .map(Some)
+                .ok_or_else(|| CmdError::BadParams(format!("`{k}` must be a positive number"))),
+        }
+    };
+    let zoom = match (num("zoom")?, num("by")?) {
+        (Some(z), None) => z,
+        (None, Some(by)) => f64::from(s.strip_zoom) * by,
+        _ => return Err(CmdError::BadParams("give one of `zoom` or `by`".into())),
+    };
+    let (lo, hi) = STRIP_ZOOM_RANGE;
+    s.strip_zoom = (zoom as f32).clamp(lo, hi);
+    let z = s.strip_zoom;
+    Ok(json!({ "zoom": z, "message": format!("Zoom {:.0}%", z * 100.0) }))
+}

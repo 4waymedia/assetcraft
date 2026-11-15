@@ -385,7 +385,7 @@ impl Navigator {
             document_view::open(self);
         }
         if self.session.mode() == assetcraft_engine::Mode::Storyboard {
-            let (undo, redo, save, space, delete, enter, escape, snapping, split) = ctx.input_mut(|i| {
+            let (undo, redo, save, space, delete, enter, escape, snapping, split, step) = ctx.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y),
@@ -401,6 +401,18 @@ impl Navigator {
                     // Cut editing (cut-editing.md C5, C3): S toggles snapping, Ctrl+K splits.
                     i.consume_key(egui::Modifiers::NONE, egui::Key::S),
                     i.consume_key(egui::Modifiers::COMMAND, egui::Key::K),
+                    // Z2: ← / → a frame, Shift+← / → a beat. Shift first: a plain match ignores Shift.
+                    if i.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowLeft) {
+                        Some((false, true))
+                    } else if i.consume_key(egui::Modifiers::SHIFT, egui::Key::ArrowRight) {
+                        Some((true, true))
+                    } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                        Some((false, false))
+                    } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+                        Some((true, false))
+                    } else {
+                        None
+                    },
                 )
             });
             if delete && !self.session.selected_clips().is_empty() {
@@ -418,6 +430,11 @@ impl Navigator {
             }
             if snapping && !starting {
                 self.run("storyboard.snapping", json!({}));
+            }
+            if let Some((forward, by_beat)) = step
+                && !starting
+            {
+                strip_view::step_playhead(self, ctx, forward, by_beat);
             }
             // Ctrl+K splits the clip under the playhead (FilmCraft's razor). On a cut or a title
             // card the command says why in the status bar.

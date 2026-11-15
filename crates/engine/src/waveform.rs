@@ -30,6 +30,28 @@ pub(crate) struct Waveforms {
     kept: Vec<(PathBuf, Overview)>,
 }
 
+/// The `(min, max)` of each of `buckets` equal runs of `from..to` seconds of `audio`, all
+/// channels together (Z1). Past the end of the audio, a run is silent.
+fn window(audio: &assetcraft_audio::Audio, from: f64, to: f64, buckets: usize) -> Vec<(f32, f32)> {
+    let rate = f64::from(audio.rate());
+    let frames = audio.frames();
+    let at = |t: f64| ((t * rate).max(0.0) as usize).min(frames);
+    let step = (to - from) / buckets.max(1) as f64;
+    (0..buckets)
+        .map(|j| {
+            let s = at(from + step * j as f64);
+            let e = at(from + step * (j + 1) as f64).max(s);
+            let mut out = (0.0f32, 0.0f32);
+            for c in 0..audio.channel_count() {
+                for v in audio.channel(c).get(s..e).unwrap_or_default() {
+                    out = (out.0.min(*v), out.1.max(*v));
+                }
+            }
+            out
+        })
+        .collect()
+}
+
 /// `peaks` merged down to `buckets` (`(min, max)` of each run).
 fn rebucket(peaks: &[(f32, f32)], buckets: usize) -> Vec<(f32, f32)> {
     let n = peaks.len();
@@ -76,9 +98,10 @@ impl Session {
     }
 }
 
-/// `track.peaks {path, buckets?}` → `{path, status: loading}` | `{path, status: ready, seconds,
-/// peaks: [[min, max]]}` | `{path, status: failed, error}`. Buckets 16–4096 (default 1024) span the
-/// whole file.
+/// `track.peaks {path, buckets?, from?, to?}` → `{path, status: loading}` | `{path, status:
+/// ready, seconds, peaks: [[min, max]]}` | `{path, status: failed, error}`. Buckets 16–4096
+/// (default 1024) span the whole file, or with `from` and `to` (seconds) just that window,
+/// measured from the decoded audio (Z1: the zoomed Strip).
 pub(crate) fn track_peaks(s: &mut Session, p: &Value) -> CmdResult {
     let path = crate::track_cmd::audio_path(p)?;
     let buckets = match p.get("buckets") {
@@ -89,6 +112,36 @@ pub(crate) fn track_peaks(s: &mut Session, p: &Value) -> CmdResult {
             .ok_or_else(|| CmdError::BadParams("`buckets` must be a whole number from 16 to 4096".into()))?,
     } as usize;
     let shown = path.to_string_lossy().into_owned();
+    // A window (Z1: the zoomed Strip's visible stretch): peaks measured from the decoded audio.
+    let secs = |k: &str| -> Result<Option<f64>, CmdError> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .map(Some)
+                .ok_or_else(|| CmdError::BadParams(format!("`{k}` must be seconds from 0"))),
+        }
+    };
+    match (secs("from")?, secs("to")?) {
+        (None, None) => {}
+        (Some(from), Some(to)) if to > from => {
+            let state = match s.load_state(&path) {
+                Some(state) => state,
+                None => s.load_slot(&path).lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(),
+            };
+            return Ok(match state {
+                Load::Loading => json!({ "path": shown, "status": "loading" }),
+                Load::Failed(e) => json!({ "path": shown, "status": "failed", "error": e }),
+                Load::Ready(d) => {
+                    let peaks: Vec<[f64; 2]> =
+                        window(&d.audio, from, to, buckets).into_iter().map(|(a, b)| [round3(a), round3(b)]).collect();
+                    json!({ "path": shown, "status": "ready", "seconds": (d.audio.seconds() * 1000.0).round() / 1000.0, "from": from, "to": to, "peaks": peaks })
+                }
+            });
+        }
+        _ => return Err(CmdError::BadParams("give both `from` and `to`, with `to` after `from`".into())),
+    }
     Ok(match s.overview(&path) {
         None => json!({ "path": shown, "status": "loading" }),
         Some(Overview::Failed(e)) => json!({ "path": shown, "status": "failed", "error": e }),

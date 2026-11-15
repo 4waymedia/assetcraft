@@ -43,6 +43,7 @@ pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_thumbs::DiskCache;
 pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
+pub use cut_cmd::STRIP_ZOOM_RANGE;
 pub use effect::{EffectClass, Effects};
 pub use export_job::{ExportPlan, ExportProgress, ExportStage};
 pub use generate_cmd::{CUEMAP_SUFFIX, GeneratedFrom, LENGTHS, cue_map_label};
@@ -228,6 +229,8 @@ pub struct Session {
     credits: bool,
     /// Snapping for the cut tools (`storyboard.snapping`; saved in prefs).
     snapping: bool,
+    /// The Strip's zoom (`storyboard.zoom`, Z1): 1 = 44 pt a second.
+    strip_zoom: f32,
 }
 
 impl Session {
@@ -281,6 +284,7 @@ impl Session {
             recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
             credits: prefs.credits,
             snapping: prefs.snapping,
+            strip_zoom: 1.0,
         };
         session.refresh_favorites();
         session.rescan_places();
@@ -566,6 +570,11 @@ impl Session {
     /// Whether the Start screen adds the credits clip (the checkbox; remembered).
     pub fn credits_on(&self) -> bool {
         self.credits
+    }
+
+    /// The Strip's zoom (Z1): 1 = 44 pt a second, from [`STRIP_ZOOM_RANGE`].
+    pub fn strip_zoom(&self) -> f32 {
+        self.strip_zoom
     }
 
     /// Whether the cut tools snap (`storyboard.snapping`; remembered).

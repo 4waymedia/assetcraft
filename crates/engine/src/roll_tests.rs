@@ -240,3 +240,20 @@ fn the_title_level_dips_the_music_under_title_cards() {
     run(&mut s, "storyboard.undo", json!({}));
     assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().title_db, default);
 }
+
+/// `storyboard.zoom` (Z1): set or multiply, kept within the range; a view setting, no undo step.
+#[test]
+fn the_strip_zoom_is_set_or_multiplied_within_its_range() {
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    assert_eq!(s.strip_zoom(), 1.0);
+    run(&mut s, "storyboard.zoom", json!({ "by": 2 }));
+    run(&mut s, "storyboard.zoom", json!({ "by": 2 }));
+    assert_eq!(s.strip_zoom(), 4.0);
+    assert_eq!(run(&mut s, "storyboard.zoom", json!({ "zoom": 0.01 }))["zoom"], 0.25, "clamped to a quarter");
+    assert_eq!(run(&mut s, "storyboard.zoom", json!({ "zoom": 99 }))["zoom"], 16.0, "and to sixteen");
+    for bad in [json!({}), json!({ "zoom": 2, "by": 2 }), json!({ "zoom": -1 }), json!({ "by": "in" })] {
+        assert!(matches!(s.execute("storyboard.zoom", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    assert_eq!(s.boards.undo_len(), undo, "no undo step");
+}

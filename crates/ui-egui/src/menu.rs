@@ -68,6 +68,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.split",
     // The Song slider in the Strip's transport controls drives it (V1).
     "storyboard.trackLevel",
+    // The Strip's − / + / Fit buttons and Ctrl+wheel (Z1).
+    "storyboard.zoom",
     // The title dip (B-R3): CLI/MCP only (Paul, 2026-11-14: editing needs the song and
     // listening levels only).
     "storyboard.titleLevel",

@@ -411,3 +411,35 @@ fn a_cut_preview_of_a_template_plays_the_music_the_timeline_draws() {
     );
     assert_eq!(player.log().last().map(String::as_str), Some("play 10.0s from 0.0"));
 }
+
+/// Z1: `track.peaks {from, to}` measures just that window from the decoded audio, so a zoomed
+/// Strip sees the waveform's detail; the whole-file overview is unchanged.
+#[test]
+fn track_peaks_for_a_window_measure_the_decoded_audio() {
+    let player = Arc::new(RecordingPlayer::default());
+    let mut s = session(Arc::clone(&player), true);
+    let song = music("track.wav");
+    let mut r = json!(null);
+    for _ in 0..2000 {
+        r = run(&mut s, "track.peaks", json!({ "path": song, "from": 1.0, "to": 2.0, "buckets": 100 }));
+        if r["status"] != "loading" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(r["status"], "ready", "{r}");
+    let peaks = r["peaks"].as_array().unwrap();
+    assert_eq!(peaks.len(), 100, "a column each");
+    assert!(peaks.iter().any(|p| p[1].as_f64().unwrap() > 0.0), "sound in the window");
+    // Past the end of the song: silent columns, not an error.
+    let end = r["seconds"].as_f64().unwrap();
+    let past = run(&mut s, "track.peaks", json!({ "path": song, "from": end + 1.0, "to": end + 2.0, "buckets": 16 }));
+    assert!(past["peaks"].as_array().unwrap().iter().all(|p| p[0] == 0.0 && p[1] == 0.0));
+    for bad in [
+        json!({ "path": song, "from": 2.0, "to": 1.0 }),
+        json!({ "path": song, "from": 1.0 }),
+        json!({ "path": song, "from": -1, "to": 1 }),
+    ] {
+        assert!(matches!(s.execute("track.peaks", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+}

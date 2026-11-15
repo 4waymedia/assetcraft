@@ -13,7 +13,7 @@ const HANDLE_W: f32 = 12.0;
 
 /// A tick step (seconds) that keeps labels at least `min_px` apart.
 pub(crate) fn tick_step(px_per_sec: f32, min_px: f32) -> f64 {
-    [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0]
+    [0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0]
         .into_iter()
         .find(|s| (*s as f32) * px_per_sec >= min_px)
         .unwrap_or(600.0)
@@ -39,18 +39,27 @@ pub(crate) fn paint_ruler(
         let x = x_of(t);
         painter.line_segment([pos2(x, ruler.bottom() - h), pos2(x, ruler.bottom())], Stroke::new(1.0, ink));
     };
+    // Counted, not summed, so a 0.1 s step doesn't drift (Z2).
     if let Some(m) = minor {
-        let mut t = 0.0;
-        while t <= len {
-            tick(t, 3.0);
-            t += m;
+        let mut i = 0u32;
+        while f64::from(i) * m <= len {
+            tick(f64::from(i) * m, 3.0);
+            i += 1;
         }
     }
-    let mut t = 0.0;
-    while t <= len {
+    let label = |t: f64| {
+        if step < 1.0 {
+            format!("{}.{:02}", mmss(t.trunc()), ((t.fract() * 100.0).round() as u32).min(99))
+        } else {
+            mmss(t)
+        }
+    };
+    let mut i = 0u32;
+    while f64::from(i) * step <= len {
+        let t = f64::from(i) * step;
         tick(t, 6.0);
-        painter.text(pos2(x_of(t) + 3.0, ruler.top()), Align2::LEFT_TOP, mmss(t), FontId::monospace(9.0), ink);
-        t += step;
+        painter.text(pos2(x_of(t) + 3.0, ruler.top()), Align2::LEFT_TOP, label(t), FontId::monospace(9.0), ink);
+        i += 1;
     }
 }
 
@@ -113,5 +122,7 @@ mod tests {
         assert_eq!(tick_step(44.0, 56.0), 2.0, "the Strip view's 44 px/s");
         assert_eq!(tick_step(4.0, 56.0), 15.0);
         assert_eq!(tick_step(0.01, 56.0), 600.0);
+        assert_eq!(tick_step(704.0, 56.0), 0.1, "16× zoom: tenths");
+        assert_eq!(tick_step(176.0, 56.0), 0.5, "4× zoom: halves");
     }
 }

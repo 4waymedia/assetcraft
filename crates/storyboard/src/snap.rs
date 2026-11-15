@@ -180,6 +180,31 @@ pub fn snap(board: &Storyboard, t: Ticks, o: &SnapOptions<'_>) -> Option<Snapped
     n.best.map(|(_, kind, at, label)| Snapped { at, kind, label })
 }
 
+/// The song's next (`forward`) or previous beat from `t` on the Cut (Z2: Shift+→ / Shift+←):
+/// the board's beats, or its tempo's from 0:00 when it has none; within the Cut. `None` without
+/// a song, or with no beat that way.
+pub fn step_beat(board: &Storyboard, t: Ticks, forward: bool) -> Option<Ticks> {
+    let track = board.track.as_ref()?;
+    // A beat within a millisecond of `t` counts as where `t` already is.
+    let eps = TICKS_PER_SECOND / 1000;
+    let end = board.total();
+    let to = if track.beat_grid.is_empty() {
+        let beat = track.bpm.beat().0.max(1);
+        let k = t.0.saturating_add(if forward { eps } else { 0 }) / beat;
+        if forward {
+            Ticks(k.saturating_add(1).saturating_mul(beat))
+        } else {
+            let k = if t.0.saturating_sub(k * beat) <= eps { k.checked_sub(1)? } else { k };
+            Ticks(k.saturating_mul(beat))
+        }
+    } else if forward {
+        *track.beat_grid.iter().find(|b| b.0 > t.0.saturating_add(eps))?
+    } else {
+        *track.beat_grid.iter().rev().find(|b| b.0.saturating_add(eps) < t.0)?
+    };
+    (to <= end).then_some(to)
+}
+
 /// A hit's label from the cue map's kind: `bassHit` → "bass hit", `drop` → "drop".
 fn hit_label(kind: &str) -> String {
     let mut out = String::with_capacity(kind.len() + 2);
@@ -329,5 +354,24 @@ mod tests {
         let s = snap(&b, secs(8.2), &opts(44.0)).unwrap();
         assert_eq!((s.at, s.kind), (secs(8.0), SnapKind::Beat));
         assert_eq!(hit_label(""), "hit");
+    }
+
+    /// Z2: Shift+← / → step beat to beat, on the tempo's grid or the song's detected one.
+    #[test]
+    fn stepping_beat_to_beat() {
+        let mut b = board();
+        let beat = b.track.as_ref().unwrap().bpm.beat().as_secs_f64();
+        let at = |t: f64| secs(t);
+        assert_eq!(step_beat(&b, at(0.0), true), Some(at(beat)), "from the top to beat 2");
+        assert_eq!(step_beat(&b, at(beat), true), Some(at(2.0 * beat)), "on a beat: the next one");
+        assert_eq!(step_beat(&b, at(beat * 1.5), false), Some(at(beat)), "between: the one before");
+        assert_eq!(step_beat(&b, at(beat), false), Some(at(0.0)), "on a beat: the one before it");
+        assert_eq!(step_beat(&b, at(0.0), false), None, "nothing before the top");
+        b.track.as_mut().unwrap().beat_grid = vec![at(0.3), at(0.9), at(1.5)];
+        assert_eq!(step_beat(&b, at(0.9), true), Some(at(1.5)));
+        assert_eq!(step_beat(&b, at(0.9), false), Some(at(0.3)));
+        assert_eq!(step_beat(&b, at(1.5), true), None, "past the last detected beat");
+        b.track = None;
+        assert_eq!(step_beat(&b, at(1.0), true), None, "no song");
     }
 }

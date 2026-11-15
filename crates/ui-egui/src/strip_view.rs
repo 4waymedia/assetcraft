@@ -28,6 +28,10 @@
 //!   ([`snap_resize`], cut-editing.md C5), with a labelled line; snapping off or Shift drags free
 //!   in tenths of a second. The Inspector's Duration field runs the same command. The card
 //!   follows the pointer while dragging ([`ResizeDrag`]).
+//! - **Zoom (Z1):** `storyboard.zoom` (0.25×–16×; Ctrl+wheel around the pointer, − / + / Fit in
+//!   the bar). The waveform is measured for the visible window (`track.peaks {from, to}`).
+//! - **Fine scrub (Z2):** Shift-drag on the ruler at a quarter speed; ← / → a frame, Shift+← / →
+//!   a beat; frame timecode from 2×.
 //! - **Song level (V1):** the transport's Song slider sets `Track.level_db` through
 //!   `storyboard.trackLevel` when let go (one undo step); playback and the export both use it.
 //!   The dip under title cards (B-R3) keeps its default here; `storyboard.titleLevel` sets it.
@@ -113,6 +117,7 @@ pub(crate) fn snap_cut(
     want: f64,
     playhead: Ticks,
     snapping: bool,
+    px: f32,
 ) -> (f64, Option<assetcraft_storyboard::Snapped>) {
     let starts = board.starts();
     let min = assetcraft_engine::MIN_CLIP_SECS;
@@ -123,20 +128,59 @@ pub(crate) fn snap_cut(
     if hi < lo {
         return (cut.as_secs_f64(), None);
     }
-    let free = ((want * 100.0).round() / 100.0).clamp(lo, hi);
+    let free = free_step(want, px).clamp(lo, hi);
     if !snapping {
         return (free, None);
     }
-    let o = assetcraft_storyboard::SnapOptions {
-        px_per_sec: PX_PER_SEC,
-        playhead: Some(playhead),
-        exclude: &[cut],
-        music: true,
-    };
+    let o =
+        assetcraft_storyboard::SnapOptions { px_per_sec: px, playhead: Some(playhead), exclude: &[cut], music: true };
     match Ticks::from_secs_f64(want.max(0.0)).and_then(|t| assetcraft_storyboard::snap(board, t, &o)) {
         Some(s) if (lo..=hi).contains(&s.at.as_secs_f64()) => (s.at.as_secs_f64(), Some(s)),
         _ => (free, None),
     }
+}
+
+/// How much slower a Shift-drag on the ruler scrubs (Z2).
+pub(crate) const FINE_SCRUB: f64 = 4.0;
+
+/// Frames a second for stepping and the frame timecode (Z2).
+pub(crate) const FPS: f64 = 24.0;
+
+/// `m:ss:ff` at [`FPS`] (Z2): the transport's time when zoomed in to frames.
+pub(crate) fn frame_timecode(secs: f64) -> String {
+    let f = (secs.max(0.0) * FPS).round() as u64;
+    let fps = FPS as u64;
+    format!("{}:{:02}:{:02}", f / fps / 60, (f / fps) % 60, f % fps)
+}
+
+/// ← / → move the playhead one frame, Shift+← / → to the song's previous or next beat (Z2),
+/// within the Cut.
+pub(crate) fn step_playhead(nav: &mut Navigator, ctx: &egui::Context, forward: bool, by_beat: bool) {
+    let at = playhead(nav, ctx);
+    let Some(board) = nav.session.storyboard() else { return };
+    let total = board.total().as_secs_f64();
+    let to = if by_beat {
+        match assetcraft_storyboard::step_beat(board, at, forward) {
+            Some(t) => t.as_secs_f64(),
+            None => return,
+        }
+    } else {
+        let frame = (at.as_secs_f64() * FPS).round() + if forward { 1.0 } else { -1.0 };
+        (frame / FPS).clamp(0.0, total)
+    };
+    nav.run("storyboard.seek", json!({ "seconds": to }));
+}
+
+/// The Strip's scale at the session's zoom (Z1): points per second.
+pub(crate) fn px_per_sec(nav: &Navigator) -> f32 {
+    PX_PER_SEC * nav.session.strip_zoom()
+}
+
+/// A free (unsnapped) drag's step at a scale (Z1/Z2): tenths of a second below 2× zoom, single
+/// frames (24 a second) from 2× up, so a zoomed-in drag can land on any frame.
+pub(crate) fn free_step(secs: f64, px: f32) -> f64 {
+    let per = if px >= 2.0 * PX_PER_SEC { 24.0 } else { 10.0 };
+    (secs * per).round() / per
 }
 
 /// The snap line's colour: apart from the selection blue and the playhead.
@@ -154,19 +198,16 @@ pub(crate) fn snap_resize(
     want: f64,
     playhead: Ticks,
     snapping: bool,
+    px: f32,
 ) -> (f64, Option<assetcraft_storyboard::Snapped>) {
     let min = assetcraft_engine::MIN_CLIP_SECS;
-    let free = ((want * 10.0).round() / 10.0).max(min);
+    let free = free_step(want, px).max(min);
     let starts = board.starts();
     let Some(start) = starts.get(index).copied().filter(|_| snapping) else { return (free, None) };
     let mut moving: Vec<Ticks> = starts.get(index + 1..).unwrap_or_default().to_vec();
     moving.push(board.total());
-    let o = assetcraft_storyboard::SnapOptions {
-        px_per_sec: PX_PER_SEC,
-        playhead: Some(playhead),
-        exclude: &moving,
-        music: true,
-    };
+    let o =
+        assetcraft_storyboard::SnapOptions { px_per_sec: px, playhead: Some(playhead), exclude: &moving, music: true };
     let end = start.as_secs_f64() + want.max(0.0);
     let Some(snapped) = Ticks::from_secs_f64(end).and_then(|t| assetcraft_storyboard::snap(board, t, &o)) else {
         return (free, None);
@@ -205,6 +246,16 @@ pub(crate) struct SbUi {
     pub(crate) snap_label: Option<String>,
     /// A cut mid-drag on the marker row (C1b), committed as one `storyboard.roll` on release.
     pub(crate) cut_drag: Option<CutDrag>,
+    /// Last frame's scale, scroll offset and visible width (Z1): a zoom keeps the time under its
+    /// anchor in place.
+    pub(crate) view: Option<(f32, f32, f32)>,
+    /// Where a Ctrl+wheel zoom is anchored, in points from the Strip's left edge (Z1).
+    pub(crate) zoom_anchor: Option<f32>,
+    /// Where a ruler drag is anchored for Shift's quarter-speed scrub (Z2): the time it last
+    /// moved at full speed.
+    pub(crate) fine_scrub: Option<f64>,
+    /// The zoomed waveform's last window per music piece: `(key, peaks)` (Z1).
+    pub(crate) wave_windows: std::collections::HashMap<usize, (String, Vec<(f32, f32)>)>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
     pub(crate) motion_player: Option<crate::motion_view::MotionPlayer>,
 }
@@ -261,7 +312,13 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
     if ui.button(label).on_hover_text(tip).clicked() {
         toggle_play(nav, at);
     }
-    ui.label(RichText::new(format!("{} / {}", at.timecode(), total.timecode())).font(FontId::monospace(12.0)));
+    // Frames when zoomed in (Z2), tenths otherwise.
+    let time = if px_per_sec(nav) >= 2.0 * PX_PER_SEC {
+        format!("{} / {}", frame_timecode(at.as_secs_f64()), frame_timecode(total.as_secs_f64()))
+    } else {
+        format!("{} / {}", at.timecode(), total.timecode())
+    };
+    ui.label(RichText::new(time).font(FontId::monospace(12.0)));
     // The song's level in the mix (V1): one `storyboard.trackLevel` when the slider is let go.
     // Editing needs two levels only (Paul, 2026-11-14): the song's volume and the listening
     // volume. The dip under title cards stays at its default; `storyboard.titleLevel` sets it
@@ -284,6 +341,39 @@ pub(crate) fn transport_controls(nav: &mut Navigator, ui: &mut Ui) {
         nav.run("storyboard.listenVolume", json!({ "volume": v }));
     }
     ui.label(RichText::new(format!("{:>3.0}%", v * 100.0)).monospace().small());
+    // The Strip's zoom (Z1): − / + by halves and doubles, Fit for the whole Cut; Ctrl+wheel
+    // over the Strip zooms around the pointer.
+    if nav.session.board_view() == assetcraft_engine::BoardView::Strip {
+        ui.separator();
+        let zoom = nav.session.strip_zoom();
+        let (lo, hi) = assetcraft_engine::STRIP_ZOOM_RANGE;
+        if ui
+            .add_enabled(zoom > lo, egui::Button::new("−"))
+            .on_hover_text("Zoom out (Ctrl+wheel over the Strip)")
+            .clicked()
+        {
+            nav.run("storyboard.zoom", json!({ "by": 0.5 }));
+        }
+        ui.label(RichText::new(format!("{:>4.0}%", zoom * 100.0)).monospace().small());
+        if ui
+            .add_enabled(zoom < hi, egui::Button::new("+"))
+            .on_hover_text("Zoom in to see the waveform and single frames")
+            .clicked()
+        {
+            nav.run("storyboard.zoom", json!({ "by": 2.0 }));
+        }
+        if ui.button("Fit").on_hover_text("The whole Cut in view").clicked() {
+            let w = nav.state.storyboard.view.map_or(1200.0, |(_, _, w)| w);
+            let secs = total.as_secs_f64().max(1.0) as f32;
+            nav.run("storyboard.zoom", json!({ "zoom": fit_zoom(w, secs) }));
+        }
+    }
+}
+
+/// The zoom that shows `secs` of Cut in a Strip `width` points wide, with its margins (Z1).
+pub(crate) fn fit_zoom(width: f32, secs: f32) -> f32 {
+    let (lo, hi) = assetcraft_engine::STRIP_ZOOM_RANGE;
+    ((width - 88.0).max(40.0) / (secs.max(0.1) * PX_PER_SEC)).clamp(lo, hi)
 }
 
 /// Space in Storyboard mode, and the ▶/⏸ button.
@@ -924,6 +1014,7 @@ pub(crate) fn clip_spans(
     left: f32,
     ctx: Option<&egui::Context>,
     drag: Option<ResizeDrag>,
+    px: f32,
 ) -> Vec<(ClipId, f32, f32)> {
     let mut x = left;
     board
@@ -932,12 +1023,14 @@ pub(crate) fn clip_spans(
         .map(|c| {
             let dragged = drag.filter(|d| d.clip == c.id.0).map(|d| d.secs);
             let secs = dragged.unwrap_or_else(|| c.duration.as_secs_f64());
-            let target = (secs as f32 * PX_PER_SEC).max(2.0);
+            // Lengths animate in seconds, so a zoom changes every card at once with the ruler
+            // and only a Re-cut's new lengths ease in (Z1).
             let anim = if dragged.is_some() { 0.0 } else { RECUT_ANIM_SECS };
-            let w = match ctx {
-                Some(ctx) => ctx.animate_value_with_time(egui::Id::new(("sb-clip-w", c.id.0)), target, anim),
-                None => target,
+            let secs = match ctx {
+                Some(ctx) => ctx.animate_value_with_time(egui::Id::new(("sb-clip-w", c.id.0)), secs as f32, anim),
+                None => secs as f32,
             };
+            let w = (secs * px).max(2.0);
             let span = (c.id, x, w);
             x += w;
             span
@@ -946,9 +1039,30 @@ pub(crate) fn clip_spans(
 }
 
 fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, at: Ticks) {
+    // Ctrl+wheel over the Strip zooms around the pointer (Z1).
+    let frame = ui.max_rect();
+    let zoom_by = ui.input(|i| i.zoom_delta());
+    if zoom_by != 1.0
+        && let Some(p) = ui.input(|i| i.pointer.hover_pos()).filter(|p| frame.contains(*p))
+    {
+        nav.state.storyboard.zoom_anchor = Some(p.x - frame.left());
+        nav.run("storyboard.zoom", json!({ "by": zoom_by }));
+    }
+    let px = px_per_sec(nav);
+    // A new scale (wheel, − / + / Fit, or `storyboard.zoom` from anywhere): scroll so the time
+    // under the anchor (the pointer, else the middle) stays where it was.
+    let anchor = nav.state.storyboard.zoom_anchor.take();
+    let rescroll = match nav.state.storyboard.view {
+        Some((old, offset, w)) if (old - px).abs() > f32::EPSILON => {
+            let at_x = anchor.unwrap_or(w / 2.0);
+            let t = (offset + at_x - 8.0) / old;
+            Some((t * px + 8.0 - at_x).max(0.0))
+        }
+        _ => None,
+    };
     let total = board.total().as_secs_f64() as f32;
     let track_len = board.track.as_ref().map(|t| t.duration.as_secs_f64() as f32).unwrap_or(0.0);
-    let width = (total.max(track_len) * PX_PER_SEC + 80.0).max(ui.available_width());
+    let width = (total.max(track_len) * px + 80.0).max(ui.available_width());
     let chosen: HashSet<ClipId> = nav.session.selected_clips().into_iter().collect();
     let playing = nav.session.transport().playing;
     let shift = ui.input(|i| i.modifiers.shift);
@@ -966,33 +1080,42 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let ctx = ui.ctx().clone();
     // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-    egui::ScrollArea::horizontal()
+    let mut area = egui::ScrollArea::horizontal()
         .auto_shrink([false, false])
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-        .show(ui, |ui| {
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible);
+    if let Some(x) = rescroll {
+        area = area.horizontal_scroll_offset(x);
+    }
+    let shown = area.show(ui, |ui| {
             let (area, _) = ui.allocate_exact_size(vec2(width, RULER_H + MARKER_H + STRIP_H + ROWS_H), Sense::hover());
             let left = area.left() + 8.0;
-            let to_secs = |x: f32| (((x - left) / PX_PER_SEC).max(0.0) as f64).min(total.max(0.0) as f64);
+            let to_secs = |x: f32| (((x - left) / px).max(0.0) as f64).min(total.max(0.0) as f64);
             // Ruler and scene-marker row: click or drag to move the playhead (finding B3).
             let ruler = Rect::from_min_size(area.min, vec2(width, RULER_H + MARKER_H));
             let tip = "Click or drag to move the playhead";
             if let Some((x, how)) = crate::timebar::scrub_area(ui, ruler, ui.id().with("sb-ruler"), tip) {
+                // A drag starts where the button went down, not where egui saw it move (Z2), so a
+                // Shift-drag is fine from its first point.
+                let x = match how {
+                    crate::timebar::Scrub::Start => ui.input(|i| i.pointer.press_origin()).map_or(x, |p| p.x),
+                    _ => x,
+                };
                 scrub = Some((to_secs(x), how));
             }
             let painter = ui.painter().clone();
             let weak = ui.visuals().weak_text_color();
             let ruler_line = Rect::from_min_size(area.min, vec2(width, RULER_H));
-            let len = f64::from((width - 8.0) / PX_PER_SEC);
-            crate::timebar::paint_ruler(&painter, ruler_line, PX_PER_SEC, len, |t| left + t as f32 * PX_PER_SEC, weak);
+            let len = f64::from((width - 8.0) / px);
+            crate::timebar::paint_ruler(&painter, ruler_line, px, len, |t| left + t as f32 * px, weak);
             if track_len > 0.0 {
-                let x = left + track_len * PX_PER_SEC;
+                let x = left + track_len * px;
                 painter.line_segment([pos2(x, area.top()), pos2(x, area.bottom())], Stroke::new(1.0, ACCENT));
             }
             // Scene markers and clips.
             let strip_top = area.top() + RULER_H + MARKER_H;
             let marker_y = area.top() + RULER_H + 2.0;
             let mut prev_scene = None;
-            let spans = clip_spans(board, left, Some(&ctx), resize);
+            let spans = clip_spans(board, left, Some(&ctx), resize, px);
             inset_cmds = inset_row(nav, ui, board, &spans, strip_top + STRIP_H + 4.0);
             audio_row(nav, ui, board, strip_top + STRIP_H + 4.0 + INSET_H + 4.0, left, width);
             inset_cmds.extend(voice_row(
@@ -1053,8 +1176,8 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 if grip.dragged()
                     && let Some(pointer) = grip.interact_pointer_pos()
                 {
-                    let want = f64::from((pointer.x - x) / PX_PER_SEC);
-                    let (secs, snapped) = snap_resize(board, n, want, at, snapping && !shift);
+                    let want = f64::from((pointer.x - x) / px);
+                    let (secs, snapped) = snap_resize(board, n, want, at, snapping && !shift, px);
                     snap_label = snapped.as_ref().map(|s| s.label.clone());
                     resize = Some(ResizeDrag { clip: id.0, secs, snapped: snapped.map(|s| s.at.as_secs_f64()) });
                 }
@@ -1079,15 +1202,15 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                     } else {
                         "Drag to move this cut: the clips either side trade length (snapping is off: S turns it on)"
                     });
-                    let from = f64::from((cx - left) / PX_PER_SEC);
+                    let from = f64::from((cx - left) / px);
                     if r.drag_started() {
                         cut_drag = Some(CutDrag { left: id.0, from, to: from, snapped: false });
                     }
                     if r.dragged()
                         && let Some(pointer) = r.interact_pointer_pos()
                     {
-                        let want = f64::from((pointer.x - left) / PX_PER_SEC);
-                        let (to, snapped) = snap_cut(board, n, want, at, snapping && !shift);
+                        let want = f64::from((pointer.x - left) / px);
+                        let (to, snapped) = snap_cut(board, n, want, at, snapping && !shift, px);
                         snap_label = snapped.as_ref().map(|s| s.label.clone());
                         cut_drag = Some(CutDrag { left: id.0, from, to, snapped: snapped.is_some() });
                     }
@@ -1103,7 +1226,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             }
             // A cut being dragged: where it would go, across the strip, with how far it moves.
             if let Some(d) = cut_drag {
-                let x = left + d.to as f32 * PX_PER_SEC;
+                let x = left + d.to as f32 * px;
                 let color = if d.snapped { SNAP_LINE } else { SELECT };
                 painter.vline(x, area.top()..=strip_top + STRIP_H, Stroke::new(2.0, color));
                 let moved = d.to - d.from;
@@ -1121,7 +1244,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             }
             // The snap line (C5): where the dragged end snapped, labelled in the marker row.
             if let Some(secs) = resize.and_then(|d| d.snapped) {
-                let x = left + secs as f32 * PX_PER_SEC;
+                let x = left + secs as f32 * px;
                 painter.vline(x, area.top()..=area.bottom(), Stroke::new(1.5, SNAP_LINE));
                 if let Some(label) = &snap_label {
                     painter.text(
@@ -1133,7 +1256,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                     );
                 }
             }
-            let x = left + at.as_secs_f64() as f32 * PX_PER_SEC;
+            let x = left + at.as_secs_f64() as f32 * px;
             crate::timebar::paint_playhead(&painter, x, area.top(), area.bottom(), SELECT);
             // Grab the playhead anywhere along it (over the clips too) and drag to scrub.
             let grab = crate::timebar::playhead_handle(ui, x, area.top(), area.bottom(), ui.id().with("sb-playhead"));
@@ -1144,11 +1267,28 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 ui.scroll_to_rect(Rect::from_min_size(pos2(x - 40.0, area.top()), vec2(200.0, 10.0)), None);
             }
         });
+    nav.state.storyboard.view = Some((px, shown.state.offset.x, shown.inner_rect.width()));
     nav.state.storyboard.resize_drag = resize;
     nav.state.storyboard.cut_drag = cut_drag;
     nav.state.storyboard.snap_label =
         snap_label.filter(|_| resize.is_some_and(|d| d.snapped.is_some()) || cut_drag.is_some_and(|d| d.snapped));
-    if let Some((secs, how)) = scrub {
+    if let Some((mut secs, how)) = scrub {
+        // Shift-drag on the ruler scrubs at a quarter of the pointer's speed, from where the drag
+        // began (Z2: "slowly scrub the video for positioning").
+        use crate::timebar::Scrub;
+        let origin = nav.state.storyboard.fine_scrub;
+        if shift
+            && matches!(how, Scrub::Move | Scrub::Stop)
+            && let Some(origin) = origin
+        {
+            secs = origin + (secs - origin) / FINE_SCRUB;
+        } else if matches!(how, Scrub::Start | Scrub::Move) {
+            // Full speed: the anchor follows, so Shift slows down from wherever it is pressed.
+            nav.state.storyboard.fine_scrub = Some(secs);
+        }
+        if matches!(how, Scrub::Stop | Scrub::Click) {
+            nav.state.storyboard.fine_scrub = None;
+        }
         scrub_to(nav, secs, how, playing);
     }
     if let Some(d) = resized {
@@ -1372,9 +1512,10 @@ fn voice_row(
     top: f32,
     left: f32,
 ) -> Vec<(&'static str, serde_json::Value)> {
+    let px = px_per_sec(nav);
     let mut out: Vec<(&'static str, serde_json::Value)> = Vec::new();
     let painter = ui.painter().clone();
-    let w = (board.total().as_secs_f64() as f32 * PX_PER_SEC).max(120.0);
+    let w = (board.total().as_secs_f64() as f32 * px).max(120.0);
     let rect = Rect::from_min_size(pos2(left, top), vec2(w, VOICE_H));
     let response = ui.interact(rect, egui::Id::new("sb-voiceover"), Sense::click());
     let hovering = response.dnd_hover_payload::<DragAsset>().is_some();
@@ -1453,6 +1594,7 @@ fn voice_row(
 /// the edit's segments (a chorus loop) butted together — with the waveform, the section bands
 /// and a splice mark where the music jumps.
 fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, left: f32, width: f32) {
+    let px = px_per_sec(nav);
     let painter = ui.painter().clone();
     let rect = Rect::from_min_size(pos2(left, top), vec2(width - 16.0, AUDIO_H));
     painter.rect_filled(rect, 2, Color32::from_gray(0x1b));
@@ -1466,7 +1608,7 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
         );
         return;
     };
-    let x_of = |t: f64| left + t as f32 * PX_PER_SEC;
+    let x_of = |t: f64| left + t as f32 * px;
     // Section bands (output time).
     for sec in &track.song_sections {
         let r = Rect::from_min_max(
@@ -1520,23 +1662,46 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
     let wave = Color32::from_rgb(0x5b, 0x8f, 0xc9);
     let splice = Color32::from_rgb(0xe0, 0xa0, 0x40);
     let visible = ui.clip_rect();
-    for &(a, b, off) in &pieces {
+    for (i_piece, &(a, b, off)) in pieces.iter().enumerate() {
         let (x0, x1) = (x_of(off), x_of(off + (b - a)));
-        if !samples.is_empty() && wave_secs > 0.0 {
+        // The visible part of this piece, a column per point (Z1): measured from the decoded
+        // audio for just that window when the overview is too coarse for the zoom, the overview
+        // otherwise or while the window is being read.
+        let (vx0, vx1) = (x0.max(visible.left()).floor(), x1.min(visible.right()).ceil());
+        if vx1 <= vx0 || samples.is_empty() || wave_secs <= 0.0 {
+            // Nothing to draw here.
+        } else {
             let n = samples.len();
-            let mut x = x0.max(visible.left()).floor();
-            while x < x1.min(visible.right()) {
-                let (t0, t1) = (a + f64::from((x - x0) / PX_PER_SEC), a + f64::from((x + 1.0 - x0) / PX_PER_SEC));
-                if t0 < wave_secs {
-                    let i0 = ((t0 / wave_secs * n as f64) as usize).min(n - 1);
-                    let i1 = ((t1 / wave_secs * n as f64).ceil() as usize).clamp(i0 + 1, n);
-                    let (lo, hi) =
-                        samples[i0..i1].iter().fold((0.0f64, 0.0f64), |(lo, hi), (p, q)| (lo.min(*p), hi.max(*q)));
-                    painter.line_segment(
-                        [pos2(x + 0.5, mid - hi as f32 * half), pos2(x + 0.5, mid - lo as f32 * half + 1.0)],
-                        Stroke::new(1.0, wave),
-                    );
-                }
+            let coarse = wave_secs / n as f64 > 1.0 / f64::from(px);
+            let cols = ((vx1 - vx0) as usize).clamp(16, 4096);
+            let (from, to) = (a + f64::from((vx0 - x0) / px), a + f64::from((vx1 - x0) / px));
+            let fine =
+                if coarse && from < wave_secs { window_peaks(nav, &track.id.0, i_piece, from, to, cols) } else { None };
+            let mut x = vx0;
+            while x < vx1 {
+                let (lo, hi) = match &fine {
+                    Some(w) => w
+                        .get(((x - vx0) as usize * w.len()) / ((vx1 - vx0) as usize).max(1))
+                        .copied()
+                        .unwrap_or_default(),
+                    None => {
+                        let (t0, t1) = (a + f64::from((x - x0) / px), a + f64::from((x + 1.0 - x0) / px));
+                        if t0 >= wave_secs {
+                            (0.0, 0.0)
+                        } else {
+                            let i0 = ((t0 / wave_secs * n as f64) as usize).min(n - 1);
+                            let i1 = ((t1 / wave_secs * n as f64).ceil() as usize).clamp(i0 + 1, n);
+                            let (lo, hi) = samples[i0..i1]
+                                .iter()
+                                .fold((0.0f64, 0.0f64), |(lo, hi), (p, q)| (lo.min(*p), hi.max(*q)));
+                            (lo as f32, hi as f32)
+                        }
+                    }
+                };
+                painter.line_segment(
+                    [pos2(x + 0.5, mid - hi * half), pos2(x + 0.5, mid - lo * half + 1.0)],
+                    Stroke::new(1.0, wave),
+                );
                 x += 1.0;
             }
         }
@@ -1561,6 +1726,37 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
             Stroke::new(1.5, Color32::from_gray(0xcc)),
         );
     }
+}
+
+/// The song's peaks for `from..to` seconds of the file at `cols` columns (Z1), from
+/// `track.peaks {from, to}`: kept per music piece, so a still Strip reads nothing new each frame.
+/// `None` while the song is still decoding.
+fn window_peaks(
+    nav: &mut Navigator,
+    path: &str,
+    piece: usize,
+    from: f64,
+    to: f64,
+    cols: usize,
+) -> Option<Vec<(f32, f32)>> {
+    let key = format!("{path}|{from:.4}|{to:.4}|{cols}");
+    if let Some((k, v)) = nav.state.storyboard.wave_windows.get(&piece)
+        && *k == key
+    {
+        return Some(v.clone());
+    }
+    let r =
+        nav.session.execute("track.peaks", &json!({ "path": path, "from": from, "to": to, "buckets": cols })).ok()?;
+    let peaks: Vec<(f32, f32)> = r["peaks"]
+        .as_array()?
+        .iter()
+        .map(|p| (p[0].as_f64().unwrap_or(0.0) as f32, p[1].as_f64().unwrap_or(0.0) as f32))
+        .collect();
+    if nav.state.storyboard.wave_windows.len() > 32 {
+        nav.state.storyboard.wave_windows.clear();
+    }
+    nav.state.storyboard.wave_windows.insert(piece, (key, peaks.clone()));
+    Some(peaks)
 }
 
 /// A cut drag released (C1b): one `storyboard.roll {left, to}` — one undo step — unless it ends

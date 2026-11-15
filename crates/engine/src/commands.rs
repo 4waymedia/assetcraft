@@ -375,7 +375,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Track Waveform",
         "Storyboard",
         None,
-        "{path, buckets?: 16..4096} → {path, status: loading|ready|failed, seconds?, peaks?: [[min, max]], error?} (decodes in the background; ask again while loading)",
+        "{path, buckets?: 16..4096, from?: seconds, to?: seconds} → {path, status: loading|ready|failed, seconds?, peaks?: [[min, max]], error?} (the whole file, or with from/to just that window at full detail; decodes in the background; ask again while loading)",
         crate::waveform::track_peaks
     ),
     cmd!(
@@ -568,6 +568,15 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{db: integer} → {db, message} (the song's level in the Cut's mix, -30..=6 dB, 0 = as the file is; playback and the exported video both use it; one undo step)",
         crate::inset_cmd::sb_track_level
+    ),
+    cmd!(
+        APP,
+        "storyboard.zoom",
+        "Zoom Strip",
+        "View",
+        None,
+        "{zoom?: 0.25..16 | by?: factor} → {zoom, message} (the Strip's zoom, 1 = 44 pt a second; Ctrl+wheel over the Strip zooms around the pointer)",
+        crate::cut_cmd::sb_zoom
     ),
     cmd!(
         APP_STEP,
