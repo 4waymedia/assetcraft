@@ -111,6 +111,41 @@ Decision (Paul, 2026-11-14): C1–C4 call `filmcraft-edit`; the adapter lives in
 storyboard model stays independent. R-C3's upstream `craft-timeline::edit` becomes a nice-to-have.
 Snapping (C5) stays AssetCraft's, shaped like FilmCraft's.
 
+### 4.2 Spike S3 (2026-11-15): decoding video in-app with FilmCraft's codecs
+
+Paul, 2026-11-15: "mp4 videos do not display/play in the preview, so I cannot properly edit the
+timeline". Finding R-C7: AssetCraft decodes no video inside clips (a poster frame through
+`filmcraft-cli`, `thumbs/src/decoders/video.rs`; the animatic draws a poster box,
+`animatic/src/lib.rs:224`). The spike opened files through `filmcraft_codecs::Mp4Source`
+(FilmCraft `v0.20.1`, `crates/codecs/src/lib.rs`: its own pure-Rust H.264 / HEVC / VP9 / ProRes /
+…, GOP-aware seeking with the GOP's frames cached) in a standalone program with AssetCraft's
+release profile. Container: 2 cores; Paul's PC will be several times faster.
+
+| File (made with ffmpeg)                       | Open + first frame | Sequential (playback)       | Random seek, average / worst | Frame → RGBA |
+| --------------------------------------------- | ------------------ | --------------------------- | ---------------------------- | ------------ |
+| 1080p30 H.264 High, 8 Mb/s, GOP 2 s, AAC, 20 s | 101 ms             | 7.3 ms a frame (137 fps)    | 189 / 415 ms                 | 92 ms        |
+| 1080p30 HEVC, GOP 2 s, 6 s                     | 24 ms              | 6.6 ms a frame (152 fps)    | 125 / 416 ms                 | 24 ms        |
+| 2160p30 H.264, 30 Mb/s, GOP 2 s, 6 s           | 533 ms             | 34 ms a frame (29 fps)      | 745 / 1892 ms                | 1215 ms      |
+| test_data 160×90 H.264, MP4 and MOV            | 1.3 / 0.7 ms       | 0.05 ms a frame             | 0.0 ms                       | 0.8 ms       |
+
+- **Size:** +5.75 MB stripped (spike 6.08 MB against an empty program's 0.33 MB): AssetCraft would
+  go from about 37.6 to about 43 MB of the 100 MB budget.
+- **Licences:** 108 crates, all inside `deny.toml`'s allowlist except symphonia's MPL-2.0 crates,
+  which decision AD1 already allows by name (`soundcraft-audio-io` uses them).
+- **What it means:** playback of 1080p (H.264 and HEVC) is comfortably real time on 2 cores;
+  a seek costs up to one GOP (decode from the keyframe), so scrubbing needs a frame cache, a
+  background decode thread and preview-sized frames. `FrameRequest.scale` was not honoured by
+  these sources (full-size frames came back), so the preview scales down itself
+  (`VideoFrame::box_decimated`), and the RGBA conversion belongs on the decode thread. 4K plays
+  at about 29 fps here; on Paul's PC it should play, and it is the case that most needs the
+  background thread.
+- **Recommendation:** adopt `filmcraft-codecs` at the pinned tag, behind an engine-layer frame
+  service (one decode thread, a small LRU of preview-sized RGBA frames, prefetch while playing),
+  in these steps: **P1** the preview shows the video frame under the playhead for a video clip;
+  **P2** playback plays it (sequential path, frames ahead of the playhead); **C6a** `Clip.sourceIn`
+  + `storyboard.slip`; **C6b** Alt-drag slip with the frame following live. Owner: Claude; Paul
+  approves the dependency (+5.75 MB).
+
 ## 5. Pinning the suite and staying in step
 
 What AssetCraft pins today (`Cargo.toml`), and what its siblings pin:
