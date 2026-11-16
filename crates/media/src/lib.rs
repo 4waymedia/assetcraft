@@ -402,6 +402,15 @@ fn decode(src: &SharedSource, index: u64, fps: f64, side: u32) -> Result<Frame, 
     Ok(Frame { width: small.width, height: small.height, rgba, index })
 }
 
+/// How long the video at `path` runs, in seconds, from its header (C6: a slip's limit). Opens
+/// the file on the calling thread; quick, as no frame is decoded.
+pub fn seconds(path: &Path) -> Result<f64, String> {
+    let src = open_file(path)?;
+    fps_of(&src)?;
+    let secs = src.info().duration.seconds();
+    if secs.is_finite() && secs > 0.0 { Ok(secs) } else { Err("the video has no length".into()) }
+}
+
 /// Open `path` as FilmCraft does: a pooled file reader and the codecs' openers.
 fn open_file(path: &Path) -> Result<SharedSource, String> {
     let reader = filmcraft_media::reader::FileReader::open(path).map_err(|e| format!("can't read the file: {e}"))?;

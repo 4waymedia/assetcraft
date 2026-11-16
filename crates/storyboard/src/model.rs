@@ -173,6 +173,11 @@ pub struct Clip {
     /// How the camera moves over the clip (see [`crate::motion`]); `None` holds still.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<Motion>,
+    /// Where in its video the clip starts (C6 slip; Paul, 2026-11-16: "is there a way to change
+    /// the in point for the video clip?"): the Viewer, playback and read-ahead play from here.
+    /// Zero (the video's start) is left out of the file.
+    #[serde(default, skip_serializing_if = "Ticks::is_zero")]
+    pub source_in: Ticks,
 }
 
 impl Clip {
@@ -193,6 +198,7 @@ impl Clip {
             overlay: None,
             text_style: TextStyle::default(),
             motion: None,
+            source_in: Ticks::ZERO,
         }
     }
 
@@ -219,6 +225,15 @@ impl Clip {
     /// A title card's background asset, if it has one.
     pub fn background(&self) -> Option<&AssetId> {
         if self.shot_type == ShotType::Ttl { self.asset_ids.first() } else { None }
+    }
+
+    /// Give the clip `assets` (the first is its hero). A different hero starts from the start of
+    /// its video again: an in-point belongs to the video it was set on (C6).
+    pub fn set_assets(&mut self, assets: Vec<AssetId>) {
+        if self.asset_ids.first() != assets.first() {
+            self.source_in = Ticks::ZERO;
+        }
+        self.asset_ids = assets;
     }
 
     /// Whether Quick fill should place an asset here.

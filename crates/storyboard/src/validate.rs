@@ -182,6 +182,9 @@ impl Storyboard {
             if c.duration > l.max_duration {
                 return Err(BoardError::Limit(format!("clip #{} is longer than the limit", c.id.0)));
             }
+            if c.source_in > l.max_duration {
+                return Err(BoardError::Limit(format!("clip #{}'s in-point is past the limit", c.id.0)));
+            }
             total = total
                 .checked_add(c.duration)
                 .filter(|t| *t <= l.max_duration)

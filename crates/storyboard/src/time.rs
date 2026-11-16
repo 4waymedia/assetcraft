@@ -24,6 +24,11 @@ impl Ticks {
     /// Zero.
     pub const ZERO: Ticks = Ticks(0);
 
+    /// Whether this is zero (for leaving zero times out of a file).
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+
     /// Whole seconds.
     pub fn from_secs(secs: u64) -> Option<Ticks> {
         secs.checked_mul(TICKS_PER_SECOND).map(Ticks)

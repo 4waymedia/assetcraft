@@ -346,7 +346,7 @@ impl Storyboard {
             let mut c = clip.clone();
             c.id = ClipId(next_clip + i as u32);
             c.scene_id = *scene_id;
-            c.asset_ids.clear();
+            c.set_assets(Vec::new());
             c.description = fill(&clip.description);
             c.overlay = clip.overlay.as_deref().map(fill).filter(|o| !o.is_empty());
             self.clips.push(c);
@@ -367,7 +367,7 @@ impl Storyboard {
         t.track = None;
         t.preset = None;
         for clip in &mut t.clips {
-            clip.asset_ids.clear();
+            clip.set_assets(Vec::new());
         }
         for scene in &mut t.scenes {
             if let Some(inset) = &mut scene.inset {

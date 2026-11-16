@@ -40,7 +40,7 @@ mod working_cmd;
 
 pub use analyse_job::{AnalyseProgress, AnalyseState};
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
-pub use assetcraft_media::{Frame as VideoFrame, Lookup as VideoLookup, is_video};
+pub use assetcraft_media::{Frame as VideoFrame, Lookup as VideoLookup, is_video, seconds as video_seconds};
 pub use assetcraft_thumbs::DiskCache;
 pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
@@ -766,6 +766,8 @@ mod rename_tests;
 mod resize_tests;
 #[cfg(test)]
 mod roll_tests;
+#[cfg(test)]
+mod slip_tests;
 #[cfg(test)]
 mod storyboard_tests;
 #[cfg(test)]

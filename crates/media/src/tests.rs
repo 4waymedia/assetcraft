@@ -79,3 +79,12 @@ fn reading_ahead_makes_the_coming_frames_ready() {
     }
     assert!(worker_count() >= 1, "every core but the UI's, at least one");
 }
+
+#[test]
+fn a_video_s_length_comes_from_its_header() {
+    for name in ["snow_clearing_flythrough.mp4", "snow_clearing_flythrough.mov"] {
+        let secs = seconds(&library(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!((secs - 2.0).abs() < 0.05, "{name}: {secs}");
+    }
+    assert!(seconds(&library("no_such_clip.mp4")).is_err());
+}

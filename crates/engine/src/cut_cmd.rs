@@ -23,6 +23,69 @@ fn tick_secs(t: Tick) -> f64 {
     t.0 as f64 / TICKS_PER_SECOND as f64
 }
 
+/// `storyboard.slip {clip, seconds? | to?}` (C6): change where in its video clip `clip` starts,
+/// by `seconds` (signed) or `to` a time in the video, without moving it or changing its length.
+/// Limited to the video's start and the last in-point that still fills the clip; the reply says
+/// where it landed. Video clips only.
+pub(crate) fn sb_slip(s: &mut Session, p: &Value) -> CmdResult {
+    let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let index = board.index_of(id).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", id.0)))?;
+    let clip = &board.clips[index];
+    let hero = clip
+        .asset_ids
+        .first()
+        .filter(|a| {
+            clip.shot_type != assetcraft_storyboard::ShotType::Ttl && crate::is_video(std::path::Path::new(&a.0))
+        })
+        .ok_or_else(|| {
+            CmdError::BadParams(format!("clip #{} has no video: only a video has an in-point", index + 1))
+        })?;
+    let video = assetcraft_media::seconds(std::path::Path::new(&hero.0))
+        .map_err(|e| CmdError::Unavailable(format!("can't read the video's length: {e}")))?;
+    let video = secs_to_tick(video).ok_or_else(|| CmdError::Unavailable("the video is too long to edit".into()))?;
+    let was = cut_adapter::tick(clip.source_in)?;
+
+    let given = ["seconds", "to"].iter().filter(|k| p.get(**k).is_some_and(|v| !v.is_null())).count();
+    if given != 1 {
+        return Err(CmdError::BadParams("give one of `seconds` or `to`".into()));
+    }
+    let asked = if let Some(v) = p.get("seconds").filter(|v| !v.is_null()) {
+        v.as_f64().and_then(secs_to_tick).ok_or_else(|| CmdError::BadParams("`seconds` must be a number".into()))?
+    } else {
+        let to = p
+            .get("to")
+            .and_then(Value::as_f64)
+            .filter(|t| *t >= 0.0)
+            .and_then(secs_to_tick)
+            .ok_or_else(|| CmdError::BadParams("`to` must be a time in the video, in seconds".into()))?;
+        Tick(to.0.saturating_sub(was.0))
+    };
+
+    let min = Ticks::from_secs_f64(MIN_CLIP_SECS).unwrap_or(Ticks(1));
+    let (now, moved) = cut_adapter::slip(&board, id, asked, video, min)?;
+    let changed = moved != Tick::ZERO;
+    if changed {
+        board.clips[index].source_in = now;
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    let at = now.as_secs_f64();
+    Ok(json!({
+        "clip": id.0,
+        "changed": changed,
+        "moved": tick_secs(moved),
+        "in": at,
+        "video": tick_secs(video),
+        "limited": moved != asked,
+        "message": if changed {
+            format!("Clip #{:02} now starts {at:.2} s into its video ({:+.2} s)", index + 1, tick_secs(moved))
+        } else {
+            format!("Clip #{:02} can't slip that way: it starts {at:.2} s into its video", index + 1)
+        },
+    }))
+}
+
 /// `storyboard.roll {left, seconds? | beats? | to?}`: move the cut after clip `left` by `seconds`
 /// (signed), by `beats` of the track (signed), or `to` a time in the Cut (seconds). The move is
 /// limited so neither clip gets shorter than half a second; the reply says how far it went.
@@ -154,6 +217,11 @@ pub(crate) fn sb_split(s: &mut Session, p: &Value) -> CmdResult {
             let mut half = source.clone();
             half.id = new_id;
             half.duration = len;
+            // The second half carries on where the first stops in the video (C6).
+            if source.asset_ids.first().is_some_and(|a| crate::is_video(std::path::Path::new(&a.0))) {
+                let first = Ticks(source.duration.0.saturating_sub(len.0));
+                half.source_in = source.source_in.checked_add(first).unwrap_or(source.source_in);
+            }
             half.transition_in = assetcraft_storyboard::Transition::Cut;
             half.notes.clear();
             half.overlay = None;

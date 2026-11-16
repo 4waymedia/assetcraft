@@ -534,6 +534,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.slip",
+        "Slip Clip",
+        "Storyboard",
+        None,
+        "{clip: number, seconds?: number | to?: number} → {in, moved, video, limited, message} (change where in its video a clip starts, by seconds, signed, or to a time in the video, without moving the clip or changing its length; it can't start before the video or so late the video runs out before the clip ends; video clips only; FilmCraft's slip; one undo step)",
+        crate::cut_cmd::sb_slip
+    ),
+    cmd!(
+        EDIT,
         "storyboard.split",
         "Split Clip",
         "Storyboard",

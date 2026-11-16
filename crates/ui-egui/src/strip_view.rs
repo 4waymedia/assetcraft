@@ -267,6 +267,11 @@ pub(crate) struct SbUi {
     pub(crate) fine_scrub: Option<f64>,
     /// A volume-line drag in progress (V3).
     pub(crate) vol_drag: Option<VolDrag>,
+    /// The Inspector's In field mid-drag (C6): `(clip, seconds into its video)`, shown live and
+    /// committed as one `storyboard.slip` when it ends.
+    pub(crate) slip_drag: Option<(u32, f64)>,
+    /// Videos' lengths in seconds, read once from their headers (C6: the In field's limit).
+    pub(crate) video_len: HashMap<String, Option<f64>>,
     /// The Viewer's video frames (P1): the frame number shown per file, and its texture.
     pub(crate) video_tex: VideoTextures,
     /// The zoomed waveform's last window per music piece: `(key, peaks)` (Z1).
@@ -900,10 +905,11 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
         return;
     }
     match clip.asset_ids.first() {
-        // A video plays its own frames (P1): the frame `elapsed` seconds in, the first at rest.
+        // A video plays its own frames (P1) from the clip's in-point (C6): the frame `elapsed`
+        // seconds after it, the in-point itself at rest.
         Some(hero)
             if assetcraft_engine::is_video(Path::new(&hero.0))
-                && show_video(nav, ui, frame, Path::new(&hero.0), elapsed) => {}
+                && show_video(nav, ui, frame, Path::new(&hero.0), video_secs(in_point(nav, clip), elapsed)) => {}
         Some(hero) => {
             let still = match thumb(nav, ui, Path::new(&hero.0), 512.0, index) {
                 Cell::Ready(texture, size) => Some((texture, size)),
@@ -951,13 +957,32 @@ fn read_ahead(nav: &Navigator, ui: &Ui, frame: Rect, board: &Storyboard, clip: &
     };
     let left = clip.duration.as_secs_f64() - elapsed;
     let next = board.index_of(clip.id).and_then(|i| board.clips.get(i + 1));
-    match (video(clip), next.and_then(video)) {
-        (_, Some(next)) if left <= 1.0 => nav.session.video_ahead(&next, 0.0, 1.0, side),
-        (Some(this), _) => {
-            nav.session.video_ahead(&this, elapsed.max(0.0), READ_AHEAD_SECS.min(left.max(0.0) + 0.1), side)
-        }
+    match (video(clip), next.and_then(|n| video(n).map(|p| (p, n.source_in.as_secs_f64())))) {
+        (_, Some((next, from))) if left <= 1.0 => nav.session.video_ahead(&next, from, 1.0, side),
+        (Some(this), _) => nav.session.video_ahead(
+            &this,
+            video_secs(clip.source_in.as_secs_f64(), elapsed),
+            READ_AHEAD_SECS.min(left.max(0.0) + 0.1),
+            side,
+        ),
         _ => nav.session.video_stop_ahead(),
     }
+}
+
+/// Where in its video a clip with in-point `from` is, `elapsed` seconds into the clip
+/// (`f64::INFINITY`: at rest, the in-point).
+fn video_secs(from: f64, elapsed: f64) -> f64 {
+    from + if elapsed.is_finite() { elapsed.max(0.0) } else { 0.0 }
+}
+
+/// Where `clip` starts in its video (C6): the In field's value while it is dragged, else the
+/// clip's own.
+fn in_point(nav: &Navigator, clip: &Clip) -> f64 {
+    nav.state
+        .storyboard
+        .slip_drag
+        .filter(|(id, _)| *id == clip.id.0)
+        .map_or_else(|| clip.source_in.as_secs_f64(), |(_, secs)| secs)
 }
 
 /// The size video frames are decoded at for the Viewer `frame` (its longest side in pixels).
@@ -965,12 +990,11 @@ fn video_side(ui: &Ui, frame: Rect) -> u32 {
     (frame.width().max(frame.height()) * ui.ctx().pixels_per_point()).clamp(64.0, 1920.0) as u32
 }
 
-/// The video at `path`, `elapsed` seconds in (`f64::INFINITY`: at rest, its first frame), into
+/// The video at `path`, `secs` seconds in, into
 /// `frame` (P1): the decoded frame if ready, else the nearest one decoded so far while the
 /// worker catches up. `false` when there is nothing to show yet (the caller shows the poster) or
 /// the file can't be played.
-fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, elapsed: f64) -> bool {
-    let secs = if elapsed.is_finite() { elapsed.max(0.0) } else { 0.0 };
+fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, secs: f64) -> bool {
     let side = video_side(ui, frame);
     let shown = match nav.session.video_frame(path, secs, side) {
         assetcraft_engine::VideoLookup::Ready(f) => Some(f),
@@ -2094,6 +2118,60 @@ pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboar
     if r.drag_stopped() || (moved && !r.dragged()) {
         let secs = if moved { value } else { before };
         commit_resize(nav, ResizeDrag { clip: id, secs, snapped: None });
+    }
+    ui.add_space(4.0);
+}
+
+/// The Inspector's In row (C6) for a video clip: where in its video the clip starts, a drag value
+/// in seconds that the Viewer follows live, committed as one `storyboard.slip` (one undo step)
+/// when the drag ends or a typed value lands. Limited to the video's start and the last in-point
+/// that still fills the clip. Nothing for other clips.
+pub(crate) fn in_field(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
+    let Some(hero) = clip
+        .asset_ids
+        .first()
+        .filter(|a| clip.shot_type != ShotType::Ttl && assetcraft_engine::is_video(Path::new(&a.0)))
+    else {
+        return;
+    };
+    let len = *nav
+        .state
+        .storyboard
+        .video_len
+        .entry(hero.0.clone())
+        .or_insert_with(|| assetcraft_engine::video_seconds(Path::new(&hero.0)).ok());
+    let Some(len) = len else { return };
+    ui.label(RichText::new("In").size(10.0).color(ui.visuals().weak_text_color()));
+    let id = clip.id.0;
+    let before = in_point(nav, clip);
+    let max = (len - clip.duration.as_secs_f64()).max(0.0);
+    let mut value = before;
+    let r = ui
+        .horizontal(|ui| {
+            let r = ui.add_enabled(
+                max > 0.0,
+                egui::DragValue::new(&mut value).range(0.0..=max).speed(1.0 / FPS).fixed_decimals(2).suffix(" s"),
+            );
+            let r = if max > 0.0 {
+                r.on_hover_text("Where in its video the clip starts: drag or type (Ctrl+Z undoes)")
+            } else {
+                r.on_disabled_hover_text("The video is no longer than the clip, so it can only start at its start")
+            };
+            ui.weak(format!("{} · of {len:.1} s", frame_timecode(value)));
+            r
+        })
+        .inner;
+    // As the Duration field: the widget's first-frame rounding isn't a move.
+    let moved = r.changed() && (value - before).abs() >= 0.005;
+    if moved {
+        nav.state.storyboard.slip_drag = Some((id, value));
+    }
+    if r.drag_stopped() || (moved && !r.dragged()) {
+        nav.state.storyboard.slip_drag = None;
+        let to = if moved { value } else { before };
+        if (to - clip.source_in.as_secs_f64()).abs() >= 0.005 {
+            nav.run("storyboard.slip", json!({ "clip": id, "to": to }));
+        }
     }
     ui.add_space(4.0);
 }

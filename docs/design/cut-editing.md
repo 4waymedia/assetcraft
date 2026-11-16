@@ -55,7 +55,7 @@ split divides one, a ripple delete removes one.
 | C3  | **Split at the playhead** | Ctrl+K, or the clip menu                                              | `storyboard.split {clip?, at?}`                              | `sequence.addEdit` (Cmd+K)        |
 | C4  | **Delete and close up**  | Delete (exists)                                                       | `storyboard.delete` (exists)                                 | `edit.rippleDelete`               |
 | C5  | **Snapping** for C1–C3 and the playhead | On by default; S toggles; a line shows where it snapped | `storyboard.snapping {on?}`                                  | `sequence.snap` (S)               |
-| C6  | Slip (later)             | Alt-drag inside a video clip                                          | `storyboard.slip {clip, seconds}`; needs `Clip.source_in`    | `slip`                           |
+| C6  | Slip (**C6a built 2026-11-16**; C6b next) | C6a: the Inspector's In field; C6b: Alt-drag inside a video clip | `storyboard.slip {clip, seconds? \| to?}`; `Clip.source_in` | `slip`                           |
 
 Each is one command and one undo step, and works from the CLI and MCP like every other command.
 Video-specific editing beyond this (multiple tracks, slide, rate stretch, transitions on the cut)

@@ -2038,3 +2038,48 @@ fn playing_a_video_clip_keeps_its_frames_with_the_playhead() {
     frame(&ctx, &mut nav, Vec::new(), t + 0.05);
     assert!(!nav.session().transport().playing);
 }
+
+/// C6a: a slipped video clip shows its video from the in-point, and the Inspector's In field
+/// (read once from the video's header) moves the Viewer live while it is dragged.
+#[test]
+fn a_slipped_video_clip_shows_its_video_from_the_in_point() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let lib = lib.canonicalize().unwrap_or(lib);
+    assert!(nav.open_folder(&lib));
+    let video = lib.join("snow_clearing_flythrough.mp4");
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let (i, clip) =
+        board.clips.iter().enumerate().find(|(_, c)| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap();
+    let id = clip.id.0;
+    nav.run("storyboard.place", json!({ "asset": video.to_string_lossy(), "clip": id }));
+    nav.run("storyboard.resize", json!({ "clip": id, "seconds": 0.5 }));
+    nav.run("storyboard.select", json!({ "clip": id }));
+    nav.run("storyboard.seek", json!({ "seconds": board.starts()[i].as_secs_f64() }));
+    let r = nav.run("storyboard.slip", json!({ "clip": id, "to": 1.0 })).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    let mut t = 0.0;
+    let shown = |nav: &Navigator| nav.state.storyboard.video_tex.0.get(&video).map(|(i, _)| *i);
+    let mut wait = |nav: &mut Navigator, want: u64| {
+        for _ in 0..400 {
+            t += 0.016;
+            frame(&ctx, nav, Vec::new(), t);
+            if shown(nav) == Some(want) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    };
+    // 12 fps: one second into the video is frame 12.
+    assert!(wait(&mut nav, 12), "from the in-point, got {:?}", shown(&nav));
+    let len = nav.state.storyboard.video_len.get(&*video.to_string_lossy()).copied().flatten();
+    assert!(len.is_some_and(|l| (l - 2.0).abs() < 0.05), "the In field read the video's length: {len:?}");
+    // Mid-drag, the Viewer follows the field before anything is committed.
+    nav.state.storyboard.slip_drag = Some((id, 0.5));
+    assert!(wait(&mut nav, 6), "half a second in while dragging, got {:?}", shown(&nav));
+    let at = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(id)).unwrap().source_in;
+    assert!((at.as_secs_f64() - 1.0).abs() < 1e-6, "a drag commits nothing until it ends");
+}

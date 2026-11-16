@@ -49,7 +49,7 @@ pub fn place(board: &mut Storyboard, asset: AssetId, target: Option<ClipId>) -> 
     if !clip.shot_type.accepts_drop() {
         return Err(FillError::TitleCard(id));
     }
-    clip.asset_ids = vec![asset];
+    clip.set_assets(vec![asset]);
     Ok(id)
 }
 
@@ -73,7 +73,7 @@ pub fn delete(board: &mut Storyboard, ids: &[ClipId]) -> Result<Deleted, FillErr
     if board.clips.iter().any(|c| chosen(c) && !c.asset_ids.is_empty()) {
         let mut n = 0;
         for c in board.clips.iter_mut().filter(|c| chosen(c) && !c.asset_ids.is_empty()) {
-            c.asset_ids.clear();
+            c.set_assets(Vec::new());
             n += 1;
         }
         return Ok(Deleted::Shots(n));
@@ -98,7 +98,7 @@ pub fn auto_fill(board: &mut Storyboard, assets: &[AssetId]) -> Vec<ClipId> {
     let mut filled = Vec::new();
     for (k, clip) in board.clips.iter_mut().filter(|c| c.is_empty_shot()).enumerate() {
         let asset = if k < fresh { queue[k].clone() } else { assets[(k - fresh) % assets.len()].clone() };
-        clip.asset_ids = vec![asset];
+        clip.set_assets(vec![asset]);
         filled.push(clip.id);
     }
     filled
@@ -108,7 +108,7 @@ pub fn auto_fill(board: &mut Storyboard, assets: &[AssetId]) -> Vec<ClipId> {
 pub fn clear(board: &mut Storyboard) -> usize {
     let mut n = 0;
     for clip in board.clips.iter_mut().filter(|c| !c.asset_ids.is_empty()) {
-        clip.asset_ids.clear();
+        clip.set_assets(Vec::new());
         n += 1;
     }
     n

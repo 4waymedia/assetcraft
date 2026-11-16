@@ -109,6 +109,49 @@ pub(crate) fn edit<T>(cut: &mut CutSeq, f: impl FnOnce(&mut Sequence, &mut EditC
     f(&mut cut.seq, &mut ctx)
 }
 
+/// The item for `fc` on the Cut's one track.
+fn slipped(seq: &mut Sequence, fc: FcClipId) -> Option<&mut TrackItem> {
+    seq.video_tracks.first_mut().and_then(|t| t.items.iter_mut().find(|i| i.id == fc))
+}
+
+/// FilmCraft's media id for the clip being slipped (every other item is `ItemId(1)`): the one
+/// item whose media has a length.
+const SLIPPED: ItemId = ItemId(2);
+
+/// Slip `clip` by `delta` (C6, FilmCraft's `slip`): move where in its video it starts, keeping
+/// its place and length. Its item alone gets the video's length, `video`, so the in-point stays
+/// between the video's start and the last point that still fills the clip. Returns the new
+/// in-point and how far it moved.
+pub(crate) fn slip(
+    board: &Storyboard,
+    clip: ClipId,
+    delta: Tick,
+    video: Tick,
+    min: Ticks,
+) -> Result<(Ticks, Tick), CmdError> {
+    let current =
+        board.clip(clip).map(|c| c.source_in).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", clip.0)))?;
+    let mut cut = to_sequence(board, min)?;
+    let fc = FcClipId(u64::from(clip.0));
+    let it = slipped(&mut cut.seq, fc).ok_or_else(|| CmdError::Unavailable("the clip isn't on the track".into()))?;
+    it.item = SLIPPED;
+    it.source_in = tick(current)?;
+    let media_duration = |i: ItemId| (i == SLIPPED).then_some(video);
+    let media_start = |_: ItemId| Tick::ZERO;
+    let mut ctx = EditCtx {
+        next_id: &mut cut.next,
+        media_duration: &media_duration,
+        media_start: &media_start,
+        min_duration: cut.min,
+    };
+    let moved = filmcraft_edit::slip(&mut cut.seq, fc, delta, &mut ctx)
+        .map_err(|e| CmdError::Unavailable(format!("the clip can't slip: {e}")))?;
+    let now = slipped(&mut cut.seq, fc)
+        .map(|i| i.source_in)
+        .ok_or_else(|| CmdError::Unavailable("the slip lost the clip".into()))?;
+    Ok((ticks(now)?, moved))
+}
+
 /// The clips' new lengths, in track order, by id.
 pub(crate) fn lengths(cut: &CutSeq) -> Result<Vec<(u64, Ticks)>, CmdError> {
     let track = cut.seq.video_tracks.first().ok_or_else(|| CmdError::Unavailable("no video track".into()))?;
