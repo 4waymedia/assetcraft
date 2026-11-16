@@ -1133,8 +1133,11 @@ fn the_start_screen_creates_from_a_template_with_its_steps_and_the_song() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The card's right edge between two clips moves the cut (Paul, 2026-11-16: "that should NOT
+/// change all the clips after it... It should only adjust the two clips at that edge"): one
+/// `storyboard.roll`, snapped to a beat, the Cut's total and every other clip unchanged.
 #[test]
-fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
+fn dragging_a_strip_cards_right_edge_moves_only_that_cut_in_one_undo_step() {
     use crate::strip_view::{PX_PER_SEC, ResizeDrag, commit_resize, snap_resize};
     use assetcraft_storyboard::ClipId;
     let ctx = Context::default();
@@ -1152,9 +1155,12 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     let left = 8.4 + 8.0;
     let edge = left + first as f32 * PX_PER_SEC - 1.0;
     let from = Pos2::new(edge - 3.0, strip_y);
-    // Aim 0.05 s past the beat nearest 5 s: inside the snap's reach (9 pt is 0.2 s at 44 pt/s).
+    // Aim 0.05 s past the first beat after the cut: inside the snap's reach (9 pt is 0.2 s at
+    // 44 pt/s), and inside clip #02, which keeps at least half a second.
     let beat = board.track.as_ref().unwrap().bpm.beat().as_secs_f64();
-    let want = (5.0 / beat).round() * beat;
+    let want = ((first + 0.2) / beat).ceil() * beat;
+    let second = board.clips[1].duration.as_secs_f64();
+    assert!(want < first + second - 0.5, "the sample leaves room: {want} in {first} + {second}");
     let to = Pos2::new(left + (want + 0.05) as f32 * PX_PER_SEC, strip_y);
     let press = |pos, pressed| Event::PointerButton {
         pos,
@@ -1172,8 +1178,9 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
         t += 0.05;
         frame(&ctx, &mut nav, events, t);
         if i == n - 1 {
-            let drag = nav.state.storyboard.resize_drag.expect("the card follows the pointer");
-            assert_eq!(drag.clip, 1);
+            let drag = nav.state.storyboard.cut_drag.expect("the cards follow the pointer");
+            assert_eq!(drag.left, 1);
+            assert!(nav.state.storyboard.resize_drag.is_none(), "not a resize");
             assert_eq!(nav.session().storyboard().unwrap(), &board, "nothing runs until the drag ends");
         }
     }
@@ -1181,7 +1188,7 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
         t += 0.05;
         frame(&ctx, &mut nav, events, t);
     }
-    assert!(nav.state.storyboard.resize_drag.is_none());
+    assert!(nav.state.storyboard.cut_drag.is_none());
     let clip = nav.session().storyboard().unwrap().clip(ClipId(1)).unwrap().clone();
     // The sample's track has no detected grid, so its beats run from 0:00 at its tempo.
     assert!(
@@ -1191,12 +1198,14 @@ fn dragging_a_strip_cards_right_edge_resizes_the_clip_in_one_undo_step() {
     );
     assert!(want > first, "longer than before");
     let board_now = nav.session().storyboard().unwrap();
-    assert!(board_now.total() > total, "the Cut's total follows");
-    assert_eq!(board_now.clips[1..], board.clips[1..], "only clip #01 changed");
+    assert_eq!(board_now.total(), total, "the Cut's total stays");
+    let gave = second - board_now.clips[1].duration.as_secs_f64();
+    assert!((gave - (want - first)).abs() < 1e-6, "clip #02 gave up what #01 gained");
+    assert_eq!(board_now.clips[2..], board.clips[2..], "nothing after the cut moved");
     nav.run("storyboard.undo", json!({}));
-    assert_eq!(nav.session().storyboard().unwrap(), &board, "one undo step restores the length");
+    assert_eq!(nav.session().storyboard().unwrap(), &board, "one undo step puts the cut back");
     nav.run("storyboard.undo", json!({}));
-    assert_ne!(nav.session().storyboard(), Some(&board), "the next step is New Storyboard's: the resize was one");
+    assert_ne!(nav.session().storyboard(), Some(&board), "the next step is New Storyboard's: the roll was one");
     nav.run("storyboard.redo", json!({}));
     assert_eq!(nav.session().storyboard().unwrap(), &board);
 
@@ -2145,4 +2154,37 @@ fn alt_dragging_a_video_card_slips_it() {
     // Far past the end of the video: held at the last in-point that fills the clip (1.5 s).
     drag_held(&ctx, &mut nav, from, from - egui::vec2(5.0 * px, 0.0), Modifiers::ALT, &mut t);
     assert!((in_secs(&nav) - 1.5).abs() < 0.05, "limited to {}", in_secs(&nav));
+}
+
+/// Paul, 2026-11-16: "there is no preview image in the clip to display what video was
+/// inserted". A video card shows its frame at the clip's in-point, and follows a slip.
+#[test]
+fn a_video_card_shows_its_in_point_frame() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let lib = lib.canonicalize().unwrap_or(lib);
+    assert!(nav.open_folder(&lib));
+    let video = lib.join("snow_clearing_flythrough.mp4");
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let id = board.clips.iter().find(|c| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap().id;
+    nav.run("storyboard.place", json!({ "asset": video.to_string_lossy(), "clip": id.0 }));
+    nav.run("storyboard.resize", json!({ "clip": id.0, "seconds": 0.5 }));
+    let key = crate::strip_view::card_key(&video, id);
+    let mut t = 0.0;
+    let mut shows = |nav: &mut Navigator, want: u64| {
+        for _ in 0..400 {
+            t += 0.016;
+            frame(&ctx, nav, Vec::new(), t);
+            if nav.state.storyboard.card_tex.0.get(&key).is_some_and(|(k, _)| *k == want) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    };
+    assert!(shows(&mut nav, 0), "the card shows the video's first frame");
+    nav.run("storyboard.slip", json!({ "clip": id.0, "to": 1.0 }));
+    assert!(shows(&mut nav, 24), "and its new in-point after a slip");
 }

@@ -270,10 +270,17 @@ pub(crate) struct SbUi {
     /// The Inspector's In field mid-drag (C6): `(clip, seconds into its video)`, shown live and
     /// committed as one `storyboard.slip` when it ends.
     pub(crate) slip_drag: Option<(u32, f64)>,
+    /// An Alt-drag slip on a card (C6b): the clip and its in-point when the drag started.
+    pub(crate) slip_card: Option<(u32, f64)>,
     /// Videos' lengths in seconds, read once from their headers (C6: the In field's limit).
     pub(crate) video_len: HashMap<String, Option<f64>>,
     /// The Viewer's video frames (P1): the frame number shown per file, and its texture.
     pub(crate) video_tex: VideoTextures,
+    /// Video cards' pictures (C6): per card, the in-point frame shown (in 1/24 s) and its texture.
+    pub(crate) card_tex: VideoTextures,
+    /// The last frame pass on which the Viewer waited for a video frame: cards leave the decoder
+    /// to it then.
+    pub(crate) viewer_waited: Option<u64>,
     /// The zoomed waveform's last window per music piece: `(key, peaks)` (Z1).
     pub(crate) wave_windows: std::collections::HashMap<usize, (String, Vec<(f32, f32)>)>,
     /// The Viewer's 3D model while a clip with motion shows (SB-3D1 step 3).
@@ -713,6 +720,12 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
         render_progress(ui, frame, done, total);
     }
     crate::export_view::progress(nav, ui, frame);
+    // Slipping a clip (C6): the Viewer shows its new first frame, wherever the playhead is.
+    if !playing && let Some(clip) = nav.state.storyboard.slip_drag.and_then(|(id, _)| board.clip(ClipId(id))).cloned() {
+        nav.session.video_stop_ahead();
+        show_section(nav, ui, frame, board, &clip, index, f64::INFINITY);
+        return;
+    }
     if playing || paused_mid {
         if let Some(clip) = board.clip_at(at).cloned() {
             let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
@@ -1000,6 +1013,7 @@ fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, secs: 
         assetcraft_engine::VideoLookup::Ready(f) => Some(f),
         assetcraft_engine::VideoLookup::Pending(near) => {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(15));
+            nav.state.storyboard.viewer_waited = Some(ui.ctx().cumulative_pass_nr());
             near
         }
         assetcraft_engine::VideoLookup::Failed(_) => None,
@@ -1124,14 +1138,25 @@ pub(crate) fn clip_spans(
     left: f32,
     ctx: Option<&egui::Context>,
     drag: Option<ResizeDrag>,
+    roll: Option<CutDrag>,
     px: f32,
 ) -> Vec<(ClipId, f32, f32)> {
     let mut x = left;
+    // A cut being rolled: the clip before it gains what the clip after it gives up.
+    let rolled = roll.and_then(|d| {
+        let i = board.index_of(ClipId(d.left))?;
+        let after = board.clips.get(i + 1)?;
+        let by = d.to - d.from;
+        Some([(d.left, board.clips[i].duration.as_secs_f64() + by), (after.id.0, after.duration.as_secs_f64() - by)])
+    });
     board
         .clips
         .iter()
         .map(|c| {
-            let dragged = drag.filter(|d| d.clip == c.id.0).map(|d| d.secs);
+            let dragged = drag
+                .filter(|d| d.clip == c.id.0)
+                .map(|d| d.secs)
+                .or_else(|| rolled.and_then(|r| r.iter().find(|(id, _)| *id == c.id.0).map(|(_, s)| *s)));
             let secs = dragged.unwrap_or_else(|| c.duration.as_secs_f64());
             // Lengths animate in seconds, so a zoom changes every card at once with the ruler
             // and only a Re-cut's new lengths ease in (Z1).
@@ -1187,6 +1212,9 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     let mut resized: Option<ResizeDrag> = None;
     let mut cut_drag: Option<CutDrag> = nav.state.storyboard.cut_drag;
     let mut rolled: Option<CutDrag> = None;
+    let alt = ui.input(|i| i.modifiers.alt);
+    let mut slip_card = nav.state.storyboard.slip_card;
+    let mut slipped: Option<(u32, f64)> = None;
     let ctx = ui.ctx().clone();
     // A solid, always-visible scroll bar: clicking its track jumps there (finding B3).
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
@@ -1225,7 +1253,7 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
             let strip_top = area.top() + RULER_H + MARKER_H;
             let marker_y = area.top() + RULER_H + 2.0;
             let mut prev_scene = None;
-            let spans = clip_spans(board, left, Some(&ctx), resize, px);
+            let spans = clip_spans(board, left, Some(&ctx), resize, cut_drag, px);
             inset_cmds = inset_row(nav, ui, board, &spans, strip_top + STRIP_H + 4.0);
             audio_row(nav, ui, board, strip_top + STRIP_H + 4.0 + INSET_H + 4.0, left, width);
             inset_cmds.extend(voice_row(
@@ -1270,31 +1298,84 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                 ) {
                     switch = Some((clip.clone(), to));
                 }
-                // The right edge resizes the clip (SR1): registered after the card so it wins the
-                // pointer there; the card follows the pointer, the command runs when the drag ends.
+                // The right edge (SR1): registered after the card so it wins the pointer there.
+                // Between two clips it moves the cut — only the clips either side change, as
+                // FilmCraft's roll (Paul, 2026-11-16: "It should only adjust the two clips at
+                // that edge"); the last clip's edge sets its length. The cards follow the
+                // pointer; the command runs when the drag ends.
                 let handle = Rect::from_min_max(pos2(rect.right() - HANDLE_W, rect.top() + 4.0), rect.max);
                 let grip = ui.interact(handle, strip_clip_id(id).with("resize"), Sense::drag());
-                let grip =
-                    grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(if snapping {
-                        "Drag to set the clip's length (its end snaps to the song's beats, sections and cuts; Shift for a free drag; S turns snapping off)"
-                    } else {
-                        "Drag to set the clip's length (snapping is off: S turns it on)"
-                    });
-                if grip.drag_started() {
-                    resize = Some(ResizeDrag { clip: id.0, secs: clip.duration.as_secs_f64(), snapped: None });
+                let last = n + 1 == board.clips.len();
+                let grip = grip.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(match (last, snapping) {
+                    (false, true) => "Drag to move this cut: this clip and the next trade length, nothing else moves (snaps to the song's beats, sections and cuts; Shift for a free drag; S turns snapping off)",
+                    (false, false) => "Drag to move this cut: this clip and the next trade length, nothing else moves (snapping is off: S turns it on)",
+                    (true, true) => "Drag to set the last clip's length (its end snaps to the song's beats, sections and cuts; Shift for a free drag; S turns snapping off)",
+                    (true, false) => "Drag to set the last clip's length (snapping is off: S turns it on)",
+                });
+                if last {
+                    if grip.drag_started() {
+                        resize = Some(ResizeDrag { clip: id.0, secs: clip.duration.as_secs_f64(), snapped: None });
+                    }
+                    if grip.dragged()
+                        && let Some(pointer) = grip.interact_pointer_pos()
+                    {
+                        let want = f64::from((pointer.x - x) / px);
+                        let (secs, snapped) = snap_resize(board, n, want, at, snapping && !shift, px);
+                        snap_label = snapped.as_ref().map(|s| s.label.clone());
+                        resize = Some(ResizeDrag { clip: id.0, secs, snapped: snapped.map(|s| s.at.as_secs_f64()) });
+                    }
+                    if grip.drag_stopped() {
+                        resized = resize.take().filter(|d| d.clip == id.0);
+                    }
+                } else {
+                    let from = board.starts().get(n + 1).map_or(0.0, |s| s.as_secs_f64());
+                    if grip.drag_started() {
+                        cut_drag = Some(CutDrag { left: id.0, from, to: from, snapped: false });
+                    }
+                    if grip.dragged()
+                        && let Some(pointer) = grip.interact_pointer_pos()
+                    {
+                        let want = f64::from((pointer.x - left) / px);
+                        let (to, snapped) = snap_cut(board, n, want, at, snapping && !shift, px);
+                        snap_label = snapped.as_ref().map(|s| s.label.clone());
+                        cut_drag = Some(CutDrag { left: id.0, from, to, snapped: snapped.is_some() });
+                    }
+                    if grip.drag_stopped() {
+                        rolled = cut_drag.take().filter(|d| d.left == id.0);
+                    }
                 }
-                if grip.dragged()
-                    && let Some(pointer) = grip.interact_pointer_pos()
+                // Alt-drag inside a video card slips it (C6b): the video moves under the clip (it
+                // follows the pointer, so dragging right shows earlier footage), the Viewer shows
+                // the new first frame, and one `storyboard.slip` runs on release. Shift: ¼ speed.
+                let slipping = slip_card.is_some_and(|(c, _)| c == id.0);
+                if (alt || slipping)
+                    && !playing
+                    && resize.is_none()
+                    && let Some(len) = clip_video_len(nav, clip)
                 {
-                    let want = f64::from((pointer.x - x) / px);
-                    let (secs, snapped) = snap_resize(board, n, want, at, snapping && !shift, px);
-                    snap_label = snapped.as_ref().map(|s| s.label.clone());
-                    resize = Some(ResizeDrag { clip: id.0, secs, snapped: snapped.map(|s| s.at.as_secs_f64()) });
+                    let body = Rect::from_min_max(rect.min + vec2(0.0, 4.0), pos2(rect.right() - HANDLE_W, rect.bottom()));
+                    let r = ui.interact(body, strip_clip_id(id).with("slip"), Sense::drag());
+                    let r = r.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(
+                        "Alt-drag to slip: change which part of the video plays, without moving the clip (Shift for fine)",
+                    );
+                    if r.drag_started() {
+                        slip_card = Some((id.0, clip.source_in.as_secs_f64()));
+                    }
+                    if r.dragged()
+                        && let Some((_, from)) = slip_card.filter(|(c, _)| *c == id.0)
+                        && let (Some(p), Some(o)) = (r.interact_pointer_pos(), ui.input(|i| i.pointer.press_origin()))
+                    {
+                        let max = (len - clip.duration.as_secs_f64()).max(0.0);
+                        let speed = if shift { 0.25 } else { 1.0 };
+                        let secs = from - f64::from((p.x - o.x) / px) * speed;
+                        nav.state.storyboard.slip_drag = Some((id.0, ((secs * FPS).round() / FPS).clamp(0.0, max)));
+                    }
+                    if r.drag_stopped() {
+                        slipped = nav.state.storyboard.slip_drag.take().filter(|(c, _)| *c == id.0);
+                        slip_card = None;
+                    }
                 }
-                if grip.drag_stopped() {
-                    resized = resize.take().filter(|d| d.clip == id.0);
-                }
-                if grip.hovered() || grip.dragged() || resize.is_some_and(|d| d.clip == id.0) {
+                if grip.hovered() || grip.dragged() || resize.is_some_and(|d| d.clip == id.0) || cut_drag.is_some_and(|d| d.left == id.0) {
                     let edge = Rect::from_min_max(pos2(rect.right() - 3.0, rect.top() + 4.0), rect.max);
                     ui.painter().rect_filled(edge, 0, SELECT);
                 }
@@ -1380,6 +1461,16 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
     nav.state.storyboard.view = Some((px, shown.state.offset.x, shown.inner_rect.width()));
     nav.state.storyboard.resize_drag = resize;
     nav.state.storyboard.cut_drag = cut_drag;
+    // A slip whose release never reached its card (playback started, the card scrolled away):
+    // drop it once no button is down, so the card takes clicks again.
+    if slipped.is_none() && slip_card.is_some() && !ui.input(|i| i.pointer.any_down()) {
+        slip_card = None;
+        nav.state.storyboard.slip_drag = None;
+    }
+    nav.state.storyboard.slip_card = slip_card;
+    if let Some((clip, to)) = slipped {
+        commit_slip(nav, clip, to);
+    }
     nav.state.storyboard.snap_label =
         snap_label.filter(|_| resize.is_some_and(|d| d.snapped.is_some()) || cut_drag.is_some_and(|d| d.snapped));
     if let Some((mut secs, how)) = scrub {
@@ -2088,10 +2179,24 @@ pub(crate) fn commit_resize(nav: &mut Navigator, d: ResizeDrag) {
 pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, clip: &Clip) {
     ui.label(RichText::new("Duration").size(10.0).color(ui.visuals().weak_text_color()));
     let id = clip.id.0;
-    let dragging = nav.state.storyboard.resize_drag.filter(|d| d.clip == id);
-    let before = dragging.map(|d| d.secs).unwrap_or_else(|| clip.duration.as_secs_f64());
+    let length = clip.duration.as_secs_f64();
+    // A clip with one after it trades length with that one (C1c): the cut moves, nothing after
+    // it does, so the timed cuts stay on the music. The last clip's length is its own.
+    let index = board.index_of(clip.id);
+    let next = index.and_then(|i| board.clips.get(i + 1));
+    let cut = index.and_then(|i| board.starts().get(i + 1).copied()).map_or(0.0, |t| t.as_secs_f64());
+    let dragging = match next {
+        Some(_) => nav.state.storyboard.cut_drag.filter(|d| d.left == id).map(|d| length + d.to - d.from),
+        None => nav.state.storyboard.resize_drag.filter(|d| d.clip == id).map(|d| d.secs),
+    };
+    let before = dragging.unwrap_or(length);
     let mut value = before;
-    let max = assetcraft_storyboard::Limits::default().max_duration.as_secs_f64();
+    let max = match next {
+        Some(n) => {
+            (length + n.duration.as_secs_f64() - assetcraft_engine::MIN_CLIP_SECS).max(assetcraft_engine::MIN_CLIP_SECS)
+        }
+        None => assetcraft_storyboard::Limits::default().max_duration.as_secs_f64(),
+    };
     let r = ui
         .horizontal(|ui| {
             let r = ui.add(
@@ -2101,7 +2206,11 @@ pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboar
                     .fixed_decimals(1)
                     .suffix(" s"),
             );
-            let r = r.on_hover_text("Drag or type the clip's length (Ctrl+Z undoes)");
+            let r = r.on_hover_text(if next.is_some() {
+                "Drag or type the clip's length: the next clip gives or takes the difference, so nothing after it moves off the music (Ctrl+Z undoes)"
+            } else {
+                "Drag or type the last clip's length (Ctrl+Z undoes)"
+            });
             if let Some(t) = &board.track {
                 let beats = t.bpm.ticks_to_beats(Ticks::from_secs_f64(value).unwrap_or(Ticks::ZERO));
                 ui.weak(format!("· {beats} beat{}", if beats == 1 { "" } else { "s" }));
@@ -2112,14 +2221,38 @@ pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboar
     // The widget rounds to a tenth on its first frame and reports that as a change; only a move
     // of at least half a step is the user's (as the MOTION sliders).
     let moved = r.changed() && (value - before).abs() >= 0.05;
+    let roll = |secs: f64| CutDrag { left: id, from: cut, to: cut + secs - length, snapped: false };
     if moved {
-        nav.state.storyboard.resize_drag = Some(ResizeDrag { clip: id, secs: value, snapped: None });
+        match next {
+            Some(_) => nav.state.storyboard.cut_drag = Some(roll(value)),
+            None => nav.state.storyboard.resize_drag = Some(ResizeDrag { clip: id, secs: value, snapped: None }),
+        }
     }
     if r.drag_stopped() || (moved && !r.dragged()) {
         let secs = if moved { value } else { before };
-        commit_resize(nav, ResizeDrag { clip: id, secs, snapped: None });
+        match next {
+            Some(_) => {
+                nav.state.storyboard.cut_drag = None;
+                commit_roll(nav, roll(secs));
+            }
+            None => commit_resize(nav, ResizeDrag { clip: id, secs, snapped: None }),
+        }
     }
     ui.add_space(4.0);
+}
+
+/// How long a clip's video runs, in seconds, if its hero is a video (title cards have none): read
+/// once per file from its header and kept (C6).
+fn clip_video_len(nav: &mut Navigator, clip: &Clip) -> Option<f64> {
+    let hero = clip
+        .asset_ids
+        .first()
+        .filter(|a| clip.shot_type != ShotType::Ttl && assetcraft_engine::is_video(Path::new(&a.0)))?;
+    *nav.state
+        .storyboard
+        .video_len
+        .entry(hero.0.clone())
+        .or_insert_with(|| assetcraft_engine::video_seconds(Path::new(&hero.0)).ok())
 }
 
 /// The Inspector's In row (C6) for a video clip: where in its video the clip starts, a drag value
@@ -2127,20 +2260,7 @@ pub(crate) fn duration_field(nav: &mut Navigator, ui: &mut Ui, board: &Storyboar
 /// when the drag ends or a typed value lands. Limited to the video's start and the last in-point
 /// that still fills the clip. Nothing for other clips.
 pub(crate) fn in_field(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
-    let Some(hero) = clip
-        .asset_ids
-        .first()
-        .filter(|a| clip.shot_type != ShotType::Ttl && assetcraft_engine::is_video(Path::new(&a.0)))
-    else {
-        return;
-    };
-    let len = *nav
-        .state
-        .storyboard
-        .video_len
-        .entry(hero.0.clone())
-        .or_insert_with(|| assetcraft_engine::video_seconds(Path::new(&hero.0)).ok());
-    let Some(len) = len else { return };
+    let Some(len) = clip_video_len(nav, clip) else { return };
     ui.label(RichText::new("In").size(10.0).color(ui.visuals().weak_text_color()));
     let id = clip.id.0;
     let before = in_point(nav, clip);
@@ -2169,11 +2289,22 @@ pub(crate) fn in_field(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     if r.drag_stopped() || (moved && !r.dragged()) {
         nav.state.storyboard.slip_drag = None;
         let to = if moved { value } else { before };
-        if (to - clip.source_in.as_secs_f64()).abs() >= 0.005 {
-            nav.run("storyboard.slip", json!({ "clip": id, "to": to }));
-        }
+        commit_slip(nav, id, to);
     }
     ui.add_space(4.0);
+}
+
+/// End a slip (C6: the In field or an Alt-drag on a card): one `storyboard.slip {clip, to}` when
+/// the in-point moved, nothing otherwise.
+pub(crate) fn commit_slip(nav: &mut Navigator, clip: u32, to: f64) {
+    let same = nav
+        .session
+        .storyboard()
+        .and_then(|b| b.clip(ClipId(clip)))
+        .is_none_or(|c| (c.source_in.as_secs_f64() - to).abs() < 0.005);
+    if !same {
+        nav.run("storyboard.slip", json!({ "clip": clip, "to": to }));
+    }
 }
 
 /// Move the Cut's playhead to `secs`. A click while playing plays on from there; a drag scrubs
@@ -2213,7 +2344,16 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
     let mut drew = false;
     if let Some(hero) = clip.asset_ids.first() {
         let thumb_rect = Rect::from_min_size(body.min, vec2(body.width(), body.height() - 34.0));
-        if let Cell::Ready(texture, size) = thumb(nav, ui, Path::new(&hero.0), 180.0, index) {
+        let path = Path::new(&hero.0);
+        // A video shows its frame at the clip's in-point (C6), live while it is slipped.
+        let picture = if assetcraft_engine::is_video(path) && !title {
+            card_frame(nav, ui, path, clip.id, in_point(nav, clip))
+        } else if let Cell::Ready(texture, size) = thumb(nav, ui, path, 180.0, index) {
+            Some((texture, size))
+        } else {
+            None
+        };
+        if let Some((texture, size)) = picture {
             let target = cover(thumb_rect, size);
             painter.image(texture, thumb_rect, uv_for_cover(thumb_rect, target), Color32::WHITE);
             drew = true;
@@ -2259,9 +2399,93 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
         None => format!("{:.1}s", clip.duration.as_secs_f64()),
     };
     painter.text(info + vec2(0.0, 14.0), Align2::LEFT_TOP, secs, FontId::monospace(10.0), Color32::from_gray(0x8a));
+    // A video's in-point (C6), when it isn't the start or while it is being slipped.
+    let slipping = nav.state.storyboard.slip_drag.is_some_and(|(c, _)| c == clip.id.0);
+    let from = in_point(nav, clip);
+    if (slipping || from > 0.0) && clip.asset_ids.first().is_some_and(|a| assetcraft_engine::is_video(Path::new(&a.0)))
+    {
+        painter.text(
+            pos2(body.right() - 5.0, info.y + 14.0),
+            Align2::RIGHT_TOP,
+            format!("in {}", frame_timecode(from)),
+            FontId::monospace(10.0),
+            if slipping { SELECT } else { Color32::from_gray(0x8a) },
+        );
+    }
     let border = if title { rgb(0xe5243b) } else { Color32::from_gray(0x3a) };
     painter.rect_stroke(rect, 3, Stroke::new(1.0, border), StrokeKind::Inside);
 }
+
+/// A video card's picture (C6): the frame `secs` into `path`, from the Viewer's video service at
+/// card size (a frame the Viewer already decoded serves too). Kept per card once shown, so a
+/// card asks again only when its in-point moves. While playing, or while the Viewer waits for a
+/// frame, a card keeps what it has and leaves the decoder to the Viewer.
+fn card_frame(
+    nav: &mut Navigator,
+    ui: &Ui,
+    path: &Path,
+    clip: ClipId,
+    secs: f64,
+) -> Option<(egui::TextureId, egui::Vec2)> {
+    let at = (secs.max(0.0) * FPS).round() as u64;
+    // Per card: the two halves of a split share a file but not an in-point.
+    let key = card_key(path, clip);
+    let have = nav.state.storyboard.card_tex.0.get(&key).map(|(k, tex)| (*k, tex.id(), tex.size_vec2()));
+    if let Some((k, id, size)) = have
+        && k == at
+    {
+        return Some((id, size));
+    }
+    let pass = ui.ctx().cumulative_pass_nr();
+    let viewer_busy = nav.state.storyboard.viewer_waited.is_some_and(|p| p + 1 >= pass);
+    if nav.session.transport().playing || viewer_busy {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        return have.map(|(_, id, size)| (id, size));
+    }
+    let side = (CARD_PICTURE_PT * ui.ctx().pixels_per_point()).ceil() as u32;
+    let (f, exact) = match nav.session.video_frame(path, secs.max(0.0), side) {
+        assetcraft_engine::VideoLookup::Ready(f) => (f, true),
+        assetcraft_engine::VideoLookup::Pending(near) => {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(15));
+            match near {
+                Some(f) => (f, false),
+                None => return have.map(|(_, id, size)| (id, size)),
+            }
+        }
+        assetcraft_engine::VideoLookup::Failed(_) => return None,
+    };
+    let size = [f.width as usize, f.height as usize];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, &f.rgba);
+    // A stand-in frame is shown but not kept as the answer, so the card asks again.
+    let k = if exact { at } else { u64::MAX };
+    let tex = match nav.state.storyboard.card_tex.0.get_mut(&key) {
+        Some((old, tex)) => {
+            tex.set(image, egui::TextureOptions::LINEAR);
+            *old = k;
+            tex.clone()
+        }
+        None => {
+            if nav.state.storyboard.card_tex.0.len() >= MAX_CARD_PICTURES {
+                nav.state.storyboard.card_tex.0.clear();
+            }
+            let tex = ui.ctx().load_texture(format!("sb-card-{}", key.display()), image, egui::TextureOptions::LINEAR);
+            nav.state.storyboard.card_tex.0.insert(key, (k, tex.clone()));
+            tex
+        }
+    };
+    Some((tex.id(), tex.size_vec2()))
+}
+
+/// Where a card's picture is kept in `card_tex`: its file and clip.
+pub(crate) fn card_key(path: &Path, clip: ClipId) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}#{}", path.display(), clip.0))
+}
+
+/// How big a video card's picture is decoded, in points (its longest side).
+const CARD_PICTURE_PT: f32 = 240.0;
+
+/// How many video cards keep a picture before they are all dropped and asked again.
+const MAX_CARD_PICTURES: usize = 128;
 
 /// An Overlay's text as a band across the bottom of a thumbnail.
 pub(crate) fn overlay_band(painter: &egui::Painter, rect: Rect, words: &str) {
