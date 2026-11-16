@@ -2083,3 +2083,66 @@ fn a_slipped_video_clip_shows_its_video_from_the_in_point() {
     let at = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(id)).unwrap().source_in;
     assert!((at.as_secs_f64() - 1.0).abs() < 1e-6, "a drag commits nothing until it ends");
 }
+
+/// [`drag`] with modifier keys held throughout.
+fn drag_held(ctx: &Context, nav: &mut Navigator, from: Pos2, to: Pos2, modifiers: Modifiers, t: &mut f64) {
+    let press = |pos, pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+    let mut steps = vec![vec![Event::PointerMoved(from)], vec![press(from, true)]];
+    for k in 1..=8 {
+        steps.push(vec![Event::PointerMoved(from + (to - from) * (k as f32 / 8.0))]);
+    }
+    steps.push(vec![press(to, false)]);
+    steps.push(Vec::new());
+    for events in steps {
+        *t += 0.05;
+        frame_held(ctx, nav, events, *t, modifiers);
+    }
+    *t += 0.05;
+    frame_held(ctx, nav, Vec::new(), *t, Modifiers::NONE);
+}
+
+/// C6b: Alt-drag inside a video card slips it — the video follows the pointer (dragging left
+/// shows later footage), the card shows the in-point while it moves, one `storyboard.slip` on
+/// release. Without Alt the same drag leaves the in-point alone.
+#[test]
+fn alt_dragging_a_video_card_slips_it() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library/environments");
+    let lib = lib.canonicalize().unwrap_or(lib);
+    assert!(nav.open_folder(&lib));
+    let video = lib.join("snow_clearing_flythrough.mp4");
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let clip = board.clips.iter().find(|c| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap();
+    let id = clip.id.0;
+    nav.run("storyboard.place", json!({ "asset": video.to_string_lossy(), "clip": id }));
+    nav.run("storyboard.resize", json!({ "clip": id, "seconds": 0.5 }));
+    nav.run("storyboard.zoom", json!({ "zoom": 2.0 }));
+    let mut t = 0.0;
+    for _ in 0..30 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    let px = nav.session().strip_zoom() * crate::strip_view::PX_PER_SEC;
+    let card = strip_rect(&ctx, id);
+    let from = Pos2::new(card.left() + 8.0, card.center().y);
+    let to = from - egui::vec2(0.5 * px, 0.0);
+    let in_secs = |nav: &Navigator| {
+        nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(id)).unwrap().source_in.as_secs_f64()
+    };
+    // No Alt: no slip.
+    drag(&ctx, &mut nav, from, to, &mut t);
+    assert_eq!(in_secs(&nav), 0.0, "a plain drag doesn't slip");
+    let undo = nav.run("storyboard.state", json!({})).unwrap();
+    // Alt held: half a second to the left is half a second later in the video.
+    drag_held(&ctx, &mut nav, from, to, Modifiers::ALT, &mut t);
+    assert!((in_secs(&nav) - 0.5).abs() < 1.0 / 24.0 + 1e-6, "slipped to {}", in_secs(&nav));
+    assert!(nav.state.storyboard.slip_drag.is_none() && nav.state.storyboard.slip_card.is_none(), "the drag ended");
+    assert_ne!(nav.run("storyboard.state", json!({})).unwrap(), undo, "one undo step");
+    nav.run("storyboard.undo", json!({}));
+    assert_eq!(in_secs(&nav), 0.0, "undo puts it back");
+    // Far past the end of the video: held at the last in-point that fills the clip (1.5 s).
+    drag_held(&ctx, &mut nav, from, from - egui::vec2(5.0 * px, 0.0), Modifiers::ALT, &mut t);
+    assert!((in_secs(&nav) - 1.5).abs() < 0.05, "limited to {}", in_secs(&nav));
+}
