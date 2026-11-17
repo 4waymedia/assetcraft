@@ -441,3 +441,39 @@ fn a_video_clip_draws_its_frames_from_the_in_point() {
     assert_eq!(black(&c.clip_frame(&gone, 0.0)), 0);
     assert_eq!(c.problems().len(), 1);
 }
+
+/// F3: a shot is cropped into the export's frame by the board's crop, as the Viewer shows it —
+/// a wide still in a vertical frame fills its height and keeps the snapped side; fill horizontal
+/// leaves a band; an older board (no frame) still fits the whole picture in.
+#[test]
+fn a_shot_is_cropped_by_the_boards_frame() {
+    use assetcraft_storyboard::{Fill, FrameSpec, Snap};
+    let mut wide = clip(1, ShotType::Ws, 2);
+    wide.asset_ids = vec![asset("environments/snow_clearing_plate.jpg")];
+    let vertical =
+        FrameSpec { width: 1080, height: 1920, fps: 30, fill: Fill::Vertical, snap: Snap::Center, preset: None };
+    let lit_rows = |img: &Rgba| -> Vec<bool> {
+        (0..img.height)
+            .map(|y| {
+                let row = &img.data[(y * img.width * 4) as usize..((y + 1) * img.width * 4) as usize];
+                row.as_chunks::<4>().0.iter().any(|p| p[..3] != [0, 0, 0])
+            })
+            .collect()
+    };
+    let frame_with = |spec: Option<&FrameSpec>| compositor(90, 160).with_crop(spec).clip_frame(&wide, 0.0);
+    // Fill vertical: every row is picture; left and right snaps show different sides.
+    let centre = frame_with(Some(&vertical));
+    let r = lit_rows(&centre);
+    // (A dark row in the plate itself may read as ground.)
+    assert!(r.iter().filter(|l| **l).count() >= 157, "the height is filled");
+    let left = frame_with(Some(&FrameSpec { snap: Snap::Left, ..vertical.clone() }));
+    let right = frame_with(Some(&FrameSpec { snap: Snap::Right, ..vertical.clone() }));
+    assert_ne!(left.data, right.data, "the snap picks the side kept");
+    // Fill horizontal, snapped to the top: the picture is a band at the top.
+    let top = frame_with(Some(&FrameSpec { fill: Fill::Horizontal, snap: Snap::Top, ..vertical.clone() }));
+    let rows = lit_rows(&top);
+    assert!(rows[0] && !rows[159], "a band at the top, ground below");
+    // No frame: the whole picture fitted in, centred (rows at both ends are ground).
+    let old = lit_rows(&frame_with(None));
+    assert!(!old[0] && old[80] && !old[159]);
+}

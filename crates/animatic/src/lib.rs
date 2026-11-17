@@ -88,6 +88,9 @@ pub struct Compositor {
     stills_bytes: usize,
     models: HashMap<PathBuf, Arc<Model>>,
     models_order: Vec<PathBuf>,
+    /// How a shot is cropped into the frame (F3): the board's fill and snap at this frame's size;
+    /// none (an older board) fits the whole picture in, as before.
+    crop: Option<assetcraft_storyboard::FrameSpec>,
     /// Videos being read (P3), most recently used last; at most [`OPEN_VIDEOS`].
     videos: Vec<(PathBuf, assetcraft_media::VideoReader)>,
     failed: HashMap<PathBuf, String>,
@@ -132,6 +135,7 @@ impl Compositor {
             stills_bytes: 0,
             models: HashMap::new(),
             models_order: Vec::new(),
+            crop: None,
             videos: Vec::new(),
             failed: HashMap::new(),
         })
@@ -284,7 +288,7 @@ impl Compositor {
                         if assetcraft_thumbs::model::is_model(format_of(path)) {
                             self.model_frame(&mut out, path, None);
                         } else if let Some(image) = self.picture(path, at) {
-                            draw::contain_window(&mut out, &image, [0.0, 0.0, 1.0, 1.0]);
+                            self.place(&mut out, &image);
                         }
                     }
                 }
@@ -427,6 +431,26 @@ impl Compositor {
             self.fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
         }
         self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
+    }
+
+    /// This compositor cropping shots by `frame`'s fill and snap (F3: the board's frame, as the
+    /// Viewer shows it); `None` fits the whole picture in, as older boards always did.
+    pub fn with_crop(mut self, frame: Option<&assetcraft_storyboard::FrameSpec>) -> Self {
+        self.crop =
+            frame.map(|f| assetcraft_storyboard::FrameSpec { width: self.width, height: self.height, ..f.clone() });
+        self
+    }
+
+    /// A shot's picture into the frame by the crop (`FrameSpec::place`, the Viewer's rule).
+    fn place(&self, out: &mut Rgba, image: &Rgba) {
+        match &self.crop {
+            Some(f) => {
+                let [x, y, w, h] = f.place(image.width as f32, image.height as f32);
+                let (fw, fh) = (self.width as f32, self.height as f32);
+                draw::window_into(out, image, [x * fw, y * fh, w * fw, h * fh]);
+            }
+            None => draw::contain_window(out, image, [0.0, 0.0, 1.0, 1.0]),
+        }
     }
 
     /// A clip's picture: a video's frame `secs` in, else the still.

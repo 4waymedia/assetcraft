@@ -9,10 +9,16 @@ use assetcraft_engine::{ExportProgress, ExportStage};
 use egui::{Color32, FontId, Rect, Ui, vec2};
 use serde_json::{Value, json};
 
-/// The sizes offered, in the engine's names.
-const SIZES: [(&str, &str); 3] = [("720p", "1280 × 720"), ("1080p", "1920 × 1080"), ("4k", "3840 × 2160")];
-/// The frame rates offered.
-const RATES: [u32; 3] = [24, 25, 30];
+/// The sizes offered (F3): the board's frame at half, its own and twice its size, in its shape.
+const SCALES: [(&str, f64); 3] = [("½×", 0.5), ("1×", 1.0), ("2×", 2.0)];
+
+/// The board's frame scaled by `scale`, both sides even and within the encoder's limits.
+fn scaled(frame: &assetcraft_storyboard::FrameSpec, scale: f64) -> (u32, u32) {
+    let even = |v: u32| ((f64::from(v) * scale / 2.0).round() as u32 * 2).clamp(16, 8192);
+    (even(frame.width), even(frame.height))
+}
+/// The frame rates offered: every rate a Cut can run at.
+const RATES: [u32; 5] = assetcraft_storyboard::FRAME_RATES;
 /// Quality (quantizer) range offered; lower is better and bigger.
 const QUALITY: (u8, u8) = (16, 36);
 /// The engine's default (`assetcraft_video::DEFAULT_QP`).
@@ -22,12 +28,13 @@ const DEFAULT_QUALITY: u8 = 24;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ExportDialog {
     size: usize,
-    rate: usize,
+    /// Frames a second (the board's own when the window opens).
+    fps: u32,
     pub(crate) quality: u8,
     mov: bool,
     /// The last dry run for these settings (`None` until asked).
     pub(crate) plan: Option<Value>,
-    planned_for: Option<(usize, usize, u8, bool)>,
+    planned_for: Option<(usize, u32, u8, bool, u32, u32)>,
     /// Tests export a tiny frame so the job finishes in a moment.
     #[cfg(test)]
     pub(crate) tiny: bool,
@@ -37,7 +44,7 @@ impl Default for ExportDialog {
     fn default() -> Self {
         Self {
             size: 1,
-            rate: 0,
+            fps: 24,
             quality: DEFAULT_QUALITY,
             mov: false,
             plan: None,
@@ -49,14 +56,15 @@ impl Default for ExportDialog {
 }
 
 impl ExportDialog {
-    fn params(&self) -> Value {
-        let mut p = json!({ "fps": RATES[self.rate], "quality": self.quality });
+    fn params(&self, frame: &assetcraft_storyboard::FrameSpec) -> Value {
+        let mut p = json!({ "fps": self.fps, "quality": self.quality });
         #[cfg(test)]
         if self.tiny {
             p["size"] = json!({ "width": 160, "height": 96 });
             return p;
         }
-        p["size"] = json!(SIZES[self.size].0);
+        let (width, height) = scaled(frame, SCALES.get(self.size).map_or(1.0, |s| s.1));
+        p["size"] = json!({ "width": width, "height": height });
         p
     }
 
@@ -71,7 +79,9 @@ pub(crate) fn open(nav: &mut Navigator) {
         return;
     }
     if nav.state.export.is_none() {
-        nav.state.export = Some(ExportDialog::default());
+        // The board's frame rate to start with (F3).
+        let fps = nav.session.storyboard().map_or(24, |b| b.frame_spec().fps);
+        nav.state.export = Some(ExportDialog { fps, ..ExportDialog::default() });
     }
 }
 
@@ -83,9 +93,10 @@ pub(crate) fn window(nav: &mut Navigator, ctx: &egui::Context) {
         return;
     }
     // A dry run for the settings as they stand (cheap: no frame is drawn).
-    let key = (dialog.size, dialog.rate, dialog.quality, dialog.mov);
+    let frame = nav.session.storyboard().map(|b| b.frame_spec()).unwrap_or_default();
+    let key = (dialog.size, dialog.fps, dialog.quality, dialog.mov, frame.width, frame.height);
     if dialog.planned_for != Some(key) {
-        let mut p = dialog.params();
+        let mut p = dialog.params(&frame);
         p["path"] = json!(plan_path(nav, dialog.extension()));
         p["dryRun"] = json!(true);
         dialog.plan = nav.session.execute("storyboard.exportVideo", &p).ok();
@@ -103,16 +114,24 @@ pub(crate) fn window(nav: &mut Navigator, ctx: &egui::Context) {
             egui::Grid::new("export-settings").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                 ui.label("Size");
                 ui.horizontal(|ui| {
-                    for (i, (name, dims)) in SIZES.iter().enumerate() {
-                        ui.selectable_value(&mut dialog.size, i, *name).on_hover_text(*dims);
+                    for (i, (name, scale)) in SCALES.iter().enumerate() {
+                        let (w, h) = scaled(&frame, *scale);
+                        ui.selectable_value(&mut dialog.size, i, *name)
+                            .on_hover_text(format!("{w} × {h} ({})", frame.ratio_label()));
                     }
+                    let (w, h) = scaled(&frame, SCALES.get(dialog.size).map_or(1.0, |s| s.1));
+                    ui.weak(format!("{w} × {h}"));
                 });
                 ui.end_row();
                 ui.label("Frame rate");
                 ui.horizontal(|ui| {
-                    for (i, fps) in RATES.iter().enumerate() {
-                        ui.selectable_value(&mut dialog.rate, i, format!("{fps} fps"));
+                    for fps in RATES {
+                        let r = ui.selectable_value(&mut dialog.fps, fps, format!("{fps}"));
+                        if fps == frame.fps {
+                            r.on_hover_text("The storyboard's own frame rate");
+                        }
                     }
+                    ui.weak("fps");
                 });
                 ui.end_row();
                 ui.label("Quality");
@@ -165,7 +184,8 @@ pub(crate) fn window(nav: &mut Navigator, ctx: &egui::Context) {
 /// The picker, then the command. Closes the window when the export starts.
 pub(crate) fn start(nav: &mut Navigator, dialog: &ExportDialog) {
     let Some(path) = pick_path(nav, dialog.extension()) else { return };
-    let mut p = dialog.params();
+    let frame = nav.session.storyboard().map(|b| b.frame_spec()).unwrap_or_default();
+    let mut p = dialog.params(&frame);
     p["path"] = json!(path.to_string_lossy());
     p["overwrite"] = json!(true);
     if nav.run("storyboard.exportVideo", p).is_some() {

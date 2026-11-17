@@ -164,6 +164,12 @@ pub fn cover(out: &mut Rgba, image: &Rgba) {
     draw_window(out, image, [0.5 - u / 2.0, 0.5 - v / 2.0, 0.5 + u / 2.0, 0.5 + v / 2.0], [0.0, 0.0, w, h]);
 }
 
+/// Draw all of `image` stretched to `target` (`[x, y, w, h]`, which may run past the picture's
+/// edges: the part outside is cropped), bilinear (F3: a shot placed by the board's crop).
+pub fn window_into(out: &mut Rgba, image: &Rgba, target: [f32; 4]) {
+    draw_window(out, image, [0.0, 0.0, 1.0, 1.0], target);
+}
+
 /// Draw all of `image` into `target` (`[x, y, w, h]`), bilinear, keeping its aspect inside it
 /// (letterboxed within the target).
 pub fn contain_in(out: &mut Rgba, image: &Rgba, target: [f32; 4]) {

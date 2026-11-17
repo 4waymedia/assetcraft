@@ -485,3 +485,31 @@ fn a_video_clip_is_exported_moving_from_its_in_point() {
     assert!(distance(&at_in) < distance(&at_zero), "starts at the in-point");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// F3: with no size or rate given, the export is the board's frame — a vertical board exports
+/// tall, at its own rate, and the dry run says so.
+#[test]
+fn an_export_takes_the_boards_frame() {
+    let dir = temp("export-frame");
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "storyboard.new", json!({ "name": "Tall" }));
+    let board = s.boards.board.as_mut().unwrap();
+    board.scenes.push(assetcraft_storyboard::Scene::new(SceneId(1), None));
+    let mut v = Clip::new(ClipId(1), SceneId(1), ShotType::Ws, Ticks::from_secs_f64(0.5).unwrap());
+    v.asset_ids.push(AssetId(library("environments/snow_clearing_plate.jpg")));
+    board.clips = vec![v];
+    // A small vertical frame so the test is quick.
+    run(&mut s, "storyboard.frame", json!({ "width": 90, "height": 160, "fps": 30 }));
+    let path = dir.join("Tall.mp4");
+    let plan = run(&mut s, "storyboard.exportVideo", json!({ "path": path.to_string_lossy(), "dryRun": true }));
+    assert_eq!(
+        (plan["width"].as_u64(), plan["height"].as_u64(), plan["fps"].as_u64()),
+        (Some(90), Some(160), Some(30)),
+        "{plan}"
+    );
+    let out = run(&mut s, "storyboard.exportVideo", json!({ "path": path.to_string_lossy(), "wait": true }));
+    assert_eq!(out["status"]["stage"], "done", "{out}");
+    let back = assetcraft_media::VideoReader::open(&path).unwrap().frame(0.1, 160).unwrap();
+    assert_eq!((back.width, back.height), (90, 160), "exported tall");
+    let _ = std::fs::remove_dir_all(&dir);
+}

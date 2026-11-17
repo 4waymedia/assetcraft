@@ -97,3 +97,16 @@ fn a_bad_frame_is_refused_and_changes_nothing() {
     assert_eq!(s.boards.undo_len(), undo);
     assert_eq!(s.storyboard().unwrap().frame, None);
 }
+
+/// F3: a named export size is its short side in the board's shape.
+#[test]
+fn named_export_sizes_follow_the_boards_shape() {
+    use crate::export_job::in_shape;
+    let spec = |id| assetcraft_storyboard::frame_preset(id).map(|p| p.spec()).unwrap();
+    assert_eq!(in_shape(&spec("hd"), 720), (1280, 720));
+    assert_eq!(in_shape(&spec("vertical"), 1080), (1080, 1920));
+    assert_eq!(in_shape(&spec("square"), 720), (720, 720));
+    assert_eq!(in_shape(&spec("portrait"), 1080), (1080, 1350));
+    let (w, h) = in_shape(&spec("scope"), 1080);
+    assert!(h == 1080 && w % 2 == 0 && (f64::from(w) / 1080.0 - 2048.0 / 858.0).abs() < 0.01);
+}

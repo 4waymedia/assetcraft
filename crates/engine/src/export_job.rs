@@ -231,12 +231,15 @@ pub(crate) fn plan(s: &Session, p: &Value) -> Result<ExportPlan, CmdError> {
         Some("mov") => Container::Mov,
         _ => return Err(CmdError::BadParams("`path` must end with .mp4 or .mov".into())),
     };
+    // The board's frame (F3): its size and rate unless the call says otherwise; a named size is
+    // its short side in the board's shape (`1080p` of a vertical post is 1080 × 1920).
+    let frame = board.frame_spec();
     let (width, height) = match p.get("size") {
-        None | Some(Value::Null) => (1920, 1080),
+        None | Some(Value::Null) => (frame.width, frame.height),
         Some(Value::String(name)) => SIZES
             .iter()
             .find(|(n, _, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, w, h)| (*w, *h))
+            .map(|(_, _, short)| in_shape(&frame, *short))
             .ok_or_else(|| CmdError::BadParams("`size` must be 720p, 1080p or 4k, or {width, height}".into()))?,
         Some(Value::Object(o)) => {
             let side = |k: &str| o.get(k).and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok());
@@ -248,7 +251,7 @@ pub(crate) fn plan(s: &Session, p: &Value) -> Result<ExportPlan, CmdError> {
         Some(_) => return Err(CmdError::BadParams("`size` must be a name or {width, height}".into())),
     };
     let fps = match p.get("fps") {
-        None | Some(Value::Null) => 24,
+        None | Some(Value::Null) => frame.fps,
         Some(v) => v
             .as_u64()
             .and_then(|f| u32::try_from(f).ok())
@@ -452,7 +455,8 @@ impl Job {
     fn render(&self, started: std::time::Instant) -> Result<(u64, Vec<String>), Stop> {
         let s = self.plan.settings;
         let mut compositor = Compositor::new(Arc::clone(&self.services), s.width, s.height, self.look, self.decode)
-            .map_err(|e| Stop::Failed(e.to_string()))?;
+            .map_err(|e| Stop::Failed(e.to_string()))?
+            .with_crop(self.board.frame.as_ref());
         let mut encoder = VideoEncoder::new(s).map_err(|e| Stop::Failed(e.to_string()))?;
         // Exact for every rate in `FRAME_RATES` (the tick rate is divisible by 24, 25, 30, 50, 60).
         let tick = Ticks(TICKS_PER_SECOND / u64::from(s.fps.max(1)));
@@ -611,6 +615,15 @@ pub(crate) fn song_gain(board: &Storyboard) -> f32 {
         Some(t) if t.volume.is_empty() => assetcraft_audio::mix::db(f64::from(t.level_db)),
         _ => 1.0,
     }
+}
+
+/// A frame of `frame`'s shape whose short side is `short`, both sides even and within the
+/// encoder's limits (F3: the export's named sizes).
+pub fn in_shape(frame: &assetcraft_storyboard::FrameSpec, short: u32) -> (u32, u32) {
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).clamp(16, 8192);
+    let r = frame.ratio();
+    let short = f64::from(short);
+    if r >= 1.0 { (even(short * r), even(short)) } else { (even(short), even(short / r)) }
 }
 
 /// The song's section fades (V4): each section's fade-in from its start and fade-out to its end.
