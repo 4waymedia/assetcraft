@@ -2241,3 +2241,28 @@ fn a_sections_corner_handles_fade_it_in_and_out() {
     assert!(chorus(&nav).fade_out.as_secs_f64() > 1.9, "the other stays");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// F2 (frame-settings.md): the Viewer is drawn in the board's frame — 16:9 as before, 9:16 for
+/// a vertical post, 1:1 square — and a still is cropped into it by the board's crop.
+#[test]
+fn the_viewer_takes_the_boards_frame() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    let mut t = 0.0;
+    let mut ratio = |nav: &mut Navigator| {
+        for _ in 0..3 {
+            t += 0.05;
+            frame(&ctx, nav, Vec::new(), t);
+        }
+        let r = ctx.read_response(crate::strip_view::viewer_id()).expect("the Viewer is drawn").rect;
+        r.width() / r.height()
+    };
+    assert!((ratio(&mut nav) - 16.0 / 9.0).abs() < 0.01, "an older board stays 16:9");
+    nav.run("storyboard.frame", json!({ "preset": "vertical" }));
+    assert!((ratio(&mut nav) - 9.0 / 16.0).abs() < 0.01, "a vertical post is 9:16");
+    nav.run("storyboard.frame", json!({ "preset": "square" }));
+    assert!((ratio(&mut nav) - 1.0).abs() < 0.01, "square");
+    nav.run("storyboard.frame", json!({ "preset": "scope" }));
+    assert!((ratio(&mut nav) - 2048.0 / 858.0).abs() < 0.02, "scope");
+}

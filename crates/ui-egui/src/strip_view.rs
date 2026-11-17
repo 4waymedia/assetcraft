@@ -697,11 +697,18 @@ fn drag_ghost(ctx: &egui::Context, cell: &Cell) {
 
 // ---- Viewer --------------------------------------------------------------------------------
 
+/// The Viewer's frame, for tests and drops: its rect is the board's frame as drawn.
+pub(crate) fn viewer_id() -> egui::Id {
+    egui::Id::new("sb-viewer-frame")
+}
+
 fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, at: Ticks, fill: bool) {
     let avail = ui.available_rect_before_wrap().shrink(8.0);
-    let w = avail.width().min(avail.height() * 16.0 / 9.0).max(16.0);
-    let frame = Rect::from_center_size(avail.center(), vec2(w, w * 9.0 / 16.0));
-    let response = ui.interact(frame, ui.id().with("sb-viewer"), Sense::hover());
+    // The board's frame (F2): 16:9 until it says otherwise, 9:16 for a vertical post.
+    let ratio = (board.frame_spec().ratio() as f32).clamp(0.1, 10.0);
+    let w = avail.width().min(avail.height() * ratio).max(16.0);
+    let frame = Rect::from_center_size(avail.center(), vec2(w, w / ratio));
+    let response = ui.interact(frame, viewer_id(), Sense::hover());
     ui.painter().rect_filled(frame, 0, Color32::BLACK);
     let playing = nav.session.transport().playing;
     let paused_mid = !playing && at > Ticks::ZERO && at < board.total();
@@ -810,7 +817,7 @@ fn show_section(
         .and_then(|s| s.inset.as_ref())
         .filter(|i| i.asset.is_some() && clip.shot_type != ShotType::Ttl);
     let Some(inset) = inset else {
-        show_clip(nav, ui, frame, clip, index, elapsed);
+        show_clip(nav, ui, frame, clip, index, elapsed, board.frame.as_ref());
         // An empty slot with a note: a dashed box where the inset will go, with the note — a
         // planning aid in the Viewer only, never in the export.
         if let Some(slot) = board
@@ -847,9 +854,9 @@ fn show_section(
         paint_inset(nav, ui, frame, inset, index);
         ui.painter().rect_filled(corner.expand(2.0), 0, Color32::from_gray(0x10));
         ui.painter().rect_filled(corner, 0, Color32::BLACK);
-        show_clip(nav, ui, corner, clip, index, elapsed);
+        show_clip(nav, ui, corner, clip, index, elapsed, None);
     } else {
-        show_clip(nav, ui, frame, clip, index, elapsed);
+        show_clip(nav, ui, frame, clip, index, elapsed, board.frame.as_ref());
         ui.painter().rect_filled(corner.expand(2.0), 0, Color32::from_gray(0x10));
         paint_inset(nav, ui, corner, inset, index);
     }
@@ -908,8 +915,18 @@ fn paint_inset(nav: &mut Navigator, ui: &mut Ui, target: Rect, inset: &assetcraf
 }
 
 /// A clip as the Cut shows it, `elapsed` seconds in (`f64::INFINITY` = at rest): a Card, or the
-/// hero frame (or "No shot assigned") with any Overlay text on top.
-fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: &Index, elapsed: f64) {
+/// hero frame (or "No shot assigned") with any Overlay text on top. `place` is the board's
+/// frame, whose crop fits the picture (F2); without one (an older board, or the inset's
+/// corner) the whole picture is fitted in, as before.
+fn show_clip(
+    nav: &mut Navigator,
+    ui: &mut Ui,
+    frame: Rect,
+    clip: &Clip,
+    index: &Index,
+    elapsed: f64,
+    place: Option<&assetcraft_storyboard::FrameSpec>,
+) {
     if clip.shot_type == ShotType::Ttl {
         if let Some(bg) = clip.background()
             && let Cell::Ready(texture, size) = thumb(nav, ui, Path::new(&bg.0), 512.0, index)
@@ -925,7 +942,7 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
         // seconds after it, the in-point itself at rest.
         Some(hero)
             if assetcraft_engine::is_video(Path::new(&hero.0))
-                && show_video(nav, ui, frame, Path::new(&hero.0), video_secs(in_point(nav, clip), elapsed)) => {}
+                && show_video(nav, ui, frame, Path::new(&hero.0), video_secs(in_point(nav, clip), elapsed), place) => {}
         Some(hero) => {
             let still = match thumb(nav, ui, Path::new(&hero.0), 512.0, index) {
                 Cell::Ready(texture, size) => Some((texture, size)),
@@ -935,9 +952,7 @@ fn show_clip(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, index: 
             if !crate::motion_view::show(nav, ui, frame, clip, still, elapsed)
                 && let Some((texture, size)) = still
             {
-                let target = contain(frame, size);
-                let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-                ui.painter().image(texture, target, uv, Color32::WHITE);
+                paint_placed(ui, frame, texture, size, place);
             }
         }
         None => {
@@ -1010,7 +1025,14 @@ fn video_side(ui: &Ui, frame: Rect) -> u32 {
 /// `frame` (P1): the decoded frame if ready, else the nearest one decoded so far while the
 /// worker catches up. `false` when there is nothing to show yet (the caller shows the poster) or
 /// the file can't be played.
-fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, secs: f64) -> bool {
+fn show_video(
+    nav: &mut Navigator,
+    ui: &mut Ui,
+    frame: Rect,
+    path: &Path,
+    secs: f64,
+    place: Option<&assetcraft_storyboard::FrameSpec>,
+) -> bool {
     let side = video_side(ui, frame);
     let shown = match nav.session.video_frame(path, secs, side) {
         assetcraft_engine::VideoLookup::Ready(f) => Some(f),
@@ -1044,9 +1066,30 @@ fn show_video(nav: &mut Navigator, ui: &mut Ui, frame: Rect, path: &Path, secs: 
             tex
         }
     };
-    let target = contain(frame, vec2(f.width as f32, f.height as f32));
-    ui.painter().image(texture.id(), target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    paint_placed(ui, frame, texture.id(), vec2(f.width as f32, f.height as f32), place);
     true
+}
+
+/// A picture of `size` into `frame` (F2): by the board's crop (`FrameSpec::place`, the export's
+/// rule too), cropped to the frame; without a board frame, the whole picture fitted in.
+fn paint_placed(
+    ui: &Ui,
+    frame: Rect,
+    texture: egui::TextureId,
+    size: egui::Vec2,
+    place: Option<&assetcraft_storyboard::FrameSpec>,
+) {
+    let full = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    let Some(spec) = place else {
+        ui.painter().image(texture, contain(frame, size), full, Color32::WHITE);
+        return;
+    };
+    let [x, y, w, h] = spec.place(size.x, size.y);
+    let target = Rect::from_min_size(frame.min + vec2(x, y) * frame.size(), vec2(w, h) * frame.size());
+    let shown = target.intersect(frame);
+    if shown.is_positive() {
+        ui.painter().image(texture, shown, uv_for_cover(shown, target), Color32::WHITE);
+    }
 }
 
 /// Quick fill Viewer: the target clip's brief in a dashed frame, or "All n clips filled" with

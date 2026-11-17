@@ -1,4 +1,4 @@
-_2026-11-17 · Cut editing, next stage · F1 built; D1 and D2 decided by Paul 2026-11-17_
+_2026-11-17 · Cut editing, next stage · F1, F2 built; D1 and D2 decided by Paul 2026-11-17_
 
 - **Scope:** the Cut's frame (ratio, pixel size, frame rate) as a storyboard setting, picked from presets for film and social, plus a workspace default for new storyboards. Layout themes for the top three social post situations (§6).
 - **Project goal it serves:** one storyboard → the right file for where it will be shown (a trailer in 2.39:1, a Reel in 9:16) without rebuilding the Cut.
@@ -62,7 +62,7 @@ Frame rates stay the whole-number set, because the tick rate divides exactly by 
 | Step | What                                                                                          | Test                                                    |
 |------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------|
 | F1   | **Built 2026-11-17.** `FrameSpec` with `fill` and `snap`, the presets, `storyboard.frame`, `storyboard.framePresets`; load check; nothing drawn differently yet | Storyboard: presets valid, ratio labels, bad frames; engine: presets listed, preset → custom, crop keeps the preset, undo, file round trip, bad params |
-| F2   | The Viewer and Strip draw the board's ratio; insets keep their share of the frame's width     | UI: the Viewer is 9:16 for `vertical`                   |
+| F2   | **Built 2026-11-17.** The Viewer is drawn in the board's frame; stills and videos are placed by the crop (`FrameSpec::place`, shared with F3) and cropped to it — a board without a frame still fits the whole picture, as before; the Inspector's text preview takes the frame's shape (held to 220 pt tall). Insets keep their 16:9 box at their share of the frame's width; Strip cards keep their shape; clips with camera motion draw through their camera as before | Storyboard: placement by fill and snap; UI: the Viewer is 16:9, 9:16, 1:1 and 2.39:1 by preset |
 | F3   | The compositor and export use the frame; the export's size list becomes ½×, 1× and 2× of the board's size, with the frame rate defaulting to the board's | Export a 9:16 board, then read back 1080 × 1920 |
 | F4   | **Storyboard setup** (D1): Dimension, Frame rate, Default crop (Fill vertical / Fill horizontal, Snap to center / top / bottom / left / right), Template preset — on the Start screen and in a Setup window for an open board; the workspace default for new boards in prefs | UI + prefs round trip |
 | F5   | Layout themes (§6): L1 split stage, L2 framed feed post; clips auto-fit their region with the board's crop; then a per-clip crop override | Compositor: each region filled per its crop |

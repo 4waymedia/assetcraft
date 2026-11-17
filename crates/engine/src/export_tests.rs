@@ -461,7 +461,9 @@ fn a_video_clip_is_exported_moving_from_its_in_point() {
     assert_eq!(out["status"]["stage"], "done", "{out}");
     assert_eq!(out["status"]["problems"].as_array().unwrap().len(), 0, "{out}");
     let mut back = assetcraft_media::VideoReader::open(&path).unwrap();
-    let lit = |f: &assetcraft_media::Frame| f.rgba.chunks_exact(4).filter(|p| p[..3].iter().any(|c| *c > 16)).count();
+    let lit = |f: &assetcraft_media::Frame| {
+        f.rgba.as_chunks::<4>().0.iter().filter(|p| p[..3].iter().any(|c| *c > 16)).count()
+    };
     let first = back.frame(0.02, 160).unwrap();
     let last = back.frame(1.4, 160).unwrap();
     assert!(lit(&first) > 160 * 96 / 2, "the video's picture, not black");

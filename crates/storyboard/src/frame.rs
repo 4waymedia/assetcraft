@@ -142,6 +142,24 @@ impl FrameSpec {
         None
     }
 
+    /// Where a picture `pic_w` × `pic_h` goes in this frame by the crop (F2: the Viewer; F3: the
+    /// export): `[x, y, w, h]` as fractions of the frame's width and height. Fill vertical makes
+    /// `h` 1, fill horizontal makes `w` 1; the snap places it along the other side. A side past
+    /// 0–1 is cropped by the frame; one short of it leaves bands.
+    pub fn place(&self, pic_w: f32, pic_h: f32) -> [f32; 4] {
+        if !(pic_w > 0.0 && pic_h > 0.0) {
+            return [0.0, 0.0, 1.0, 1.0];
+        }
+        let frame = self.ratio() as f32;
+        let pic = pic_w / pic_h;
+        let (w, h) = match self.fill {
+            Fill::Vertical => (pic / frame, 1.0),
+            Fill::Horizontal => (1.0, frame / pic),
+        };
+        let (ax, ay) = self.snap.align();
+        [(1.0 - w) * ax, (1.0 - h) * ay, w, h]
+    }
+
     /// Whether it is taller than wide.
     pub fn is_vertical(&self) -> bool {
         self.height > self.width
@@ -312,6 +330,27 @@ mod tests {
         assert_eq!(label("scope").as_deref(), Some("2.39:1"));
         assert_eq!(label("flat").as_deref(), Some("1.85:1"));
         assert!(frame_preset("vertical").is_some_and(|p| p.spec().is_vertical()));
+    }
+
+    #[test]
+    fn a_picture_is_placed_by_the_crop() {
+        let close = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-4);
+        let vertical = frame_preset("vertical").map(|p| p.spec()).unwrap();
+        // A 16:9 shot in 9:16, fill vertical: its height fills, the sides are cropped, centred.
+        let w = (16.0 / 9.0) / (9.0 / 16.0);
+        assert!(close(vertical.place(1920.0, 1080.0), [(1.0 - w) / 2.0, 0.0, w, 1.0]));
+        // Snapped left: the crop keeps its left edge.
+        let left = FrameSpec { snap: Snap::Left, ..vertical.clone() };
+        assert!(close(left.place(1920.0, 1080.0), [0.0, 0.0, w, 1.0]));
+        // Fill horizontal: its width fills, bands above and below, snapped to the top.
+        let top = FrameSpec { fill: Fill::Horizontal, snap: Snap::Top, ..vertical.clone() };
+        let h = (9.0 / 16.0) / (16.0 / 9.0);
+        assert!(close(top.place(1920.0, 1080.0), [0.0, 0.0, 1.0, h]));
+        let bottom = FrameSpec { snap: Snap::Bottom, ..top };
+        assert!(close(bottom.place(1920.0, 1080.0), [0.0, 1.0 - h, 1.0, h]));
+        // The same shape fills exactly either way; a bad size fills the frame.
+        assert!(close(FrameSpec::default().place(1920.0, 1080.0), [0.0, 0.0, 1.0, 1.0]));
+        assert!(close(vertical.place(0.0, 10.0), [0.0, 0.0, 1.0, 1.0]));
     }
 
     #[test]

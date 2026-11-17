@@ -308,8 +308,11 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         nav.run("storyboard.text.style", p);
     }
     // Preview: replays the intro, then holds for a second.
+    // In the board's frame (F2): a vertical post previews tall, held to a sensible height.
+    let ratio = nav.session.storyboard().map_or(16.0 / 9.0, |b| b.frame_spec().ratio() as f32).clamp(0.1, 10.0);
     let w = ui.available_width().min(268.0);
-    let (frame, _) = ui.allocate_exact_size(vec2(w, w * 9.0 / 16.0), Sense::hover());
+    let h = (w / ratio).min(220.0);
+    let (frame, _) = ui.allocate_exact_size(vec2(h * ratio, h), Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(frame, 2, Color32::from_rgb(0x2b, 0x31, 0x3b));
     if kind == TextKind::Overlay {
