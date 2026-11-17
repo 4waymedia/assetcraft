@@ -101,8 +101,8 @@ struct State {
     /// `(path, frame index, size asked, frame)`, oldest first.
     cache: VecDeque<(PathBuf, u64, u32, Arc<Frame>)>,
     bytes: usize,
-    /// Frames a second, once a file is open.
-    fps: HashMap<PathBuf, f64>,
+    /// Frames a second and the last frame's index, once a file is open.
+    fps: HashMap<PathBuf, (f64, u64)>,
     failed: HashMap<PathBuf, String>,
     stop: bool,
 }
@@ -206,18 +206,24 @@ impl VideoFrames {
         if let Some(why) = s.failed.get(path) {
             return Lookup::Failed(why.clone());
         }
-        let fps = s.fps.get(path).copied();
-        if let Some(fps) = fps
-            && let Some(f) = s.cached(path, frame_index(secs, fps), side)
+        let index = s.fps.get(path).map(|(fps, last)| frame_index(secs, *fps).min(*last));
+        if let Some(index) = index
+            && let Some(f) = s.cached(path, index, side)
         {
             return Lookup::Ready(f);
         }
-        let near = s
-            .cache
-            .iter()
-            .filter(|(p, _, sz, _)| p == path && *sz >= side)
-            .min_by_key(|(_, i, ..)| fps.map_or(0, |fps| i.abs_diff(frame_index(secs, fps))))
-            .map(|c| Arc::clone(&c.3));
+        // A stand-in while it decodes: the nearest frame at or before the one asked (so playback
+        // never shows a later frame and then steps back), else the nearest after. None until the
+        // file's rate is known.
+        let near = index.and_then(|want| {
+            let frames = s.cache.iter().filter(|(p, _, sz, _)| p == path && *sz >= side);
+            frames
+                .clone()
+                .filter(|(_, i, ..)| *i <= want)
+                .max_by_key(|(_, i, ..)| *i)
+                .or_else(|| frames.min_by_key(|(_, i, ..)| *i))
+                .map(|c| Arc::clone(&c.3))
+        });
         s.want = Some(Want { path: path.to_path_buf(), secs, side });
         drop(s);
         self.shared.wake.notify_all();
@@ -315,8 +321,9 @@ fn work(shared: &Shared, first: bool) {
             Job::Now(want) => {
                 let result = source(&mut open, &want.path).and_then(|src| {
                     let fps = fps_of(&src)?;
-                    shared.lock().fps.insert(want.path.clone(), fps);
-                    decode(&src, frame_index(want.secs, fps), fps, want.side)
+                    let last = last_frame(&src, fps);
+                    shared.lock().fps.insert(want.path.clone(), (fps, last));
+                    decode(&src, frame_index(want.secs, fps).min(last), fps, want.side)
                 });
                 let mut s = shared.lock();
                 match result {
@@ -329,9 +336,12 @@ fn work(shared: &Shared, first: bool) {
             Job::Ahead(c, epoch) => {
                 let result = source(&mut open, &c.path).and_then(|src| {
                     let fps = fps_of(&src)?;
-                    shared.lock().fps.insert(c.path.clone(), fps);
+                    let last = last_frame(&src, fps);
+                    shared.lock().fps.insert(c.path.clone(), (fps, last));
+                    // Nothing past the video's end: those would be its last frame again under
+                    // indexes it doesn't have.
                     let from = (c.chunk as f64 * CHUNK_SECS * fps).ceil() as u64;
-                    let to = ((c.chunk + 1) as f64 * CHUNK_SECS * fps).ceil() as u64;
+                    let to = (((c.chunk + 1) as f64 * CHUNK_SECS * fps).ceil() as u64).min(last.saturating_add(1));
                     for index in from..to {
                         {
                             let s = shared.lock();
@@ -385,6 +395,12 @@ fn fps_of(src: &SharedSource) -> Result<f64, String> {
         .map(|v| v.frame_rate.as_f64())
         .filter(|f| f.is_finite() && *f > 0.0)
         .ok_or_else(|| "the file has no video".to_string())
+}
+
+/// The index of the last frame of `src` at `fps`, from its length (unbounded without one).
+fn last_frame(src: &SharedSource, fps: f64) -> u64 {
+    let secs = src.info().duration.seconds();
+    if secs.is_finite() && secs > 0.0 { ((secs * fps).ceil() as u64).saturating_sub(1) } else { u64::MAX }
 }
 
 /// Frame `index` of `src`, shrunk to `side` and converted to RGBA.

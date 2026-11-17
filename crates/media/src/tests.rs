@@ -88,3 +88,36 @@ fn a_video_s_length_comes_from_its_header() {
     }
     assert!(seconds(&library("no_such_clip.mp4")).is_err());
 }
+
+/// Paul's Windows run, 2026-11-16: playback showed frame 36 of a 24-frame video, then stepped
+/// back to 0. Read-ahead stops at the video's end, a time past it is the last frame, and a
+/// stand-in is never later than the frame asked while an earlier one is at hand.
+#[test]
+fn nothing_past_the_end_and_stand_ins_never_run_ahead() {
+    for workers in [1, 4] {
+        let v = VideoFrames::with_workers(workers);
+        let path = library("snow_clearing_flythrough.mp4");
+        // Four seconds asked of a two-second video.
+        v.ahead(&path, 0.0, 4.0, 64);
+        let until = Instant::now() + Duration::from_secs(10);
+        while !matches!(v.frame(&path, 1.95, 64), Lookup::Ready(_)) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        let indexes: Vec<u64> = {
+            let s = v.shared.lock();
+            s.cache.iter().map(|(_, i, ..)| *i).collect()
+        };
+        assert!(indexes.iter().all(|i| *i < 24), "{workers} worker(s): only the video's frames: {indexes:?}");
+        // Past the end: its last frame, ready.
+        match v.frame(&path, 3.5, 64) {
+            Lookup::Ready(f) => assert_eq!(f.index, 23),
+            other => panic!("past the end: {other:?}"),
+        }
+        // A size not decoded yet: the stand-in is the nearest frame at or before the one asked.
+        v.stop_ahead();
+        if let Lookup::Pending(Some(f)) = v.frame(&path, 1.0, 32) {
+            assert!(f.index <= 12, "{workers} worker(s): stand-in {} for frame 12", f.index);
+        }
+    }
+}
