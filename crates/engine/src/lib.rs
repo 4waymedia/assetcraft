@@ -15,6 +15,7 @@ pub mod document_cmd;
 pub mod effect;
 mod enabled;
 pub mod export_job;
+mod frame_cmd;
 pub mod generate_cmd;
 mod inset_cmd;
 pub mod launch;
@@ -748,6 +749,8 @@ mod document_tests;
 mod enabled_tests;
 #[cfg(test)]
 mod export_tests;
+#[cfg(test)]
+mod frame_tests;
 #[cfg(test)]
 mod generate_tests;
 #[cfg(test)]

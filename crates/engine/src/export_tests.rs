@@ -438,3 +438,48 @@ fn a_voiceover_ducks_the_song_only_while_it_speaks() {
     assert!(s.storyboard().unwrap().voiceover.is_some(), "undo brings it back");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// P3: a video clip is exported as its own moving picture, from its in-point — read back from
+/// the exported file with the same decoder, the frames aren't black and change over the clip.
+#[test]
+fn a_video_clip_is_exported_moving_from_its_in_point() {
+    let dir = temp("export-video");
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "storyboard.new", json!({ "name": "Video" }));
+    let board = s.boards.board.as_mut().unwrap();
+    board.scenes.push(assetcraft_storyboard::Scene::new(SceneId(1), None));
+    let mut v = Clip::new(ClipId(1), SceneId(1), ShotType::Ws, Ticks::from_secs_f64(1.5).unwrap());
+    v.asset_ids.push(AssetId(library("environments/snow_clearing_flythrough.mp4")));
+    v.source_in = Ticks::from_secs_f64(0.5).unwrap();
+    board.clips = vec![v];
+    let path = dir.join("Video.mp4");
+    let out = run(
+        &mut s,
+        "storyboard.exportVideo",
+        json!({ "path": path.to_string_lossy(), "size": { "width": 160, "height": 96 }, "fps": 24, "quality": 24, "wait": true }),
+    );
+    assert_eq!(out["status"]["stage"], "done", "{out}");
+    assert_eq!(out["status"]["problems"].as_array().unwrap().len(), 0, "{out}");
+    let mut back = assetcraft_media::VideoReader::open(&path).unwrap();
+    let lit = |f: &assetcraft_media::Frame| f.rgba.chunks_exact(4).filter(|p| p[..3].iter().any(|c| *c > 16)).count();
+    let first = back.frame(0.02, 160).unwrap();
+    let last = back.frame(1.4, 160).unwrap();
+    assert!(lit(&first) > 160 * 96 / 2, "the video's picture, not black");
+    let diff: u64 = first.rgba.iter().zip(&last.rgba).map(|(a, b)| u64::from(a.abs_diff(*b))).sum();
+    assert!(diff > first.rgba.len() as u64 * 2, "it moves over the clip");
+    // The first exported frame is the source half a second in, not its first frame.
+    let mut src =
+        assetcraft_media::VideoReader::open(Path::new(&library("environments/snow_clearing_flythrough.mp4"))).unwrap();
+    // The source fills the width (16:9 in a 160 × 96 frame), letterboxed top and bottom: compare
+    // the rows it covers.
+    let (at_in, at_zero) = (src.frame(0.5, 160).unwrap(), src.frame(0.0, 160).unwrap());
+    assert_eq!((at_in.width, first.width), (160, 160));
+    let top = (first.height - at_in.height) as usize / 2;
+    let row = 160 * 4;
+    let distance = |a: &assetcraft_media::Frame| -> u64 {
+        let ours = &first.rgba[top * row..(top + a.height as usize) * row];
+        ours.iter().zip(&a.rgba).map(|(x, y)| u64::from(x.abs_diff(*y))).sum()
+    };
+    assert!(distance(&at_in) < distance(&at_zero), "starts at the in-point");
+    let _ = std::fs::remove_dir_all(&dir);
+}

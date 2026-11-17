@@ -139,7 +139,9 @@ impl Session {
         // And the volume line (V3).
         let envelope = crate::export_job::song_envelope(&board);
         let gain = crate::export_job::song_gain(&board);
-        let mut key = format!("level {level}; dips {dips:?}; volume {envelope:?};");
+        // And the section fades (V4).
+        let fades = crate::export_job::section_fades(&board);
+        let mut key = format!("level {level}; dips {dips:?}; volume {envelope:?}; fades {fades:?};");
         for v in &wanted {
             let p = PathBuf::from(&v.path);
             self.load_slot(&p);
@@ -168,7 +170,8 @@ impl Session {
                 .with_layers(layers)
                 .with_music_gain(gain)
                 .with_envelope(envelope)
-                .with_dips(dips),
+                .with_dips(dips)
+                .with_fades(fades),
         );
         self.audio.program = Some((path, edit_now, key, Arc::clone(&prog)));
         Some(prog)

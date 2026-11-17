@@ -121,3 +121,19 @@ fn nothing_past_the_end_and_stand_ins_never_run_ahead() {
         }
     }
 }
+
+/// P3: the export reads frames on its own thread, in order, through `VideoReader`.
+#[test]
+fn a_reader_gives_frames_in_order_and_holds_the_end() {
+    let mut r = VideoReader::open(&library("snow_clearing_flythrough.mp4")).unwrap();
+    let a = r.frame(0.0, 64).unwrap();
+    let b = r.frame(1.0, 64).unwrap();
+    assert_eq!((a.index, b.index), (0, 12));
+    assert!(a.width.max(a.height) <= 64 && a.rgba.len() == (a.width * a.height * 4) as usize);
+    assert_ne!(a.rgba, b.rgba, "different pictures");
+    // The same frame again is the one held, not decoded again.
+    assert!(Arc::ptr_eq(&b, &r.frame(1.04, 64).unwrap()));
+    assert_eq!(r.frame(9.0, 64).unwrap().index, 23, "past the end: the last frame");
+    assert_eq!(r.frame(f64::NAN, 64).unwrap().index, 0);
+    assert!(VideoReader::open(&library("no_such_clip.mp4")).is_err());
+}

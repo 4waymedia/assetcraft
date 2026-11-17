@@ -417,3 +417,27 @@ fn a_title_card_draws_its_text_finish() {
         .count();
     assert!(shadowed > 30, "a shadow down-right of the letters: {shadowed} px");
 }
+
+/// P3 (Paul, 2026-11-15: "mp4 videos do not display/play"): a video clip is drawn from its own
+/// frames, from its in-point (C6), moving as the clip plays; a video that won't open is reported
+/// and drawn black.
+#[test]
+fn a_video_clip_draws_its_frames_from_the_in_point() {
+    let mut c = compositor(160, 90);
+    let mut v = clip(1, ShotType::Ws, 2);
+    v.asset_ids = vec![asset("environments/snow_clearing_flythrough.mp4")];
+    let black = |img: &Rgba| img.data.as_chunks::<4>().0.iter().filter(|p| p[..3] != [0, 0, 0]).count();
+    let start = c.clip_frame(&v, 0.0);
+    assert!(black(&start) > 160 * 90 / 2, "the picture fills the frame");
+    let later = c.clip_frame(&v, 1.0);
+    assert_ne!(start.data, later.data, "it moves as the clip plays");
+    // Slipped by a second: the clip's first frame is the one a second in.
+    v.source_in = Ticks::from_secs(1).unwrap_or(Ticks::ZERO);
+    assert_eq!(c.clip_frame(&v, 0.0).data, later.data);
+    assert!(c.problems().is_empty(), "{:?}", c.problems());
+    // A missing file: black, and named in the problems.
+    let mut gone = clip(2, ShotType::Ws, 2);
+    gone.asset_ids = vec![asset("environments/no_such_clip.mp4")];
+    assert_eq!(black(&c.clip_frame(&gone, 0.0)), 0);
+    assert_eq!(c.problems().len(), 1);
+}

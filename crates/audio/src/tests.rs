@@ -269,3 +269,21 @@ fn a_volume_line_glides_between_points() {
     let plain = Program::new(ramp(8_000, 40_000), None);
     assert!((p.frame(8_000).0 - plain.frame(8_000).0 * 0.501_187).abs() < 1e-4);
 }
+
+/// V4: a section fade rises from silence or falls to it over its stretch, a quarter sine, and
+/// leaves the music alone outside it.
+#[test]
+fn a_section_fade_comes_up_and_goes_down() {
+    use crate::Fade;
+    let up = Fade { start: 1.0, end: 3.0, rising: true };
+    assert_eq!((up.at(0.5), up.at(1.0), up.at(3.0)), (1.0, 0.0, 1.0));
+    assert!((up.at(2.0) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4, "halfway: −3 dB");
+    let down = Fade { start: 1.0, end: 3.0, rising: false };
+    assert!(down.at(1.0) > 0.999 && down.at(3.0 - 1e-6) < 1e-3, "full at its start, silent by its end");
+    assert_eq!(down.at(3.0), 1.0, "the next section starts at full");
+    assert_eq!(Fade { start: 2.0, end: 2.0, rising: true }.at(2.0), 1.0, "an empty fade does nothing");
+    let p = Program::new(ramp(8_000, 40_000), None).with_fades(vec![up]);
+    let plain = Program::new(ramp(8_000, 40_000), None);
+    assert!((p.frame(16_000).0 - plain.frame(16_000).0 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+    assert_eq!(p.frame(4_000), plain.frame(4_000));
+}

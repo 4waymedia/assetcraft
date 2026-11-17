@@ -313,6 +313,7 @@ version = "0.0.1"
 dependencies = [
  "ab_glyph",
  "assetcraft-fs",
+ "assetcraft-media",
  "assetcraft-mesh",
  "assetcraft-probe",
  "assetcraft-storyboard",

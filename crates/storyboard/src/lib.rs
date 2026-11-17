@@ -15,6 +15,7 @@
 //! - [`shape`]: a preset's shape on top of a pacing profile (titles, tighten, end card, transition,
 //!   overlays, shot mix).
 //! - [`fill`]: Quick fill, placing assets into empty clips in order.
+//! - [`frame`]: the Cut's frame — size, frame rate, crop — and its film and social presets.
 //! - [`sample`]: the handoff's 24-clip sample board (placeholder content).
 //! - [`validate`]: loading a storyboard document from bytes as hostile input, with [`Limits`].
 //!
@@ -25,6 +26,7 @@ pub mod analyse;
 pub mod cuemap;
 pub mod decor;
 pub mod fill;
+pub mod frame;
 pub mod generate;
 pub mod inset;
 pub mod model;
@@ -46,6 +48,7 @@ pub use decor::{
     text_decor,
 };
 pub use fill::{Deleted, FillError, auto_fill, clear, delete, next_empty, place};
+pub use frame::{FRAME_PRESETS, FRAME_RATES, FRAME_SIDE_RANGE, Fill, FramePreset, FrameSpec, Snap, frame_preset};
 pub use generate::{
     DENSITY_RANGE, GenerateError, GenerateOptions, GenerateReport, LOOP_FADE_SECS, LOOP_MAX_SEGMENTS, MusicMode,
     MusicSpan, Pacing, chorus_loop, fit_for, generate, structured_fit, track_edit, track_from_cue, track_under,

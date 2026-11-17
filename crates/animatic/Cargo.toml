@@ -17,4 +17,5 @@ assetcraft-probe = { workspace = true }
 assetcraft-mesh = { workspace = true }
 assetcraft-thumbs = { workspace = true }
 assetcraft-storyboard = { workspace = true }
+assetcraft-media = { workspace = true }
 ab_glyph = { workspace = true }

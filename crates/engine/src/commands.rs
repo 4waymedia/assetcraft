@@ -562,6 +562,33 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         EDIT,
+        "storyboard.frame",
+        "Frame Setup",
+        "Storyboard",
+        None,
+        "{preset?: string, width?: number, height?: number, fps?: number, fill?: \"vertical\"|\"horizontal\", snap?: \"center\"|\"top\"|\"bottom\"|\"left\"|\"right\"} → {width, height, fps, ratio, vertical, fill, snap, preset, changed, message} (the Cut's frame: a film or social preset, or a size and rate by hand — sides even, 16 to 8192 px; fps 24, 25, 30, 50 or 60 — and how a picture of another shape is cropped into it; {} reports it; one undo step)",
+        crate::frame_cmd::sb_frame
+    ),
+    cmd!(
+        READ,
+        "storyboard.framePresets",
+        "Frame Presets",
+        "Storyboard",
+        None,
+        "{} → {presets: [{id, group, name, for, width, height, fps, ratio, fill}], rates, sides, fills, snaps} (the film, square and social frames storyboard.frame offers)",
+        crate::frame_cmd::sb_frame_presets
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.fade",
+        "Section Fade",
+        "Storyboard",
+        None,
+        "{section: number, in?: seconds, out?: seconds} → {section, name, in, out, message} (the music fades in from silence at a song section's start and out to silence by its end; section is its index from 0; a side left out keeps its fade, 0 removes it; the two together fit in the section; playback and the export use them; one undo step)",
+        crate::inset_cmd::sb_fade
+    ),
+    cmd!(
+        EDIT,
         "storyboard.volume",
         "Volume Line",
         "Storyboard",

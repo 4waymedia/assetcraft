@@ -115,6 +115,9 @@ impl Storyboard {
 
     /// Check counts, lengths, ids and times.
     pub fn validate(&self, l: &Limits) -> Result<(), BoardError> {
+        if let Some(problem) = self.frame.as_ref().and_then(crate::FrameSpec::problem) {
+            return Err(BoardError::Invalid(format!("the frame: {problem}")));
+        }
         if self.version > FORMAT_VERSION {
             return Err(BoardError::NewerVersion(self.version));
         }
@@ -259,6 +262,10 @@ impl Storyboard {
                 text("song section", &s.name, l)?;
                 if s.start >= s.end || s.start < prev_end || s.end > track.duration {
                     return Err(BoardError::Invalid(format!("song section {:?} is out of order", s.name)));
+                }
+                let fades = s.fade_in.checked_add(s.fade_out);
+                if fades.is_none_or(|f| f.0 > s.end.0 - s.start.0) {
+                    return Err(BoardError::Invalid(format!("song section {:?}'s fades are longer than it", s.name)));
                 }
                 prev_end = s.end;
             }

@@ -46,6 +46,8 @@ impl Session {
             | "storyboard.resize"
             | "storyboard.roll"
             | "storyboard.slip"
+            | "storyboard.fade"
+            | "storyboard.frame"
             | "storyboard.split"
             | "storyboard.trackLevel"
             | "storyboard.titleLevel"

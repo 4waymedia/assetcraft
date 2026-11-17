@@ -270,6 +270,9 @@ pub(crate) struct SbUi {
     /// The Inspector's In field mid-drag (C6): `(clip, seconds into its video)`, shown live and
     /// committed as one `storyboard.slip` when it ends.
     pub(crate) slip_drag: Option<(u32, f64)>,
+    /// A section fade being dragged (V4): `(section index, the fade-out?, seconds)`, committed as
+    /// one `storyboard.fade` on release.
+    pub(crate) fade_drag: Option<(usize, bool, f64)>,
     /// An Alt-drag slip on a card (C6b): the clip and its in-point when the drag started.
     pub(crate) slip_card: Option<(u32, f64)>,
     /// Videos' lengths in seconds, read once from their headers (C6: the In field's limit).
@@ -1928,6 +1931,116 @@ fn audio_row(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, top: f32, lef
         );
     }
     volume_line(nav, ui, board, rect, left, px);
+    section_fades(nav, ui, board, rect, left, px);
+}
+
+/// How close (points) the pointer must be to a fade handle (V4).
+const FADE_GRAB: f32 = 6.0;
+
+/// The fade in and out of each song section on the AUDIO row (V4; Paul, 2026-11-15: "allow audio
+/// fade in/out for each section"): a handle at each top corner of a section's band; drag it in to
+/// fade the music up from silence at the start, or down to silence by the end, the ramp drawn
+/// over the band. One `storyboard.fade` on release; a double-click removes the fade. Registered
+/// after the volume line, so the corners are the fades'.
+fn section_fades(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, rect: Rect, left: f32, px: f32) {
+    let Some(track) = &board.track else { return };
+    let painter = ui.painter().clone();
+    let mut drag = nav.state.storyboard.fade_drag;
+    let mut commit: Option<(usize, bool, f64)> = None;
+    let ramp = Color32::from_gray(0xd8);
+    let shade = Color32::from_black_alpha(110);
+    for (i, sec) in track.song_sections.iter().enumerate() {
+        let (a, b) = (sec.start.as_secs_f64(), sec.end.as_secs_f64());
+        let (x0, x1) = (left + a as f32 * px, left + b as f32 * px);
+        let band = Rect::from_min_max(pos2(x0, rect.top()), pos2(x1, rect.bottom()));
+        if band.width() < 4.0 * FADE_GRAB || !ui.is_rect_visible(band) {
+            continue;
+        }
+        let shown = |out: bool, saved: Ticks| {
+            drag.filter(|(s, o, _)| *s == i && *o == out).map_or_else(|| saved.as_secs_f64(), |(_, _, v)| v)
+        };
+        let (fi, fo) = (shown(false, sec.fade_in), shown(true, sec.fade_out));
+        let len = b - a;
+        // The ramps: silence shaded above a line from the band's foot to its top.
+        let (top, foot) = (rect.top() + 1.0, rect.bottom() - 1.0);
+        let xi = x0 + fi as f32 * px;
+        let xo = x1 - fo as f32 * px;
+        if fi > 0.0 {
+            painter.add(egui::Shape::convex_polygon(
+                vec![pos2(x0, top), pos2(xi, top), pos2(x0, foot)],
+                shade,
+                Stroke::NONE,
+            ));
+            painter.line_segment([pos2(x0, foot), pos2(xi, top)], Stroke::new(1.5, ramp));
+        }
+        if fo > 0.0 {
+            painter.add(egui::Shape::convex_polygon(
+                vec![pos2(xo, top), pos2(x1, top), pos2(x1, foot)],
+                shade,
+                Stroke::NONE,
+            ));
+            painter.line_segment([pos2(xo, top), pos2(x1, foot)], Stroke::new(1.5, ramp));
+        }
+        for out in [false, true] {
+            let x = if out { xo } else { xi };
+            // Kept just inside the band so both corners can be grabbed at zero.
+            let x = if out { x.min(x1 - FADE_GRAB) } else { x.max(x0 + FADE_GRAB) };
+            let at = pos2(x, top + FADE_GRAB);
+            let id = egui::Id::new(("sb-fade", i, out));
+            let r = ui.interact(
+                Rect::from_center_size(at, vec2(2.0 * FADE_GRAB, 2.0 * FADE_GRAB)),
+                id,
+                Sense::click_and_drag(),
+            );
+            let (name, side) = (sec.name.to_lowercase(), if out { "out by the end of" } else { "in at the start of" });
+            let r = r
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+                .on_hover_text(format!("Drag to fade the music {side} the {name} (double-click removes the fade)"));
+            let active = r.hovered() || r.dragged() || (if out { fo } else { fi }) > 0.0;
+            painter.rect_filled(
+                Rect::from_center_size(at, vec2(7.0, 7.0)),
+                1,
+                if r.hovered() || r.dragged() {
+                    SELECT
+                } else if active {
+                    ramp
+                } else {
+                    Color32::from_gray(0x70)
+                },
+            );
+            if r.dragged()
+                && let Some(p) = r.interact_pointer_pos()
+            {
+                let other = if out { fi } else { fo };
+                let want = if out { f64::from((x1 - p.x) / px) } else { f64::from((p.x - x0) / px) };
+                // To twentieths of a second, held to what the section has left.
+                let v = ((want * 20.0).round() / 20.0).clamp(0.0, (len - other).max(0.0));
+                drag = Some((i, out, v));
+                let label = format!("fade {} {v:.2} s", if out { "out" } else { "in" });
+                painter.text(
+                    pos2(x, rect.top() - 2.0),
+                    if out { Align2::RIGHT_BOTTOM } else { Align2::LEFT_BOTTOM },
+                    label,
+                    FontId::monospace(9.0),
+                    SELECT,
+                );
+            }
+            if r.drag_stopped() {
+                commit = drag.take().filter(|(s, o, _)| *s == i && *o == out);
+            }
+            if r.double_clicked() {
+                commit = Some((i, out, 0.0));
+                drag = None;
+            }
+        }
+    }
+    nav.state.storyboard.fade_drag = drag;
+    if let Some((section, out, v)) = commit {
+        let saved = track.song_sections.get(section).map(|s| if out { s.fade_out } else { s.fade_in });
+        if saved.is_some_and(|t| (t.as_secs_f64() - v).abs() >= 1e-3) {
+            nav.run("storyboard.fade", json!({ "section": section, if out { "out" } else { "in" }: v }));
+        }
+    }
 }
 
 /// The top of the volume line's scale in dB (V3).

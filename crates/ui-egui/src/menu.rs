@@ -66,6 +66,11 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.roll",
     // The Inspector's In field drives it (cut-editing.md C6a).
     "storyboard.slip",
+    // The corner handles on the AUDIO row's sections drive it (cut-editing.md V4).
+    "storyboard.fade",
+    // The storyboard setup drives them (frame-settings.md F4); until then the CLI and MCP.
+    "storyboard.frame",
+    "storyboard.framePresets",
     // Ctrl+K at the playhead on the Strip drives it (cut-editing.md C3).
     "storyboard.split",
     // The Song slider in the Strip's transport controls drives it (V1).

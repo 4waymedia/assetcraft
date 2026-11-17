@@ -3,7 +3,7 @@
 
 use super::*;
 use assetcraft_fs::FakeFs;
-use assetcraft_storyboard::{ClipId, ShotType};
+use assetcraft_storyboard::{ClipId, ShotType, Ticks};
 use serde_json::json;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -287,4 +287,69 @@ fn the_volume_line_is_set_whole_and_overrides_the_song_level() {
     }
     run(&mut s, "storyboard.undo", json!({}));
     assert_eq!(s.storyboard().unwrap().track.as_ref().unwrap().volume.len(), 3, "undo brings the line back");
+}
+
+/// `storyboard.fade` (V4): a section's fade in and out, each held to what the section has left,
+/// played and exported as quarter-sine fades at the section's ends; saved, checked on load, one
+/// undo step.
+#[test]
+fn a_section_fades_in_and_out() {
+    let mut s = session();
+    // The sample's song has no sections: give it two.
+    let secs = |x: f64| Ticks::from_secs_f64(x).unwrap();
+    let section = |name: &str, a: f64, b: f64| assetcraft_storyboard::SongSection {
+        name: name.into(),
+        start: secs(a),
+        end: secs(b),
+        fade_in: Ticks::ZERO,
+        fade_out: Ticks::ZERO,
+    };
+    let track = s.boards.board.as_mut().and_then(|b| b.track.as_mut()).unwrap();
+    assert!(track.duration.as_secs_f64() > 12.0);
+    track.song_sections = vec![section("Intro", 0.0, 4.0), section("Chorus", 4.0, 12.0)];
+    let sec = s.storyboard().unwrap().track.as_ref().unwrap().song_sections[1].clone();
+    let (a, b) = (sec.start.as_secs_f64(), sec.end.as_secs_f64());
+    let len = b - a;
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.fade", json!({ "section": 1, "in": 1.0 }));
+    assert_eq!((r["in"].as_f64(), r["out"].as_f64()), (Some(1.0), Some(0.0)), "{r}");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    // Out leaves in alone; asking for more than is left is held.
+    let r = run(&mut s, "storyboard.fade", json!({ "section": 1, "out": len * 10.0 }));
+    assert_eq!(r["in"].as_f64(), Some(1.0));
+    assert!((r["out"].as_f64().unwrap() - (len - 1.0)).abs() < 1e-6, "{r}");
+    run(&mut s, "storyboard.fade", json!({ "section": 1, "out": 0.5 }));
+    let fades = crate::export_job::section_fades(s.storyboard().unwrap());
+    assert_eq!(fades.len(), 2);
+    assert_eq!((fades[0].start, fades[0].end, fades[0].rising), (a, a + 1.0, true));
+    assert!((fades[1].start - (b - 0.5)).abs() < 1e-9 && fades[1].end == b && !fades[1].rising);
+    // The same again: no undo step.
+    let undo = s.boards.undo_len();
+    run(&mut s, "storyboard.fade", json!({ "section": 1, "in": 1.0, "out": 0.5 }));
+    assert_eq!(s.boards.undo_len(), undo);
+    // Saved, and checked on load.
+    let text = serde_json::to_string(s.storyboard().unwrap()).unwrap();
+    assert!(text.contains("\"fadeIn\"") && text.contains("\"fadeOut\""));
+    assert!(assetcraft_storyboard::Storyboard::from_json(text.as_bytes()).is_ok());
+    let mut long: Value = serde_json::from_str(&text).unwrap();
+    long["track"]["songSections"][1]["fadeIn"] = json!((len as u64 + 1) * assetcraft_storyboard::TICKS_PER_SECOND);
+    let long = serde_json::to_string(&long).unwrap();
+    assert!(
+        assetcraft_storyboard::Storyboard::from_json(long.as_bytes()).is_err(),
+        "a fade longer than its section is refused on load"
+    );
+    for bad in [
+        json!({ "section": 1 }),
+        json!({ "section": 99, "in": 1 }),
+        json!({ "section": -1, "in": 1 }),
+        json!({ "section": 1, "in": -1 }),
+        json!({ "section": 1, "out": "slow" }),
+    ] {
+        assert!(matches!(s.execute("storyboard.fade", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    run(&mut s, "storyboard.fade", json!({ "section": 1, "in": 0, "out": 0 }));
+    assert!(crate::export_job::section_fades(s.storyboard().unwrap()).is_empty());
+    assert!(!serde_json::to_string(s.storyboard().unwrap()).unwrap().contains("fadeIn"), "no fades: left out");
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(crate::export_job::section_fades(s.storyboard().unwrap()).len(), 2, "undo brings them back");
 }

@@ -29,7 +29,7 @@ pub mod mix;
 pub mod program;
 
 pub use program::{
-    DIP_RAMP_SECS, Dip, ENVELOPE_FLOOR_DB, Edit, Envelope, Layer, Player, Program, RecordingPlayer, SilentPlayer,
+    DIP_RAMP_SECS, Dip, ENVELOPE_FLOOR_DB, Edit, Envelope, Fade, Layer, Player, Program, RecordingPlayer, SilentPlayer,
 };
 pub use sio::peaks::Peaks;
 

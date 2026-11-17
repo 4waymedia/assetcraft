@@ -427,6 +427,47 @@ pub fn seconds(path: &Path) -> Result<f64, String> {
     if secs.is_finite() && secs > 0.0 { Ok(secs) } else { Err("the video has no length".into()) }
 }
 
+/// One video's frames read on the calling thread, in any order (P3: the export draws the Cut
+/// frame by frame and waits for each). A time past the end is the last frame; the last frame
+/// read is kept, so an export at a higher rate than the video doesn't decode a frame twice.
+pub struct VideoReader {
+    src: SharedSource,
+    fps: f64,
+    last: u64,
+    held: Option<(u64, u32, Arc<Frame>)>,
+}
+
+impl std::fmt::Debug for VideoReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VideoReader").field("fps", &self.fps).field("last", &self.last).finish()
+    }
+}
+
+impl VideoReader {
+    /// Open the video at `path`.
+    pub fn open(path: &Path) -> Result<Self, String> {
+        let src = open_file(path)?;
+        let fps = fps_of(&src)?;
+        let last = last_frame(&src, fps);
+        Ok(Self { src, fps, last, held: None })
+    }
+
+    /// The frame `secs` into the video (clamped to its start and end), its longest side at
+    /// most about `side`.
+    pub fn frame(&mut self, secs: f64, side: u32) -> Result<Arc<Frame>, String> {
+        let index = frame_index(if secs.is_finite() { secs } else { 0.0 }, self.fps).min(self.last);
+        if let Some((i, s, f)) = &self.held
+            && *i == index
+            && *s == side
+        {
+            return Ok(Arc::clone(f));
+        }
+        let f = Arc::new(decode(&self.src, index, self.fps, side.max(1))?);
+        self.held = Some((index, side, Arc::clone(&f)));
+        Ok(f)
+    }
+}
+
 /// Open `path` as FilmCraft does: a pooled file reader and the codecs' openers.
 fn open_file(path: &Path) -> Result<SharedSource, String> {
     let reader = filmcraft_media::reader::FileReader::open(path).map_err(|e| format!("can't read the file: {e}"))?;

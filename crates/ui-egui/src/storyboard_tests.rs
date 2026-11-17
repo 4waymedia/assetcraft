@@ -2188,3 +2188,56 @@ fn a_video_card_shows_its_in_point_frame() {
     nav.run("storyboard.slip", json!({ "clip": id.0, "to": 1.0 }));
     assert!(shows(&mut nav, 24), "and its new in-point after a slip");
 }
+
+/// V4 (Paul, 2026-11-15: "allow audio fade in/out for each section"): the handle at a section's
+/// top-left corner drags a fade-in, the top-right a fade-out — one `storyboard.fade` each — and a
+/// double-click removes one.
+#[test]
+fn a_sections_corner_handles_fade_it_in_and_out() {
+    use crate::strip_view::PX_PER_SEC;
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    // The sample's song has no sections: save it with two and open that.
+    let tps = assetcraft_storyboard::TICKS_PER_SECOND;
+    let mut doc = serde_json::to_value(nav.session().storyboard().unwrap()).unwrap();
+    doc["track"]["songSections"] = json!([
+        { "name": "Intro", "start": 0, "end": 4 * tps },
+        { "name": "Chorus", "start": 4 * tps, "end": 12 * tps },
+    ]);
+    let dir = std::env::temp_dir().join(format!("assetcraft-fade-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("fades.storyboard.json");
+    std::fs::write(&file, serde_json::to_vec(&doc).unwrap()).unwrap();
+    let r = nav.run("storyboard.open", json!({ "path": file.to_string_lossy() }));
+    assert!(r.is_some(), "opened");
+    let mut t = 0.0;
+    for _ in 0..10 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    let row = ctx.read_response(crate::strip_view::volume_line_id()).expect("the AUDIO row is drawn").rect;
+    let left = strip_rect(&ctx, 1).left() - 1.0;
+    let chorus = |nav: &Navigator| nav.session().storyboard().unwrap().track.as_ref().unwrap().song_sections[1].clone();
+    let x_of = |secs: f32| left + secs * PX_PER_SEC;
+    let handle_y = row.top() + 1.0 + 6.0;
+    // The chorus's fade-in handle sits just inside its start: drag it 1.5 s in.
+    let from = Pos2::new(x_of(4.0) + 6.0, handle_y);
+    drag(&ctx, &mut nav, from, Pos2::new(x_of(5.5), handle_y), &mut t);
+    let fade_in = chorus(&nav).fade_in.as_secs_f64();
+    assert!((fade_in - 1.5).abs() < 0.06, "fades in over {fade_in}");
+    // The fade-out handle, just inside its end: 2 s in from the end.
+    let from = Pos2::new(x_of(12.0) - 6.0, handle_y);
+    drag(&ctx, &mut nav, from, Pos2::new(x_of(10.0), handle_y), &mut t);
+    let fade_out = chorus(&nav).fade_out.as_secs_f64();
+    assert!((fade_out - 2.0).abs() < 0.06, "fades out over {fade_out}");
+    assert!(nav.state.storyboard.fade_drag.is_none());
+    // A double-click on the fade-in's handle (now 1.5 s in) removes it.
+    let at = Pos2::new(x_of(5.5), handle_y);
+    for _ in 0..2 {
+        click(&ctx, &mut nav, at, &mut t);
+    }
+    assert_eq!(chorus(&nav).fade_in.as_secs_f64(), 0.0, "removed");
+    assert!(chorus(&nav).fade_out.as_secs_f64() > 1.9, "the other stays");
+    let _ = std::fs::remove_dir_all(&dir);
+}

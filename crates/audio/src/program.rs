@@ -49,6 +49,35 @@ pub struct Program {
     dips: Vec<Dip>,
     /// The song's volume line (V3), on top of `music_gain`.
     envelope: Option<Envelope>,
+    /// Fades in and out at the song's sections (V4).
+    fades: Vec<Fade>,
+}
+
+/// The music fading in (from silence) or out (to silence) over `[start, end)` of program time
+/// (V4: a section's fade). Outside that stretch it leaves the music as it is, so a fade-out at a
+/// section's end gives way to the next section at full level. A quarter sine, as the edit's own
+/// fade-out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fade {
+    /// Program seconds it starts at.
+    pub start: f64,
+    /// Program seconds it is done by.
+    pub end: f64,
+    /// Up from silence (a fade-in), else down to it.
+    pub rising: bool,
+}
+
+impl Fade {
+    /// The gain this fade puts on program second `t` (1 outside it).
+    pub fn at(&self, t: f64) -> f32 {
+        if !(t >= self.start && t < self.end) || self.end.partial_cmp(&self.start) != Some(std::cmp::Ordering::Greater)
+        {
+            return 1.0;
+        }
+        let x = (t - self.start) / (self.end - self.start);
+        let x = if self.rising { x } else { 1.0 - x };
+        (x * FRAC_PI_2).sin() as f32
+    }
 }
 
 /// The quietest level a volume point can hold: at or below it the song is silent.
@@ -167,6 +196,7 @@ impl Program {
                 music_gain: 1.0,
                 dips: Vec::new(),
                 envelope: None,
+                fades: Vec::new(),
             };
         };
         let r = |f: u64| rescale(f, edit.rate, rate);
@@ -194,6 +224,7 @@ impl Program {
             music_gain: 1.0,
             dips: Vec::new(),
             envelope: None,
+            fades: Vec::new(),
         }
     }
 
@@ -255,9 +286,10 @@ impl Program {
             out = (out.0 * g, out.1 * g);
         }
         let mut g = self.music_gain;
-        if !self.dips.is_empty() || self.envelope.is_some() {
+        if !self.dips.is_empty() || self.envelope.is_some() || !self.fades.is_empty() {
             let secs = t as f64 / f64::from(self.rate().max(1));
             g *= self.dips.iter().map(|d| d.at(secs)).product::<f32>();
+            g *= self.fades.iter().map(|f| f.at(secs)).product::<f32>();
             if let Some(e) = &self.envelope {
                 g *= e.gain_at(secs);
             }
@@ -268,6 +300,12 @@ impl Program {
     /// This program with the music following a volume line (V3).
     pub fn with_envelope(mut self, envelope: Option<Envelope>) -> Program {
         self.envelope = envelope;
+        self
+    }
+
+    /// This program with the music fading in and out at the song's sections (V4).
+    pub fn with_fades(mut self, fades: Vec<Fade>) -> Program {
+        self.fades = fades;
         self
     }
 

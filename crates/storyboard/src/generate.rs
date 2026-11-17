@@ -373,7 +373,13 @@ pub fn track_from_cue(
         song_sections: tl
             .sections
             .iter()
-            .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
+            .map(|s| SongSection {
+                name: s.label.clone(),
+                start: cue.ticks(s.start),
+                end: cue.ticks(s.end),
+                fade_in: Ticks::ZERO,
+                fade_out: Ticks::ZERO,
+            })
             .collect(),
         edit: edit_of(cue, fit, &tl),
         level_db: 0,
@@ -754,7 +760,13 @@ pub fn track_under(cue: &CueMap, track_path: &str, board: &Storyboard, music: Mu
         song_sections: tl
             .sections
             .iter()
-            .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
+            .map(|s| SongSection {
+                name: s.label.clone(),
+                start: cue.ticks(s.start),
+                end: cue.ticks(s.end),
+                fade_in: Ticks::ZERO,
+                fade_out: Ticks::ZERO,
+            })
             .collect(),
         edit: edit_of(cue, fit.as_ref(), &tl),
         level_db: 0,
@@ -987,7 +999,13 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
         volume: Vec::new(),
         song_sections: scenes
             .iter()
-            .map(|s| SongSection { name: s.label.clone(), start: cue.ticks(s.start), end: cue.ticks(s.end) })
+            .map(|s| SongSection {
+                name: s.label.clone(),
+                start: cue.ticks(s.start),
+                end: cue.ticks(s.end),
+                fade_in: Ticks::ZERO,
+                fade_out: Ticks::ZERO,
+            })
             .collect(),
         edit: edit_of(cue, fit, &tl),
         level_db: 0,

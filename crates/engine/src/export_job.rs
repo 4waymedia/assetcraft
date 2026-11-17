@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 /// Output sizes by name (`size`), 16:9.
 pub const SIZES: [(&str, u32, u32); 3] = [("720p", 1280, 720), ("1080p", 1920, 1080), ("4k", 3840, 2160)];
 /// Frame rates accepted (`fps`).
-pub const FRAME_RATES: [u32; 5] = [24, 25, 30, 50, 60];
+pub const FRAME_RATES: [u32; 5] = assetcraft_storyboard::FRAME_RATES;
 /// Quantizer range accepted (`quality`; lower is better and bigger).
 pub const QUALITY_RANGE: (u8, u8) = (16, 36);
 /// Longest Cut exported, in seconds (the encoder's frame cap at 60 fps is higher).
@@ -508,7 +508,8 @@ impl Job {
                     Program::new(Arc::new(decoded), edit.as_ref())
                         .with_music_gain(song_gain(&self.board))
                         .with_envelope(song_envelope(&self.board))
-                        .with_dips(title_dips(&self.board)),
+                        .with_dips(title_dips(&self.board))
+                        .with_fades(section_fades(&self.board)),
                 )
             }
             None => None,
@@ -610,6 +611,22 @@ pub(crate) fn song_gain(board: &Storyboard) -> f32 {
         Some(t) if t.volume.is_empty() => assetcraft_audio::mix::db(f64::from(t.level_db)),
         _ => 1.0,
     }
+}
+
+/// The song's section fades (V4): each section's fade-in from its start and fade-out to its end.
+pub(crate) fn section_fades(board: &Storyboard) -> Vec<assetcraft_audio::Fade> {
+    let Some(track) = &board.track else { return Vec::new() };
+    let mut fades = Vec::new();
+    for s in &track.song_sections {
+        let (a, b) = (s.start.as_secs_f64(), s.end.as_secs_f64());
+        if !s.fade_in.is_zero() {
+            fades.push(assetcraft_audio::Fade { start: a, end: a + s.fade_in.as_secs_f64(), rising: true });
+        }
+        if !s.fade_out.is_zero() {
+            fades.push(assetcraft_audio::Fade { start: b - s.fade_out.as_secs_f64(), end: b, rising: false });
+        }
+    }
+    fades
 }
 
 /// Where the music dips under the board's title cards, at its title level (B-R3): one dip per

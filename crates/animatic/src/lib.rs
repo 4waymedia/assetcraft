@@ -88,8 +88,13 @@ pub struct Compositor {
     stills_bytes: usize,
     models: HashMap<PathBuf, Arc<Model>>,
     models_order: Vec<PathBuf>,
+    /// Videos being read (P3), most recently used last; at most [`OPEN_VIDEOS`].
+    videos: Vec<(PathBuf, assetcraft_media::VideoReader)>,
     failed: HashMap<PathBuf, String>,
 }
+
+/// How many videos a compositor keeps open at once.
+const OPEN_VIDEOS: usize = 4;
 
 impl fmt::Debug for Compositor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -127,6 +132,7 @@ impl Compositor {
             stills_bytes: 0,
             models: HashMap::new(),
             models_order: Vec::new(),
+            videos: Vec::new(),
             failed: HashMap::new(),
         })
     }
@@ -265,17 +271,19 @@ impl Compositor {
             Some(hero) => {
                 let path = Path::new(hero.0.as_str());
                 let t = progress(clip, elapsed);
+                // A video plays from the clip's in-point (P3, C6); a still is itself.
+                let at = clip.source_in.as_secs_f64() + if elapsed.is_finite() { elapsed.max(0.0) } else { 0.0 };
                 match (clip.motion, MotionKind::of_clip(clip)) {
                     (Some(motion), Some(MotionKind::Orbit)) => self.model_frame(&mut out, path, Some(motion.at(t))),
                     (Some(motion), Some(MotionKind::PanZoom)) => {
-                        if let Some(image) = self.still(path) {
+                        if let Some(image) = self.picture(path, at) {
                             draw::contain_window(&mut out, &image, window(motion.at(t)));
                         }
                     }
                     _ => {
                         if assetcraft_thumbs::model::is_model(format_of(path)) {
                             self.model_frame(&mut out, path, None);
-                        } else if let Some(image) = self.still(path) {
+                        } else if let Some(image) = self.picture(path, at) {
                             draw::contain_window(&mut out, &image, [0.0, 0.0, 1.0, 1.0]);
                         }
                     }
@@ -419,6 +427,48 @@ impl Compositor {
             self.fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
         }
         self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
+    }
+
+    /// A clip's picture: a video's frame `secs` in, else the still.
+    fn picture(&mut self, path: &Path, secs: f64) -> Option<Arc<Rgba>> {
+        if assetcraft_media::is_video(path) { self.video(path, secs) } else { self.still(path) }
+    }
+
+    /// The frame `secs` into the video at `path` (P3; Paul, 2026-11-15: "mp4 videos do not
+    /// display/play"), read on this thread through FilmCraft's codecs at the frame's size. A
+    /// video that won't open or decode is reported once, as a still is, and drawn as black.
+    fn video(&mut self, path: &Path, secs: f64) -> Option<Arc<Rgba>> {
+        if self.failed.contains_key(path) {
+            return None;
+        }
+        let at = match self.videos.iter().position(|(p, _)| p == path) {
+            Some(i) => i,
+            None => match assetcraft_media::VideoReader::open(path) {
+                Ok(r) => {
+                    if self.videos.len() >= OPEN_VIDEOS {
+                        self.videos.remove(0);
+                    }
+                    self.videos.push((path.to_path_buf(), r));
+                    self.videos.len() - 1
+                }
+                Err(why) => {
+                    self.failed.insert(path.to_path_buf(), why);
+                    return None;
+                }
+            },
+        };
+        // Most recently used last.
+        let entry = self.videos.remove(at);
+        self.videos.push(entry);
+        let side = self.width.max(self.height);
+        let reader = &mut self.videos.last_mut()?.1;
+        match reader.frame(secs, side) {
+            Ok(f) => Some(Arc::new(Rgba { width: f.width, height: f.height, data: f.rgba.clone() })),
+            Err(why) => {
+                self.failed.insert(path.to_path_buf(), why);
+                None
+            }
+        }
     }
 
     fn still(&mut self, path: &Path) -> Option<Arc<Rgba>> {

@@ -455,6 +455,63 @@ pub(crate) fn sb_title_level(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({ "db": db, "message": message }))
 }
 
+/// `storyboard.fade {section, in?, out?}` (V4; Paul, 2026-11-15: "allow audio fade in/out for
+/// each section"): how long the music takes to come up from silence at the start of song section
+/// `section` (its index) and to go down to silence by its end, in seconds. A side left out keeps
+/// its fade; 0 removes it. Each is held between 0 and what the section has left after the other.
+/// One undo step; the same fades again are none. Replies `{section, name, in, out, message}`.
+pub(crate) fn sb_fade(s: &mut Session, p: &Value) -> CmdResult {
+    let index = p
+        .get("section")
+        .and_then(Value::as_u64)
+        .and_then(|i| usize::try_from(i).ok())
+        .ok_or_else(|| CmdError::BadParams("`section` must be a section's number, from 0".into()))?;
+    let side = |k: &str| -> Result<Option<f64>, CmdError> {
+        match p.get(k) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|x| x.is_finite() && *x >= 0.0)
+                .map(Some)
+                .ok_or_else(|| CmdError::BadParams(format!("`{k}` must be seconds, from 0"))),
+        }
+    };
+    let (fade_in, fade_out) = (side("in")?, side("out")?);
+    if fade_in.is_none() && fade_out.is_none() {
+        return Err(CmdError::BadParams("give `in`, `out` or both, in seconds".into()));
+    }
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let track = board.track.as_mut().ok_or_else(|| CmdError::Unavailable("the storyboard has no song".into()))?;
+    let count = track.song_sections.len();
+    let sec = track
+        .song_sections
+        .get_mut(index)
+        .ok_or_else(|| CmdError::BadParams(format!("no section {index}: the song has {count}")))?;
+    let length = Ticks(sec.end.0.saturating_sub(sec.start.0));
+    let ticks = |x: f64| Ticks::from_secs_f64(x).unwrap_or(length).min(length);
+    let was = (sec.fade_in, sec.fade_out);
+    // The side being set first, then the other held to what is left.
+    if let Some(x) = fade_in {
+        sec.fade_in = ticks(x).min(Ticks(length.0.saturating_sub(fade_out.map_or(sec.fade_out, ticks).0)));
+    }
+    if let Some(x) = fade_out {
+        sec.fade_out = ticks(x).min(Ticks(length.0.saturating_sub(sec.fade_in.0)));
+    }
+    let (fi, fo) = (sec.fade_in.as_secs_f64(), sec.fade_out.as_secs_f64());
+    let name = sec.name.clone();
+    let message = match (fi > 0.0, fo > 0.0) {
+        (false, false) => format!("{name}: no fades"),
+        (true, false) => format!("{name}: fades in over {fi:.2} s"),
+        (false, true) => format!("{name}: fades out over {fo:.2} s"),
+        (true, true) => format!("{name}: fades in over {fi:.2} s, out over {fo:.2} s"),
+    };
+    if (sec.fade_in, sec.fade_out) != was {
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({ "section": index, "name": name, "in": fi, "out": fo, "message": message }))
+}
+
 /// `storyboard.volume {points: [[seconds, dB], …]}` (V3; Paul, 2026-11-15: "a horizontal line on
 /// the track where you can shift+click to add a point and then click the point and move up/down
 /// for volume"): the song's whole volume line, replacing the last one — sorted by time, a point

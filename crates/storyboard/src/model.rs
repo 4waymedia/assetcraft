@@ -299,6 +299,14 @@ pub struct SongSection {
     pub start: Ticks,
     /// End on the track (after `start`).
     pub end: Ticks,
+    /// How long the music takes to come up from silence at the section's start (V4; Paul,
+    /// 2026-11-15: "allow audio fade in/out for each section"). Zero (no fade) is left out of the
+    /// file.
+    #[serde(default, skip_serializing_if = "Ticks::is_zero")]
+    pub fade_in: Ticks,
+    /// How long the music takes to go down to silence by the section's end (V4).
+    #[serde(default, skip_serializing_if = "Ticks::is_zero")]
+    pub fade_out: Ticks,
 }
 
 /// The music file a storyboard is timed to.
@@ -505,6 +513,10 @@ pub struct Storyboard {
     /// none, so older boards load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voiceover: Option<Voiceover>,
+    /// The Cut's frame: size, frame rate, crop (frame-settings.md F1). None is
+    /// [`crate::FrameSpec::default`], 1920 × 1080 at 24 fps, and is left out of the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<crate::FrameSpec>,
 }
 
 /// A voiceover (SR4b): the file, and its two levels in dB (the ranges and defaults of an
@@ -534,6 +546,11 @@ impl Voiceover {
 }
 
 impl Storyboard {
+    /// The Cut's frame: its own, or 1920 × 1080 at 24 fps (frame-settings.md F1).
+    pub fn frame_spec(&self) -> crate::FrameSpec {
+        self.frame.clone().unwrap_or_default()
+    }
+
     /// An empty storyboard.
     pub fn new(name: impl Into<String>) -> Storyboard {
         Storyboard {
@@ -548,6 +565,7 @@ impl Storyboard {
             text_clips: Vec::new(),
             template: false,
             voiceover: None,
+            frame: None,
         }
     }
 

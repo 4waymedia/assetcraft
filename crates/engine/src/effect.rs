@@ -185,6 +185,7 @@ mod tests {
                 "item.probe",
                 "storyboard.cueMaps",
                 "storyboard.exportStatus",
+                "storyboard.framePresets",
                 "storyboard.preview",
                 "storyboard.recent",
                 "storyboard.templates",
