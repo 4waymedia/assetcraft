@@ -1,5 +1,8 @@
-//! Video poster frames through FilmCraft's command-line tool, run as a separate process.
+//! Video poster frames: decoded in-process through FilmCraft's codecs (`assetcraft-media`,
+//! T1; Paul, 2026-11-18: "we also need to create thumbnails for videos in the Organizer view"),
+//! and only when that can't read the file, through FilmCraft's command-line tool as before.
 //!
+//! The fallback:
 //! AssetCraft has no video decoders of its own: when `filmcraft-cli` is installed, it imports
 //! the file into a throw-away headless project and exports one frame (about [`POSTER_SECONDS`]
 //! in, clamped to the clip) as a PNG in a private temp folder, which is then decoded with the
@@ -73,8 +76,37 @@ impl Decoder for Video {
     }
 
     fn render(&self, _services: &dyn Services, probe: &Probe, max_side: u32) -> Result<Thumb, ThumbError> {
-        poster_frame(&SystemRunner, &probe.path, max_side)
+        match in_process(&probe.path, max_side) {
+            Ok(thumb) => Ok(thumb),
+            // A codec or container the in-app decoders don't read: the external tool, if any.
+            Err(_) => poster_frame(&SystemRunner, &probe.path, max_side),
+        }
     }
+}
+
+/// The poster frame through FilmCraft's codecs in this process (T1): [`POSTER_SECONDS`] in,
+/// clamped to the clip, its longest side at most about `max_side`.
+pub(crate) fn in_process(path: &Path, max_side: u32) -> Result<Thumb, ThumbError> {
+    let mut reader = assetcraft_media::VideoReader::open(path).map_err(ThumbError::Decode)?;
+    let (source_width, source_height) = reader.size();
+    let at = reader.poster_secs(f64::from(POSTER_SECONDS));
+    // The reader shrinks by whole steps (a 160-wide video asked for 128 would come back 80
+    // wide), so ask for the step that stays at or above `max_side`, then shrink the rest here.
+    let max_side = max_side.max(1);
+    let longest = source_width.max(source_height);
+    let side = if longest > max_side { longest.div_ceil((longest / max_side).max(1)) } else { max_side };
+    let frame = reader.frame(at, side).map_err(ThumbError::Decode)?;
+    if frame.width == 0 || frame.height == 0 {
+        return Err(ThumbError::Decode("the video gave an empty frame".into()));
+    }
+    let thumb = Thumb {
+        width: frame.width,
+        height: frame.height,
+        source_width: if source_width > 0 { source_width } else { frame.width },
+        source_height: if source_height > 0 { source_height } else { frame.height },
+        rgba: frame.rgba.clone(),
+    };
+    super::finish(thumb, max_side)
 }
 
 /// One run of the tool.

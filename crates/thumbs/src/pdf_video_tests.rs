@@ -352,3 +352,28 @@ fn real_filmcraft_cli_poster_frames_from_the_library() {
     let r = poster_frame(&SystemRunner, &library().join("edge-cases/broken_not_an_image.jpg"), 64);
     assert!(matches!(r, Err(ThumbError::Decode(_))), "{r:?}");
 }
+
+// ---- video: in-process decode (no tool needed) ----------------------------------------------
+
+/// The Organizer's video cards: every library video gets a poster frame without
+/// filmcraft-cli, at the source's shape, and not a black frame.
+#[test]
+fn in_process_poster_frames_from_the_library() {
+    for name in
+        ["snow_clearing_flythrough.mp4", "snow_clearing_flythrough.mov", "soul_light_loop.webm", "frozen_lake_pan.avi"]
+    {
+        let path = library().join("environments").join(name);
+        let t = video::in_process(&path, 128).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!((t.source_width, t.source_height), (160, 90), "{name}");
+        assert_eq!((t.width, t.height), (128, 72), "{name}");
+        assert_eq!(t.rgba.len(), (t.width * t.height * 4) as usize, "{name}");
+        let i = ((2 * t.width + 2) * 4) as usize;
+        assert!(t.rgba[i + 2] > 100, "{name}: {:?}", &t.rgba[i..i + 4]);
+        // render_path goes the same way when the tool isn't there.
+        let r = render_path(&RealFs, &path, 128).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!((r.width, r.height), (t.width, t.height), "{name}");
+    }
+    // Not a video: an error, never a hang or crash.
+    let r = video::in_process(&library().join("edge-cases/broken_not_an_image.jpg"), 64);
+    assert!(r.is_err(), "{r:?}");
+}

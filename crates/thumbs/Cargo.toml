@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+assetcraft-media = { workspace = true }
 assetcraft-cache = { workspace = true }
 assetcraft-fs = { workspace = true }
 assetcraft-probe = { workspace = true }

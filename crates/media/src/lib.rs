@@ -444,6 +444,18 @@ impl std::fmt::Debug for VideoReader {
 }
 
 impl VideoReader {
+    /// The video's own picture size, `(width, height)`.
+    pub fn size(&self) -> (u32, u32) {
+        self.src.info().video.as_ref().map_or((0, 0), |v| (v.width, v.height))
+    }
+
+    /// Where a poster frame is taken: `at` seconds in, clamped to the video (a short clip gives
+    /// its last frame).
+    pub fn poster_secs(&self, at: f64) -> f64 {
+        let secs = self.src.info().duration.seconds();
+        if secs.is_finite() && secs > 0.0 { at.min((secs - 0.5 / self.fps).max(0.0)) } else { 0.0 }
+    }
+
     /// Open the video at `path`.
     pub fn open(path: &Path) -> Result<Self, String> {
         let src = open_file(path)?;
