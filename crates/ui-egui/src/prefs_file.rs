@@ -120,6 +120,7 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         recent_storyboards,
         credits,
         snapping,
+        safe_zones,
         frame,
         hidden_places,
     } = a;
@@ -135,6 +136,7 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         || *recent_storyboards != b.recent_storyboards
         || *credits != b.credits
         || *snapping != b.snapping
+        || *safe_zones != b.safe_zones
         || *frame != b.frame
         || *hidden_places != b.hidden_places
 }

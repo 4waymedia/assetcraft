@@ -2348,3 +2348,32 @@ fn a_framed_post_draws_in_the_viewer_and_setup() {
     let r = ctx.read_response(crate::strip_view::viewer_id()).expect("the Viewer is drawn").rect;
     assert!((r.width() / r.height() - 0.8).abs() < 0.01, "4:5");
 }
+
+/// F6: View › Safe Zones is a checked item in Storyboard mode, and the Viewer draws with the
+/// guides on or off for a vertical and a 16:9 frame, changing nothing.
+#[test]
+fn view_safe_zones_toggles_the_viewers_guides() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    let checked = |nav: &Navigator| {
+        crate::menu::menus(nav).iter().flat_map(|m| m.entries.iter()).find_map(|e| match e {
+            MenuEntry::Item { label, checked, .. } if label == "Safe Zones" => *checked,
+            _ => None,
+        })
+    };
+    assert_eq!(checked(&nav), Some(true), "View › Safe Zones, on");
+    let before = nav.session().storyboard().unwrap().clone();
+    let mut t = 0.0;
+    for preset in ["vertical", "hd"] {
+        nav.run("storyboard.frame", json!({ "preset": preset }));
+        for on in [true, false] {
+            nav.run("storyboard.safeZones", json!({ "on": on }));
+            t += 0.05;
+            frame(&ctx, &mut nav, Vec::new(), t);
+        }
+    }
+    assert_eq!(checked(&nav), Some(false));
+    assert_eq!(nav.session().storyboard().unwrap().clips, before.clips, "guides change nothing");
+}

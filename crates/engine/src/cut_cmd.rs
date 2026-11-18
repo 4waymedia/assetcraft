@@ -273,6 +273,19 @@ pub(crate) fn sb_snapping(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({ "on": on, "message": message }))
 }
 
+/// `storyboard.safeZones {on?}` (frame-settings.md F6) → `{on, message}`: the Viewer's guides —
+/// on a vertical frame, where Reels, TikTok and Shorts put their buttons and words; on any other,
+/// title-safe 90 %. Drawn in the Viewer only, never exported. No `on` toggles; remembered.
+pub(crate) fn sb_safe_zones(s: &mut Session, p: &Value) -> CmdResult {
+    let on = match p.get("on") {
+        None | Some(Value::Null) => !s.safe_zones,
+        Some(v) => v.as_bool().ok_or_else(|| CmdError::BadParams("`on` must be true/false".into()))?,
+    };
+    s.safe_zones = on;
+    let message = if on { "Safe zones shown in the Viewer" } else { "Safe zones hidden" };
+    Ok(json!({ "on": on, "message": message }))
+}
+
 /// The Strip's zoom range (Z1): a quarter (whole Cuts at a glance) to sixteen times (single
 /// frames and the waveform's detail).
 pub const STRIP_ZOOM_RANGE: (f32, f32) = (0.25, 16.0);

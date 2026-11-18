@@ -241,3 +241,16 @@ fn a_framed_post() {
     s.execute("storyboard.layout", &json!({ "kind": "full" })).unwrap();
     assert_eq!(s.storyboard().unwrap().layout, None);
 }
+
+/// F6: `storyboard.safeZones` toggles the Viewer's guides (on to start), remembered in prefs.
+#[test]
+fn safe_zones_toggle_and_are_remembered() {
+    let mut s = session();
+    assert!(s.safe_zones_on(), "on to start");
+    let r = s.execute("storyboard.safeZones", &json!({})).unwrap();
+    assert_eq!(r["on"], false);
+    assert!(!Prefs::from_json(&s.prefs().to_json()).safe_zones, "remembered");
+    s.execute("storyboard.safeZones", &json!({ "on": true })).unwrap();
+    assert!(s.safe_zones_on());
+    assert!(matches!(s.execute("storyboard.safeZones", &json!({ "on": "yes" })), Err(CmdError::BadParams(_))));
+}

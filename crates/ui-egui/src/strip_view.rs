@@ -708,6 +708,65 @@ fn viewer(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, a
     let ratio = (board.frame_spec().ratio() as f32).clamp(0.1, 10.0);
     let w = avail.width().min(avail.height() * ratio).max(16.0);
     let frame = Rect::from_center_size(avail.center(), vec2(w, w / ratio));
+    viewer_in(nav, ui, board, index, at, fill, frame);
+    // On top of whatever the frame shows (F6).
+    if nav.session.safe_zones_on() {
+        safe_zones(ui, &board.frame_spec(), frame);
+    }
+}
+
+/// The Viewer's safe-zone guides (frame-settings.md F6), drawn over the picture and never
+/// exported: on a vertical frame the margins where Reels, TikTok and Shorts put their username,
+/// caption and button column are shaded and the safe area outlined; on any other frame the
+/// title-safe 90 % box is outlined.
+fn safe_zones(ui: &Ui, spec: &assetcraft_storyboard::FrameSpec, frame: Rect) {
+    let painter = ui.painter().with_clip_rect(frame);
+    let [x, y, w, h] = spec.safe_area();
+    let safe = Rect::from_min_size(frame.min + vec2(x, y) * frame.size(), vec2(w, h) * frame.size());
+    let line = Stroke::new(1.0, Color32::from_white_alpha(110));
+    let label = |at: egui::Pos2, align: Align2, text: &str| {
+        painter.text(at, align, text, FontId::monospace(9.0), Color32::from_white_alpha(150));
+    };
+    if spec.is_vertical() {
+        let shade = Color32::from_black_alpha(70);
+        // Above, below, then the sides between them.
+        painter.rect_filled(Rect::from_min_max(frame.min, pos2(frame.right(), safe.top())), 0, shade);
+        painter.rect_filled(Rect::from_min_max(pos2(frame.left(), safe.bottom()), frame.max), 0, shade);
+        painter.rect_filled(
+            Rect::from_min_max(pos2(frame.left(), safe.top()), pos2(safe.left(), safe.bottom())),
+            0,
+            shade,
+        );
+        painter.rect_filled(
+            Rect::from_min_max(pos2(safe.right(), safe.top()), pos2(frame.right(), safe.bottom())),
+            0,
+            shade,
+        );
+        painter.rect_stroke(safe, 0, line, StrokeKind::Inside);
+        label(pos2(frame.center().x, safe.top() - 3.0), Align2::CENTER_BOTTOM, "USERNAME · TOP BAR");
+        label(pos2(frame.center().x, safe.bottom() + 3.0), Align2::CENTER_TOP, "CAPTION · AUDIO");
+        let buttons = pos2((safe.right() + frame.right()) / 2.0, safe.center().y);
+        painter.text(
+            buttons,
+            Align2::CENTER_CENTER,
+            "LIKE\nCOMMENT\nSHARE",
+            FontId::monospace(8.0),
+            Color32::from_white_alpha(140),
+        );
+    } else {
+        let dashed = egui::Shape::dashed_line(
+            &[safe.left_top(), safe.right_top(), safe.right_bottom(), safe.left_bottom(), safe.left_top()],
+            line,
+            4.0,
+            4.0,
+        );
+        painter.extend(dashed);
+        label(safe.left_top() + vec2(4.0, 3.0), Align2::LEFT_TOP, "TITLE SAFE 90%");
+    }
+}
+
+/// The Viewer's contents in `frame`.
+fn viewer_in(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index, at: Ticks, fill: bool, frame: Rect) {
     let response = ui.interact(frame, viewer_id(), Sense::hover());
     ui.painter().rect_filled(frame, 0, Color32::BLACK);
     let playing = nav.session.transport().playing;

@@ -670,6 +670,15 @@ static COMMANDS: &[CommandSpec] = &[
     ),
     cmd!(
         APP_STEP,
+        "storyboard.safeZones",
+        "Safe Zones",
+        "View",
+        None,
+        "{on?: bool} → {on, message} (the Viewer's guides: on a vertical frame where Reels, TikTok and Shorts put their buttons and words, else title-safe 90 %; never exported; no `on` toggles; remembered)",
+        crate::cut_cmd::sb_safe_zones
+    ),
+    cmd!(
+        APP_STEP,
         "storyboard.snapping",
         "Snapping",
         "View",

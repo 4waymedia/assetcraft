@@ -234,6 +234,8 @@ pub struct Session {
     credits: bool,
     /// Snapping for the cut tools (`storyboard.snapping`; saved in prefs).
     snapping: bool,
+    /// The Viewer's safe-zone guides (`storyboard.safeZones`; saved in prefs).
+    safe_zones: bool,
     /// The frame new storyboards start with (`storyboard.defaultFrame`; saved in prefs).
     pub(crate) default_frame: Option<assetcraft_storyboard::FrameSpec>,
     /// The Strip's zoom (`storyboard.zoom`, Z1): 1 = 44 pt a second.
@@ -294,6 +296,7 @@ impl Session {
             recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
             credits: prefs.credits,
             snapping: prefs.snapping,
+            safe_zones: prefs.safe_zones,
             default_frame: prefs.frame.clone(),
             strip_zoom: 1.0,
             video: std::sync::OnceLock::new(),
@@ -576,6 +579,7 @@ impl Session {
             recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
             credits: self.credits,
             snapping: self.snapping,
+            safe_zones: self.safe_zones,
             frame: self.default_frame.clone(),
             hidden_places: self.hidden_places.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
         }
@@ -614,6 +618,11 @@ impl Session {
     /// The frame new storyboards start with (`storyboard.defaultFrame`; F4).
     pub fn default_frame(&self) -> assetcraft_storyboard::FrameSpec {
         self.default_frame.clone().unwrap_or_default()
+    }
+
+    /// Whether the Viewer draws safe-zone guides (`storyboard.safeZones`; remembered).
+    pub fn safe_zones_on(&self) -> bool {
+        self.safe_zones
     }
 
     /// Whether the cut tools snap (`storyboard.snapping`; remembered).

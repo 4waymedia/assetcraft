@@ -329,6 +329,16 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
             action: cmd(spec.id, json!({ "on": !s.snapping_on() })),
         }],
         "storyboard.snapping" => Vec::new(),
+        // View › Safe Zones, in Storyboard mode only (frame-settings.md F6).
+        "storyboard.safeZones" if s.mode() == Mode::Storyboard => vec![MenuEntry::Item {
+            label: spec.label.into(),
+            shortcut: spec.shortcut,
+            enabled: true,
+            checked: Some(s.safe_zones_on()),
+            tooltip: Some("Guides in the Viewer: where platform buttons and captions sit on a vertical post, else title-safe 90 %".into()),
+            action: cmd(spec.id, json!({ "on": !s.safe_zones_on() })),
+        }],
+        "storyboard.safeZones" => Vec::new(),
         "nav.back" => simple(s.can_back()),
         "nav.forward" => simple(s.can_forward()),
         "nav.up" => simple(s.can_up()),

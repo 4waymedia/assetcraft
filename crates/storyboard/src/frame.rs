@@ -170,6 +170,29 @@ fn gcd(a: u32, b: u32) -> u32 {
     if b == 0 { a.max(1) } else { gcd(b, a % b) }
 }
 
+/// Where a vertical post's platform buttons and words sit (F6): a combined guide for Reels,
+/// TikTok and Shorts as fractions of the frame — `[top, bottom, left, right]`. Words and faces
+/// kept inside stay clear of the username, caption and like / comment / share column on all
+/// three. A conservative shared start, not any platform's official numbers.
+pub const VERTICAL_SAFE: [f32; 4] = [0.15, 0.25, 0.10, 0.15];
+
+/// Title-safe for other frames (F6): 90 % of the frame, centred.
+pub const TITLE_SAFE: f32 = 0.90;
+
+impl FrameSpec {
+    /// The safe area as `[x, y, w, h]` fractions of the frame (F6): inside [`VERTICAL_SAFE`]'s
+    /// margins for a vertical frame, else the centred [`TITLE_SAFE`] box.
+    pub fn safe_area(&self) -> [f32; 4] {
+        if self.is_vertical() {
+            let [t, b, l, r] = VERTICAL_SAFE;
+            [l, t, 1.0 - l - r, 1.0 - t - b]
+        } else {
+            let m = (1.0 - TITLE_SAFE) / 2.0;
+            [m, m, TITLE_SAFE, TITLE_SAFE]
+        }
+    }
+}
+
 /// A named frame for a kind of film or a social placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FramePreset {
@@ -351,6 +374,19 @@ mod tests {
         // The same shape fills exactly either way; a bad size fills the frame.
         assert!(close(FrameSpec::default().place(1920.0, 1080.0), [0.0, 0.0, 1.0, 1.0]));
         assert!(close(vertical.place(0.0, 10.0), [0.0, 0.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn the_safe_area_suits_the_frame() {
+        let vertical = frame_preset("vertical").map(|p| p.spec()).unwrap();
+        let [x, y, w, h] = vertical.safe_area();
+        assert!((x - 0.10).abs() < 1e-6 && (y - 0.15).abs() < 1e-6);
+        assert!(
+            (x + w - 0.85).abs() < 1e-6 && (y + h - 0.75).abs() < 1e-6,
+            "clear of the right column and the caption"
+        );
+        let [x, y, w, h] = FrameSpec::default().safe_area();
+        assert!((x - 0.05).abs() < 1e-6 && (y - 0.05).abs() < 1e-6 && (w - 0.9).abs() < 1e-6 && (h - 0.9).abs() < 1e-6);
     }
 
     #[test]

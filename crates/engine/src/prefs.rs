@@ -286,6 +286,9 @@ pub struct Prefs {
     /// Snapping for the cut tools (cut-editing.md C5; `storyboard.snapping`, S); on by default.
     #[serde(default = "yes")]
     pub snapping: bool,
+    /// The Viewer's safe-zone guides (frame-settings.md F6; `storyboard.safeZones`); on by default.
+    #[serde(default = "yes")]
+    pub safe_zones: bool,
     /// The frame new storyboards start with (frame-settings.md F4; `storyboard.defaultFrame`);
     /// `None` = 1920 × 1080 at 24 fps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -318,6 +321,7 @@ impl Default for Prefs {
             recent_storyboards: Vec::new(),
             credits: true,
             snapping: true,
+            safe_zones: true,
             frame: None,
             hidden_places: Vec::new(),
         }
@@ -376,6 +380,9 @@ impl Prefs {
         }
         if let Some(on) = root.get("snapping").and_then(Value::as_bool) {
             prefs.snapping = on;
+        }
+        if let Some(on) = root.get("safe_zones").and_then(Value::as_bool) {
+            prefs.safe_zones = on;
         }
         if let Some(Value::Array(items)) = root.get("hidden_places") {
             prefs.hidden_places =
