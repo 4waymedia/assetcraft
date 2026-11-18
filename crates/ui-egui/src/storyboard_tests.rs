@@ -2266,3 +2266,85 @@ fn the_viewer_takes_the_boards_frame() {
     nav.run("storyboard.frame", json!({ "preset": "scope" }));
     assert!((ratio(&mut nav) - 2048.0 / 858.0).abs() < 0.02, "scope");
 }
+
+/// F4: File › Storyboard Setup… opens the frame window (its controls draw the board's frame); the
+/// Start screen's Frame row shows what new storyboards will be.
+#[test]
+fn storyboard_setup_opens_and_shows_the_frame() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    // Fonts take effect from the second pass.
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    let menus = crate::menu::menus(&nav);
+    let entry = menus
+        .iter()
+        .flat_map(|m| m.entries.iter())
+        .find(|e| matches!(e, MenuEntry::Item { label, .. } if label == "Storyboard Setup…"))
+        .cloned()
+        .expect("File › Storyboard Setup…");
+    let MenuEntry::Item { action, enabled, .. } = entry else { unreachable!() };
+    assert!(enabled);
+    crate::menu::apply(&mut nav, &ctx, action);
+    assert!(nav.state.setup_open);
+    nav.run("storyboard.frame", json!({ "preset": "vertical" }));
+    let mut t = 0.0;
+    for _ in 0..3 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    assert!(nav.state.setup_open, "stays open while the frame changes");
+    assert_eq!(crate::setup_view::current(&nav, crate::setup_view::Target::Board).ratio_label(), "9:16");
+}
+
+/// F5 (L1): with a split stage the Viewer, Setup window, Inspector's Region row and the cards'
+/// region tags all draw, and only commands change the board.
+#[test]
+fn a_split_stage_draws_in_the_viewer_setup_and_inspector() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    nav.run("storyboard.frame", json!({ "preset": "vertical" }));
+    nav.run("storyboard.layout", json!({ "kind": "split", "stack": true, "share": 60 }));
+    let board = nav.session().storyboard().unwrap().clone();
+    let shot = board.clips.iter().find(|c| c.shot_type != assetcraft_storyboard::ShotType::Ttl).unwrap().id.0;
+    nav.run("storyboard.select", json!({ "clip": shot }));
+    nav.run("storyboard.region", json!({ "clip": shot, "region": "b" }));
+    nav.state.setup_open = true;
+    let before = nav.session().storyboard().unwrap().clone();
+    let mut t = 0.0;
+    for _ in 0..4 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    assert_eq!(nav.session().storyboard().unwrap(), &before, "drawing changes nothing");
+    let r = ctx.read_response(crate::strip_view::viewer_id()).expect("the Viewer is drawn").rect;
+    assert!((r.width() / r.height() - 9.0 / 16.0).abs() < 0.01, "still the board's frame");
+}
+
+/// F5 (L2): a framed post draws in the Viewer and the Setup window, changing nothing.
+#[test]
+fn a_framed_post_draws_in_the_viewer_and_setup() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    nav.run("storyboard.frame", json!({ "preset": "portrait" }));
+    nav.run("storyboard.layout", json!({ "kind": "framed", "headline": "Big news", "caption": "Link in bio" }));
+    nav.state.setup_open = true;
+    let before = nav.session().storyboard().unwrap().clone();
+    let mut t = 0.0;
+    for _ in 0..4 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    assert_eq!(nav.session().storyboard().unwrap(), &before, "drawing changes nothing");
+    assert_eq!(
+        nav.state.post_draft.as_ref().map(|d| d[0].as_str()),
+        Some("Big news"),
+        "the Setup fields read the board"
+    );
+    let r = ctx.read_response(crate::strip_view::viewer_id()).expect("the Viewer is drawn").rect;
+    assert!((r.width() / r.height() - 0.8).abs() < 0.01, "4:5");
+}

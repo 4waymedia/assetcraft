@@ -188,6 +188,19 @@ pub(crate) fn sb_view(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({ "view": view.as_str() }))
 }
 
+/// A new storyboard's frame (F4): the call's `frame` (a preset id, or `{preset?, width?, …}` as
+/// `storyboard.frame` takes) over the workspace default; HD 24 (`None`) when neither says.
+pub(crate) fn frame_param(s: &Session, p: &Value) -> Result<Option<assetcraft_storyboard::FrameSpec>, CmdError> {
+    let base = s.default_frame.clone().unwrap_or_default();
+    let frame = match p.get("frame") {
+        None | Some(Value::Null) => base,
+        Some(Value::String(id)) => crate::frame_cmd::frame_from(&json!({ "preset": id }), base)?,
+        Some(v @ Value::Object(_)) => crate::frame_cmd::frame_from(v, base)?,
+        Some(_) => return Err(CmdError::BadParams("`frame` must be a preset's id or {preset?, width?, …}".into())),
+    };
+    Ok((frame != assetcraft_storyboard::FrameSpec::default()).then_some(frame))
+}
+
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
     let mut board = match p.get("template") {
@@ -231,6 +244,8 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     } else {
         None
     };
+    // The workspace's frame (F4), unless the call names one.
+    board.frame = frame_param(s, p)?;
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board).or_else(|| board.clips.first().map(|c| c.id));
     s.boards.generated = None;

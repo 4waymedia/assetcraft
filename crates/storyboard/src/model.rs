@@ -178,6 +178,9 @@ pub struct Clip {
     /// Zero (the video's start) is left out of the file.
     #[serde(default, skip_serializing_if = "Ticks::is_zero")]
     pub source_in: Ticks,
+    /// The region of a split stage it plays in (F5, L1); none is A. Left out of the file unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<crate::Region>,
 }
 
 impl Clip {
@@ -199,6 +202,7 @@ impl Clip {
             text_style: TextStyle::default(),
             motion: None,
             source_in: Ticks::ZERO,
+            region: None,
         }
     }
 
@@ -517,6 +521,9 @@ pub struct Storyboard {
     /// [`crate::FrameSpec::default`], 1920 × 1080 at 24 fps, and is left out of the file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<crate::FrameSpec>,
+    /// The stage's layout theme (F5): none is the whole frame (L0 Full).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::Layout>,
 }
 
 /// A voiceover (SR4b): the file, and its two levels in dB (the ranges and defaults of an
@@ -566,6 +573,7 @@ impl Storyboard {
             template: false,
             voiceover: None,
             frame: None,
+            layout: None,
         }
     }
 

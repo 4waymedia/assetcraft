@@ -810,6 +810,73 @@ fn show_section(
     index: &Index,
     elapsed: f64,
 ) {
+    // A split stage (F5, L1): each region shows its own shot, cropped into it as the export does.
+    if let Some(layout) = &board.layout
+        && let Some(start) = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied())
+        && let Some(shots) = board.split_shots(Ticks(start.0.saturating_add(
+            Ticks::from_secs_f64(if elapsed.is_finite() { elapsed.max(0.0) } else { 0.0 }).unwrap_or(Ticks::ZERO).0,
+        )))
+    {
+        ui.painter().rect_filled(frame, 0, Color32::BLACK);
+        let spec = board.frame_spec();
+        for (rect, shot) in layout.regions().into_iter().zip(shots) {
+            let region = Rect::from_min_size(
+                frame.min + vec2(rect[0], rect[1]) * frame.size(),
+                vec2(rect[2], rect[3]) * frame.size(),
+            );
+            let Some((i, at)) = shot else { continue };
+            let Some(c) = board.clips.get(i) else { continue };
+            // The board's crop at the region's own shape.
+            let fit = assetcraft_storyboard::FrameSpec {
+                width: (region.width().round() as u32).max(2),
+                height: (region.height().round() as u32).max(2),
+                ..spec.clone()
+            };
+            let c = c.clone();
+            ui.scope_builder(egui::UiBuilder::new().max_rect(region), |ui| {
+                ui.set_clip_rect(region.intersect(ui.clip_rect()));
+                show_clip(nav, ui, region, &c, index, at, Some(&fit));
+            });
+        }
+        return;
+    }
+    // A framed post (F5, L2): the bands, and the shot in the picture region between them.
+    if let Some(layout @ assetcraft_storyboard::Layout::Framed { headline, caption, theme, .. }) = &board.layout
+        && clip.shot_type != ShotType::Ttl
+        && let Some([top, picture, bottom]) = layout.framed()
+    {
+        let at = |r: [f32; 4]| {
+            Rect::from_min_size(frame.min + vec2(r[0], r[1]) * frame.size(), vec2(r[2], r[3]) * frame.size())
+        };
+        let (top, picture, bottom) = (at(top), at(picture), at(bottom));
+        let look = theme.look();
+        let painter = ui.painter().clone();
+        painter.rect_filled(frame, 0, Color32::BLACK);
+        for band in [top, bottom] {
+            painter.rect_filled(band, 0, rgb(look.background));
+        }
+        let spec = board.frame_spec();
+        let fit = assetcraft_storyboard::FrameSpec {
+            width: (picture.width().round() as u32).max(2),
+            height: (picture.height().round() as u32).max(2),
+            ..spec
+        };
+        ui.scope_builder(egui::UiBuilder::new().max_rect(picture), |ui| {
+            ui.set_clip_rect(picture.intersect(ui.clip_rect()));
+            show_clip(nav, ui, picture, clip, index, elapsed, Some(&fit));
+        });
+        for (band, words, scale) in [(top, headline, 0.42), (bottom, caption, 0.3)] {
+            let words = if look.uppercase { words.trim().to_uppercase() } else { words.trim().to_owned() };
+            if words.is_empty() || band.height() < 4.0 {
+                continue;
+            }
+            let size = (band.height() * scale).min(frame.height() * 0.06).max(6.0);
+            let galley = painter.layout(words, egui::FontId::proportional(size), rgb(look.text), band.width() * 0.9);
+            let pos = band.center() - galley.size() / 2.0;
+            painter.with_clip_rect(band).galley(pos, galley, rgb(look.text));
+        }
+        return;
+    }
     let inset = board
         .scenes
         .iter()
@@ -1323,7 +1390,15 @@ fn timeline(nav: &mut Navigator, ui: &mut Ui, board: &Storyboard, index: &Index,
                     continue;
                 }
                 let response = ui.interact(rect, strip_clip_id(id), Sense::click());
-                paint_clip(nav, ui, rect, n + 1, clip, index);
+                paint_clip(
+                    nav,
+                    ui,
+                    rect,
+                    n + 1,
+                    clip,
+                    index,
+                    matches!(board.layout, Some(assetcraft_storyboard::Layout::Split { .. })),
+                );
                 let accepts = clip.shot_type.accepts_drop();
                 let hovering = accepts && response.dnd_hover_payload::<DragAsset>().is_some();
                 if chosen.contains(&id) || hovering {
@@ -2484,7 +2559,7 @@ pub(crate) fn scrub_to(nav: &mut Navigator, secs: f64, how: crate::timebar::Scru
     }
 }
 
-fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Clip, index: &Index) {
+fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Clip, index: &Index, split: bool) {
     let painter = ui.painter().with_clip_rect(rect);
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), 4.0));
     let body = Rect::from_min_max(rect.min + vec2(0.0, 4.0), rect.max);
@@ -2567,6 +2642,12 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
             FontId::monospace(10.0),
             if slipping { SELECT } else { Color32::from_gray(0x8a) },
         );
+    }
+    // On a split stage, the clip's region (F5, L1).
+    if split && !title {
+        let tag = Rect::from_min_size(pos2(body.right() - 20.0, body.top() + 4.0), vec2(16.0, 14.0));
+        painter.rect_filled(tag, 2, Color32::from_black_alpha(170));
+        painter.text(tag.center(), Align2::CENTER_CENTER, clip.region().letter(), FontId::monospace(10.0), SELECT);
     }
     let border = if title { rgb(0xe5243b) } else { Color32::from_gray(0x3a) };
     painter.rect_stroke(rect, 3, Stroke::new(1.0, border), StrokeKind::Inside);

@@ -192,17 +192,47 @@ impl Session {
         &self.recent
     }
 
-    /// System → Favorites: the OS sidebar when it has one, else the standard known folders.
-    /// `(label, path)`, in the OS's order.
+    /// System → Favorites: the OS sidebar when it has one, else the standard known folders,
+    /// less those hidden in AssetCraft (`nav.place.hide`). `(label, path)`, in the OS's order.
     pub fn system_places(&self) -> Vec<(String, PathBuf)> {
+        let shown = |p: &PathBuf| !self.hidden_places.iter().any(|h| same_path(h, p));
         if !self.sidebar.is_empty() {
             return self
                 .sidebar
                 .iter()
+                .filter(|i| shown(&i.path))
                 .map(|i| (i.name.clone().unwrap_or_else(|| assetcraft_fs::display_name(&i.path)), i.path.clone()))
                 .collect();
         }
-        self.known.iter().map(|(k, p)| (k.label().to_string(), p.clone())).collect()
+        self.known.iter().filter(|(_, p)| shown(p)).map(|(k, p)| (k.label().to_string(), p.clone())).collect()
+    }
+
+    /// Favorites hidden from System in AssetCraft.
+    pub fn hidden_places(&self) -> &[PathBuf] {
+        &self.hidden_places
+    }
+
+    /// Forget `path` in Recent; `true` when it was there.
+    pub(crate) fn forget_recent(&mut self, path: &Path) -> bool {
+        let before = self.recent.len();
+        self.recent.retain(|p| !same_path(p, path));
+        self.recent.len() != before
+    }
+
+    /// Hide `path` from Favorites › System (or show it again); `true` when that changed it.
+    pub(crate) fn set_place_hidden(&mut self, path: &Path, hidden: bool) -> bool {
+        let is = self.hidden_places.iter().any(|h| same_path(h, path));
+        match (is, hidden) {
+            (false, true) => self.hidden_places.push(path.to_path_buf()),
+            (true, false) => self.hidden_places.retain(|h| !same_path(h, path)),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Show every hidden favorite again; how many there were.
+    pub(crate) fn show_all_places(&mut self) -> usize {
+        std::mem::take(&mut self.hidden_places).len()
     }
 
     /// `true` when System → Favorites mirrors the OS sidebar (not the standard list).

@@ -120,6 +120,8 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         recent_storyboards,
         credits,
         snapping,
+        frame,
+        hidden_places,
     } = a;
     *favorites != b.favorites
         || *view != b.view
@@ -133,6 +135,8 @@ fn settings_differ(a: &Prefs, b: &Prefs) -> bool {
         || *recent_storyboards != b.recent_storyboards
         || *credits != b.credits
         || *snapping != b.snapping
+        || *frame != b.frame
+        || *hidden_places != b.hidden_places
 }
 
 /// Load prefs from `path`. A missing, oversized or unreadable file gives defaults: bad prefs

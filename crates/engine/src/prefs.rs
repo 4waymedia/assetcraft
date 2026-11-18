@@ -286,6 +286,14 @@ pub struct Prefs {
     /// Snapping for the cut tools (cut-editing.md C5; `storyboard.snapping`, S); on by default.
     #[serde(default = "yes")]
     pub snapping: bool,
+    /// The frame new storyboards start with (frame-settings.md F4; `storyboard.defaultFrame`);
+    /// `None` = 1920 × 1080 at 24 fps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<assetcraft_storyboard::FrameSpec>,
+    /// Folders hidden from Favorites › System in AssetCraft (`nav.place.hide`); the OS sidebar
+    /// itself is never changed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_places: Vec<PathBuf>,
 }
 
 fn yes() -> bool {
@@ -310,6 +318,8 @@ impl Default for Prefs {
             recent_storyboards: Vec::new(),
             credits: true,
             snapping: true,
+            frame: None,
+            hidden_places: Vec::new(),
         }
     }
 }
@@ -367,6 +377,15 @@ impl Prefs {
         if let Some(on) = root.get("snapping").and_then(Value::as_bool) {
             prefs.snapping = on;
         }
+        if let Some(Value::Array(items)) = root.get("hidden_places") {
+            prefs.hidden_places =
+                items.iter().filter_map(Value::as_str).map(PathBuf::from).take(crate::places::MAX_RECENT * 4).collect();
+        }
+        // A default frame that isn't a usable one is dropped, not fatal.
+        prefs.frame = root
+            .get("frame")
+            .and_then(|v| serde_json::from_value::<assetcraft_storyboard::FrameSpec>(v.clone()).ok())
+            .filter(|f| f.problem().is_none());
         if let Some(Value::Array(items)) = root.get("recent_storyboards") {
             prefs.recent_storyboards = items
                 .iter()

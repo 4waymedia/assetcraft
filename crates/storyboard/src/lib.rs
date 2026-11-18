@@ -29,6 +29,7 @@ pub mod fill;
 pub mod frame;
 pub mod generate;
 pub mod inset;
+pub mod layout;
 pub mod model;
 pub mod motion;
 pub mod recut;
@@ -54,6 +55,7 @@ pub use generate::{
     MusicSpan, Pacing, chorus_loop, fit_for, generate, structured_fit, track_edit, track_from_cue, track_under,
 };
 pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_RANGE, VOICE_DB_RANGE};
+pub use layout::{BAND_MAX, Layout, POST_TEXT_MAX, Region, RegionShot, SPLIT_GUTTER, SPLIT_SHARES};
 pub use model::{
     AssetId, Clip, ClipId, MAX_VOLUME_POINTS, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard,
     TITLE_DB_DEFAULT, TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition,

@@ -170,6 +170,24 @@ pub fn window_into(out: &mut Rgba, image: &Rgba, target: [f32; 4]) {
     draw_window(out, image, [0.0, 0.0, 1.0, 1.0], target);
 }
 
+/// [`window_into`], kept inside `clip` (`[x, y, w, h]`): the part of the picture outside it is
+/// cropped (F5: a shot in its region of a split stage).
+pub fn window_clipped(out: &mut Rgba, image: &Rgba, target: [f32; 4], clip: [f32; 4]) {
+    let [tx, ty, tw, th] = target;
+    if tw <= 0.0 || th <= 0.0 {
+        return;
+    }
+    let x0 = tx.max(clip[0]);
+    let y0 = ty.max(clip[1]);
+    let x1 = (tx + tw).min(clip[0] + clip[2]);
+    let y1 = (ty + th).min(clip[1] + clip[3]);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let window = [(x0 - tx) / tw, (y0 - ty) / th, (x1 - tx) / tw, (y1 - ty) / th];
+    draw_window(out, image, window, [x0, y0, x1 - x0, y1 - y0]);
+}
+
 /// Draw all of `image` into `target` (`[x, y, w, h]`), bilinear, keeping its aspect inside it
 /// (letterboxed within the target).
 pub fn contain_in(out: &mut Rgba, image: &Rgba, target: [f32; 4]) {

@@ -157,6 +157,18 @@ impl Compositor {
     /// The Cut at `at`: the clip under the playhead, `elapsed` seconds into it; black past the
     /// end or with no clips.
     pub fn frame(&mut self, board: &Storyboard, at: Ticks) -> Rgba {
+        // A split stage (F5, L1): each region its own shot, cropped into it.
+        if let (Some(layout), Some(shots)) = (board.layout.as_ref(), board.split_shots(at)) {
+            return self.split_frame(board, layout, shots);
+        }
+        // A framed post (F5, L2): bands around the shot, unless a title card takes the frame.
+        if let Some(layout @ assetcraft_storyboard::Layout::Framed { .. }) = board.layout.as_ref()
+            && let Some(clip) = board.clip_at(at).filter(|c| c.shot_type != ShotType::Ttl)
+        {
+            let start = board.index_of(clip.id).and_then(|i| board.starts().get(i).copied()).unwrap_or(Ticks::ZERO);
+            let elapsed = Ticks(at.0.saturating_sub(start.0)).as_secs_f64();
+            return self.framed_frame(clip, elapsed, layout);
+        }
         let starts = board.starts();
         let found = board.clip_at(at).and_then(|c| {
             let i = board.clips.iter().position(|x| x.id == c.id)?;
@@ -451,6 +463,79 @@ impl Compositor {
             }
             None => draw::contain_window(out, image, [0.0, 0.0, 1.0, 1.0]),
         }
+    }
+
+    /// A split stage's frame (F5, L1): ground, then each region's shot — a still or a video's
+    /// frame — cropped into its region by the board's fill and snap. A region with nothing to
+    /// show stays ground; models and camera moves show their still there for now.
+    fn split_frame(
+        &mut self,
+        board: &Storyboard,
+        layout: &assetcraft_storyboard::Layout,
+        shots: [assetcraft_storyboard::RegionShot; 2],
+    ) -> Rgba {
+        let mut out = Rgba::filled(self.width, self.height, [0, 0, 0]);
+        let (fw, fh) = (self.width as f32, self.height as f32);
+        for (rect, shot) in layout.regions().into_iter().zip(shots) {
+            let Some((i, elapsed)) = shot else { continue };
+            let Some(clip) = board.clips.get(i) else { continue };
+            let Some(hero) = clip.asset_ids.first() else { continue };
+            let at = clip.source_in.as_secs_f64() + elapsed.max(0.0);
+            let Some(image) = self.picture(Path::new(hero.0.as_str()), at) else { continue };
+            let region = [rect[0] * fw, rect[1] * fh, rect[2] * fw, rect[3] * fh];
+            // The board's crop at the region's own shape.
+            let spec = assetcraft_storyboard::FrameSpec {
+                width: (region[2].round() as u32).max(2),
+                height: (region[3].round() as u32).max(2),
+                ..self.crop.clone().unwrap_or_default()
+            };
+            let [x, y, w, h] = spec.place(image.width as f32, image.height as f32);
+            let target = [region[0] + x * region[2], region[1] + y * region[3], w * region[2], h * region[3]];
+            draw::window_clipped(&mut out, &image, target, region);
+        }
+        out
+    }
+
+    /// A framed post's frame (F5, L2): the headline band, the shot cropped into the picture
+    /// region by the board's fill and snap, the caption band; the bands in the layout's theme.
+    fn framed_frame(&mut self, clip: &Clip, elapsed: f64, layout: &assetcraft_storyboard::Layout) -> Rgba {
+        let mut out = Rgba::filled(self.width, self.height, [0, 0, 0]);
+        let assetcraft_storyboard::Layout::Framed { headline, caption, theme, .. } = layout else { return out };
+        let Some([top, picture, bottom]) = layout.framed() else { return out };
+        let look = theme.look();
+        let (fw, fh) = (self.width as f32, self.height as f32);
+        let px = |r: [f32; 4]| [r[0] * fw, r[1] * fh, r[2] * fw, r[3] * fh];
+        let (top, picture, bottom) = (px(top), px(picture), px(bottom));
+        for band in [top, bottom] {
+            draw::rect(&mut out, band[0], band[1], band[2], band[3], rgb(look.background), 1.0);
+        }
+        if let Some(hero) = clip.asset_ids.first() {
+            let at = clip.source_in.as_secs_f64() + elapsed.max(0.0);
+            if let Some(image) = self.picture(Path::new(hero.0.as_str()), at) {
+                let spec = assetcraft_storyboard::FrameSpec {
+                    width: (picture[2].round() as u32).max(2),
+                    height: (picture[3].round() as u32).max(2),
+                    ..self.crop.clone().unwrap_or_default()
+                };
+                let [x, y, w, h] = spec.place(image.width as f32, image.height as f32);
+                let target = [picture[0] + x * picture[2], picture[1] + y * picture[3], w * picture[2], h * picture[3]];
+                draw::window_clipped(&mut out, &image, target, picture);
+            }
+        }
+        let case = |s: &str| if look.uppercase { s.to_uppercase() } else { s.to_owned() };
+        for (band, words, scale) in [(top, headline, 0.42), (bottom, caption, 0.3)] {
+            let words = case(words.trim());
+            if words.is_empty() || band[3] < 4.0 {
+                continue;
+            }
+            let height = (band[3] * scale).min(fh * 0.06).max(6.0);
+            let wrap = band[2] * 0.9;
+            let block = self.fonts.measure(&words, height, look.tracking * height, wrap);
+            let left = band[0] + (band[2] - block[0]) / 2.0;
+            let topy = band[1] + (band[3] - block[1]) / 2.0;
+            self.fonts.draw(&mut out, &words, height, look.tracking * height, wrap, left, topy, rgb(look.text), 1.0);
+        }
+        out
     }
 
     /// A clip's picture: a video's frame `secs` in, else the still.

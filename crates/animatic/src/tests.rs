@@ -477,3 +477,71 @@ fn a_shot_is_cropped_by_the_boards_frame() {
     let old = lit_rows(&frame_with(None));
     assert!(!old[0] && old[80] && !old[159]);
 }
+
+/// F5 (L1): a split stage draws each region's shot cropped into it — stacked, the top is A's
+/// picture and the bottom B's; the other region holds its last shot.
+#[test]
+fn a_split_stage_draws_each_regions_shot() {
+    use assetcraft_storyboard::{Layout, Region, Storyboard};
+    let mut b = Storyboard::new("Split");
+    let mut a = clip(1, ShotType::Ws, 2);
+    a.asset_ids = vec![asset("environments/snow_clearing_plate.jpg")];
+    let mut bb = clip(2, ShotType::Cu, 2);
+    bb.asset_ids = vec![asset("environments/ruins_vertical.png")];
+    bb.region = Some(Region::B);
+    b.clips = vec![a, bb];
+    b.layout = Some(Layout::Split { stack: true, share: 50 });
+    let mut c = compositor(90, 160);
+    let row_mean = |img: &Rgba, y: u32| -> [f32; 3] {
+        let row = &img.data[(y * img.width * 4) as usize..((y + 1) * img.width * 4) as usize];
+        let px = row.as_chunks::<4>().0;
+        let n = px.len() as f32;
+        [0, 1, 2].map(|k| px.iter().map(|p| f32::from(p[k])).sum::<f32>() / n)
+    };
+    let lit = |m: [f32; 3]| m.iter().sum::<f32>() > 6.0;
+    // In clip 1 (A plays, B shows its first frame): both halves lit.
+    let f = c.frame(&b, Ticks::from_secs_f64(0.5).unwrap_or(Ticks::ZERO));
+    assert!(lit(row_mean(&f, 20)) && lit(row_mean(&f, 140)), "both regions drawn");
+    // In clip 2 (B plays): A holds clip 1, so the top is unchanged.
+    let g = c.frame(&b, Ticks::from_secs_f64(2.5).unwrap_or(Ticks::ZERO));
+    let top = |img: &Rgba| img.data[..(70 * img.width * 4) as usize].to_vec();
+    assert_eq!(top(&f), top(&g), "region A holds its shot");
+    // A full stage draws one shot.
+    b.layout = None;
+    let full = c.frame(&b, Ticks::from_secs_f64(0.5).unwrap_or(Ticks::ZERO));
+    assert_ne!(full.data, f.data);
+}
+
+/// F5 (L2): a framed post draws its bands in the theme's colour around the shot, the headline in
+/// the top band; a title card still takes the whole frame.
+#[test]
+fn a_framed_post_draws_bands_around_the_shot() {
+    use assetcraft_storyboard::{Layout, Storyboard, TextTheme};
+    let mut b = Storyboard::new("Post");
+    let mut shot = clip(1, ShotType::Ws, 2);
+    shot.asset_ids = vec![asset("environments/snow_clearing_plate.jpg")];
+    b.clips = vec![shot, clip(2, ShotType::Ttl, 2)];
+    b.layout = Some(Layout::Framed {
+        top: 20,
+        bottom: 15,
+        headline: "Big news".into(),
+        caption: String::new(),
+        theme: TextTheme::Bold,
+    });
+    let mut c = compositor(108, 136);
+    let f = c.frame(&b, Ticks::from_secs_f64(0.5).unwrap_or(Ticks::ZERO));
+    let px = |img: &Rgba, x: u32, y: u32| {
+        let i = ((y * img.width + x) * 4) as usize;
+        [img.data[i], img.data[i + 1], img.data[i + 2]]
+    };
+    let band = [0xe5, 0x24, 0x3b];
+    assert_eq!(px(&f, 1, 1), band, "the headline band in Bold's colour");
+    assert_eq!(px(&f, 1, 134), band, "the caption band");
+    assert_ne!(px(&f, 54, 67), band, "the picture between");
+    // The headline's words: some pixels in the top band aren't the band colour.
+    let inked = (0..108).flat_map(|x| (0..27).map(move |y| (x, y))).filter(|(x, y)| px(&f, *x, *y) != band).count();
+    assert!(inked > 20, "the headline is drawn ({inked} px)");
+    // A title card takes the whole frame: no band colour at the top-left unless it's its theme.
+    let card = c.frame(&b, Ticks::from_secs_f64(2.5).unwrap_or(Ticks::ZERO));
+    assert_ne!(card.data, f.data);
+}

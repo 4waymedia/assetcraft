@@ -475,6 +475,37 @@ fn node(nav: &mut Navigator, ui: &mut Ui, section: Section, path: &Path, label: 
         if ui.button("Reveal in File Manager").clicked() {
             nav.run("file.reveal", json!({ "path": path.to_string_lossy() }));
         }
+        // Remove from the list it's in (the folder itself is untouched).
+        if depth == 0 {
+            match section {
+                Section::Recent => {
+                    ui.separator();
+                    if ui.button("Remove from Recent").clicked() {
+                        nav.run("nav.recent.remove", json!({ "path": p }));
+                    }
+                    if ui.button("Clear Recent").clicked() {
+                        nav.run("nav.recent.remove", json!({ "all": true }));
+                    }
+                }
+                Section::Places => {
+                    ui.separator();
+                    if ui
+                        .button("Remove from Favorites")
+                        .on_hover_text("Hides it here in AssetCraft; your system's sidebar is unchanged")
+                        .clicked()
+                    {
+                        nav.run("nav.place.hide", json!({ "path": p }));
+                    }
+                }
+                _ => {}
+            }
+            if matches!(section, Section::Places | Section::Recent) {
+                let hidden = nav.session.hidden_places().len();
+                if hidden > 0 && ui.button(format!("Show Removed Favorites ({hidden})")).clicked() {
+                    nav.run("nav.place.hide", json!({ "showAll": true }));
+                }
+            }
+        }
     });
     if !nav.state.tree.expanded.contains(&key) || depth >= MAX_DEPTH {
         return;

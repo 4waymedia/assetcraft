@@ -110,3 +110,134 @@ fn named_export_sizes_follow_the_boards_shape() {
     let (w, h) = in_shape(&spec("scope"), 1080);
     assert!(h == 1080 && w % 2 == 0 && (f64::from(w) / 1080.0 - 2048.0 / 858.0).abs() < 0.01);
 }
+
+/// F4: the workspace default frame — set like a board's, copied from the open board, or reset —
+/// is what new storyboards start with, unless `storyboard.new` names its own; it is kept in prefs.
+#[test]
+fn new_storyboards_start_with_the_default_frame() {
+    let mut s = session();
+    let ask =
+        |s: &mut Session, p: Value| s.execute("storyboard.defaultFrame", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert_eq!(ask(&mut s, json!({}))["ratio"], "16:9");
+    let r = ask(&mut s, json!({ "preset": "vertical", "snap": "top" }));
+    assert_eq!(
+        (r["changed"].as_bool(), r["ratio"].as_str(), r["snap"].as_str()),
+        (Some(true), Some("9:16"), Some("top"))
+    );
+    let undo = s.boards.undo_len();
+    s.execute("storyboard.new", &json!({ "name": "Reel" })).unwrap();
+    let f = s.storyboard().unwrap().frame_spec();
+    assert_eq!((f.width, f.height, f.fps, f.snap), (1080, 1920, 30, assetcraft_storyboard::Snap::Top));
+    assert!(s.boards.undo_len() >= undo, "the setting itself is no undo step");
+    // A storyboard's own frame wins.
+    s.execute("storyboard.new", &json!({ "frame": "square" })).unwrap();
+    assert_eq!(s.storyboard().unwrap().frame_spec().ratio_label(), "1:1");
+    assert!(s.execute("storyboard.new", &json!({ "frame": "imax" })).is_err());
+    // Copied from the open board.
+    s.execute("storyboard.frame", &json!({ "preset": "scope" })).unwrap();
+    assert_eq!(ask(&mut s, json!({ "fromBoard": true }))["ratio"], "2.39:1");
+    // Kept in prefs, and read back; a bad one in the file is dropped.
+    let text = serde_json::to_string(&s.prefs()).unwrap();
+    let back = Prefs::parse(&text).0;
+    assert_eq!(back.frame.as_ref().map(|f| f.width), Some(2048));
+    let mut bad: Value = serde_json::from_str(&text).unwrap();
+    bad["frame"]["width"] = json!(2047);
+    assert_eq!(Prefs::parse(&bad.to_string()).0.frame, None);
+    // Reset: new storyboards are HD 24 again, with no frame in the file.
+    ask(&mut s, json!({ "reset": true }));
+    s.execute("storyboard.new", &json!({})).unwrap();
+    assert_eq!(s.storyboard().unwrap().frame, None);
+    assert!(s.prefs().frame.is_none());
+}
+
+/// F5 (L1): `storyboard.layout` splits the stage and `storyboard.region` puts clips in A or B —
+/// one undo step each, title cards left alone, saved and checked on load.
+#[test]
+fn a_split_stage_and_its_regions() {
+    use assetcraft_storyboard::{ClipId, Layout, Region, ShotType};
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    let r = s.execute("storyboard.layout", &json!({ "kind": "split" })).unwrap();
+    assert_eq!((r["stack"].as_bool(), r["share"].as_u64()), (Some(true), Some(50)), "{r}");
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    let r = s.execute("storyboard.layout", &json!({ "share": 70 })).unwrap();
+    assert_eq!((r["stack"].as_bool(), r["share"].as_u64()), (Some(true), Some(70)), "keeps stacked");
+    s.execute("storyboard.layout", &json!({ "stack": false })).unwrap();
+    assert_eq!(s.storyboard().unwrap().layout, Some(Layout::Split { stack: false, share: 70 }));
+    let undo = s.boards.undo_len();
+    s.execute("storyboard.layout", &json!({ "kind": "split", "stack": false, "share": 70 })).unwrap();
+    assert_eq!(s.boards.undo_len(), undo, "the same layout: no step");
+    for bad in [json!({ "kind": "grid" }), json!({ "share": 55 }), json!({ "stack": "yes" }), json!({ "kind": 3 })] {
+        assert!(matches!(s.execute("storyboard.layout", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    // Regions: shots move, a title card stays.
+    let board = s.storyboard().unwrap().clone();
+    let title = board.clips.iter().find(|c| c.shot_type == ShotType::Ttl).map(|c| c.id.0);
+    let shots: Vec<u32> = board.clips.iter().filter(|c| c.shot_type != ShotType::Ttl).take(2).map(|c| c.id.0).collect();
+    let mut ids = shots.clone();
+    ids.extend(title);
+    let undo = s.boards.undo_len();
+    let r = s.execute("storyboard.region", &json!({ "clips": ids, "region": "b" })).unwrap();
+    assert_eq!(r["changed"], true, "{r}");
+    assert_eq!(s.boards.undo_len(), undo + 1, "one step for all");
+    let b = s.storyboard().unwrap();
+    for id in &shots {
+        assert_eq!(b.clip(ClipId(*id)).unwrap().region(), Region::B);
+    }
+    if let Some(t) = title {
+        assert_eq!(b.clip(ClipId(t)).unwrap().region, None, "a title card takes the frame");
+    }
+    let r = s.execute("storyboard.region", &json!({ "clip": shots[0], "region": "B" })).unwrap();
+    assert_eq!(r["changed"], false);
+    for bad in
+        [json!({ "clip": shots[0], "region": "c" }), json!({ "region": "a" }), json!({ "clip": 9999, "region": "a" })]
+    {
+        assert!(matches!(s.execute("storyboard.region", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    // Saved, and checked on load.
+    let text = serde_json::to_string(s.storyboard().unwrap()).unwrap();
+    let back = assetcraft_storyboard::Storyboard::from_json(text.as_bytes()).unwrap();
+    assert_eq!(back.layout, Some(Layout::Split { stack: false, share: 70 }));
+    let mut bad: Value = serde_json::from_str(&text).unwrap();
+    bad["layout"]["share"] = json!(55);
+    assert!(assetcraft_storyboard::Storyboard::from_json(bad.to_string().as_bytes()).is_err());
+    // Back to full: the field leaves the file; regions stay on the clips for next time.
+    s.execute("storyboard.layout", &json!({ "kind": "full" })).unwrap();
+    assert!(!serde_json::to_string(s.storyboard().unwrap()).unwrap().contains("\"layout\""));
+}
+
+/// F5 (L2): `storyboard.layout {kind: "framed"}` frames the post — headline (the board's name to
+/// start with) and caption bands in a text theme — one undo step, fields kept when not given.
+#[test]
+fn a_framed_post() {
+    use assetcraft_storyboard::{Layout, TextTheme};
+    let mut s = session();
+    let name = s.storyboard().unwrap().name.clone();
+    let r = s.execute("storyboard.layout", &json!({ "kind": "framed" })).unwrap();
+    assert_eq!(r["kind"], "framed", "{r}");
+    assert_eq!(
+        s.storyboard().unwrap().layout,
+        Some(Layout::Framed { top: 14, bottom: 12, headline: name, caption: String::new(), theme: TextTheme::Bold })
+    );
+    let undo = s.boards.undo_len();
+    s.execute("storyboard.layout", &json!({ "caption": "Swipe for more", "theme": "paper" })).unwrap();
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    let Some(Layout::Framed { top, caption, theme, .. }) = s.storyboard().unwrap().layout.clone() else { panic!() };
+    assert_eq!((top, caption.as_str(), theme), (14, "Swipe for more", TextTheme::Paper), "kept and changed");
+    for bad in [
+        json!({ "kind": "framed", "top": 40 }),
+        json!({ "kind": "framed", "headline": "x".repeat(201) }),
+        json!({ "kind": "framed", "theme": "rainbow" }),
+        json!({ "kind": "framed", "caption": 3 }),
+    ] {
+        assert!(matches!(s.execute("storyboard.layout", &bad), Err(CmdError::BadParams(_))), "{bad}");
+    }
+    let text = serde_json::to_string(s.storyboard().unwrap()).unwrap();
+    let back = assetcraft_storyboard::Storyboard::from_json(text.as_bytes()).unwrap();
+    assert_eq!(back.layout, s.storyboard().unwrap().layout);
+    // From framed to split and back to full.
+    s.execute("storyboard.layout", &json!({ "kind": "split" })).unwrap();
+    assert!(matches!(s.storyboard().unwrap().layout, Some(Layout::Split { .. })));
+    s.execute("storyboard.layout", &json!({ "kind": "full" })).unwrap();
+    assert_eq!(s.storyboard().unwrap().layout, None);
+}

@@ -48,6 +48,8 @@ impl Session {
             | "storyboard.slip"
             | "storyboard.fade"
             | "storyboard.frame"
+            | "storyboard.layout"
+            | "storyboard.region"
             | "storyboard.split"
             | "storyboard.trackLevel"
             | "storyboard.titleLevel"

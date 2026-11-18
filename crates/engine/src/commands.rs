@@ -103,6 +103,24 @@ static COMMANDS: &[CommandSpec] = &[
     cmd!(APP, "nav.favorite.remove", "Unpin from My Folders", "Go", None, "{path}", fav_remove),
     cmd!(
         APP,
+        "nav.recent.remove",
+        "Remove from Recent",
+        "Go",
+        None,
+        "{path} | {all: true} → {recent, changed} (forget a folder in Favorites › Recent, or all of them; the folder itself is untouched)",
+        recent_remove
+    ),
+    cmd!(
+        APP,
+        "nav.place.hide",
+        "Hide from Favorites",
+        "Go",
+        None,
+        "{path, hidden?: bool} | {showAll: true} → {places, hidden, changed} (hide a folder from Favorites › System in AssetCraft, show it again, or show every hidden one; the system sidebar itself is never changed)",
+        place_hide
+    ),
+    cmd!(
+        APP,
         "nav.favorite.scope",
         "Share Pinned Folder",
         "Go",
@@ -564,10 +582,37 @@ static COMMANDS: &[CommandSpec] = &[
         EDIT,
         "storyboard.frame",
         "Frame Setup",
-        "Storyboard",
+        "File",
         None,
         "{preset?: string, width?: number, height?: number, fps?: number, fill?: \"vertical\"|\"horizontal\", snap?: \"center\"|\"top\"|\"bottom\"|\"left\"|\"right\"} → {width, height, fps, ratio, vertical, fill, snap, preset, changed, message} (the Cut's frame: a film or social preset, or a size and rate by hand — sides even, 16 to 8192 px; fps 24, 25, 30, 50 or 60 — and how a picture of another shape is cropped into it; {} reports it; one undo step)",
         crate::frame_cmd::sb_frame
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.layout",
+        "Stage Layout",
+        "Storyboard",
+        None,
+        "{kind?: \"full\"|\"split\", stack?: boolean, share?: 50|60|70} → {kind, stack, share, label, changed, message} (the stage's layout theme: the whole frame, or split in two regions — stacked or side by side, A taking share per cent — each clip cropped into its region and the other region holding its last clip; title cards take the whole frame; one undo step)",
+        crate::frame_cmd::sb_layout
+    ),
+    cmd!(
+        EDIT,
+        "storyboard.region",
+        "Clip Region",
+        "Storyboard",
+        None,
+        "{clip: number | clips: number[], region: \"a\"|\"b\"} → {region, clips, changed, message} (which region of a split stage the clips play in — A is top or left; title cards are left as they are; one undo step)",
+        crate::frame_cmd::sb_region
+    ),
+    cmd!(
+        APP,
+        "storyboard.defaultFrame",
+        "Default Frame",
+        "Storyboard",
+        None,
+        "{preset?, width?, height?, fps?, fill?, snap?} | {fromBoard: true} | {reset: true} → {width, height, fps, ratio, vertical, fill, snap, preset, changed, message} (the frame new storyboards start with, kept in prefs; set like storyboard.frame, copied from the open storyboard, or reset to 1920 × 1080 at 24; {} reports it; storyboard.new and storyboard.generate also take a `frame` of their own)",
+        crate::frame_cmd::sb_default_frame
     ),
     cmd!(
         READ,
@@ -863,6 +908,33 @@ fn fav_remove(s: &mut Session, p: &Value) -> CmdResult {
     let path = PathBuf::from(need_str(p, "path")?);
     s.edit_pins(|pins| crate::places::unpin(pins, &path))?;
     Ok(pins_json(s))
+}
+
+fn recent_remove(s: &mut Session, p: &Value) -> CmdResult {
+    let changed = if p.get("all").and_then(Value::as_bool) == Some(true) {
+        let any = !s.recent().is_empty();
+        s.recent.clear();
+        any
+    } else {
+        let path = PathBuf::from(need_str(p, "path")?);
+        s.forget_recent(&path)
+    };
+    Ok(json!({ "recent": lossy_all(s.recent()), "changed": changed }))
+}
+
+fn place_hide(s: &mut Session, p: &Value) -> CmdResult {
+    let changed = if p.get("showAll").and_then(Value::as_bool) == Some(true) {
+        s.show_all_places() > 0
+    } else {
+        let path = PathBuf::from(need_str(p, "path")?);
+        let hidden = match p.get("hidden") {
+            None | Some(Value::Null) => true,
+            Some(v) => v.as_bool().ok_or_else(|| CmdError::BadParams("`hidden` must be true or false".into()))?,
+        };
+        s.set_place_hidden(&path, hidden)
+    };
+    let places: Vec<Value> = s.system_places().iter().map(|(n, p)| json!({ "name": n, "path": lossy(p) })).collect();
+    Ok(json!({ "places": places, "hidden": lossy_all(s.hidden_places()), "changed": changed }))
 }
 
 fn fav_scope(s: &mut Session, p: &Value) -> CmdResult {

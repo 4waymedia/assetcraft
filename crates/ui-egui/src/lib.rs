@@ -23,6 +23,7 @@ mod motion_view;
 mod pathbar;
 pub mod prefs_file;
 mod rename_dialog;
+mod setup_view;
 mod start_timeline;
 mod start_tracks;
 mod start_view;
@@ -93,6 +94,10 @@ struct UiState {
     unsaved: Option<document_view::Pending>,
     /// The Export Video window (SF5-5), while it is open.
     export: Option<export_view::ExportDialog>,
+    /// Storyboard › Setup… is open (frame-settings.md F4).
+    setup_open: bool,
+    /// The framed post's headline and caption while they are typed (F5, L2).
+    post_draft: Option<[String; 2]>,
     /// The Save as Template window (ST3), while it is open.
     save_template: Option<template_view::SaveTemplateDialog>,
     /// The export stage last seen, to notice when a job ends.
@@ -355,6 +360,7 @@ impl Navigator {
         document_view::intercept_close(self, &ctx);
         document_view::window(self, &ctx);
         export_view::window(self, &ctx);
+        setup_view::window(self, &ctx);
         export_view::tick(self, &ctx);
         template_view::window(self, &ctx);
         if self.state.custom_chrome {

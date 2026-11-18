@@ -131,3 +131,50 @@ fn system_favorites_mirror_the_os_sidebar_else_the_standard_list_and_network_is_
         ]
     );
 }
+
+/// Paul, 2026-11-17: "add to the right click menu on a folder to 'remove' in the user favorites,
+/// and recents". Recent forgets a folder (or all); a System favorite is hidden in AssetCraft only
+/// and can be shown again; both are kept in prefs. The folders themselves are untouched.
+#[test]
+fn recent_and_system_favorites_can_be_removed() {
+    let fake = FakeFs::new()
+        .known(KnownFolder::Home, "/home/paul")
+        .known(KnownFolder::Pictures, "/home/paul/Pictures")
+        .dir("/home/paul/a")
+        .dir("/home/paul/b");
+    let mut s = Session::new(Arc::new(fake), Arc::new(RecordingLauncher::default()), Prefs::default());
+    run(&mut s, "nav.open", json!({ "path": "/home/paul/a" }));
+    run(&mut s, "nav.open", json!({ "path": "/home/paul/b" }));
+    let r = run(&mut s, "nav.recent.remove", json!({ "path": "/home/paul/a" }));
+    assert_eq!(r["changed"], true, "{r}");
+    let listed = |r: &Value, p: &str| r["recent"].as_array().is_some_and(|a| a.iter().any(|v| v == p));
+    assert!(!listed(&r, "/home/paul/a") && listed(&r, "/home/paul/b"), "{r}");
+    assert_eq!(run(&mut s, "nav.recent.remove", json!({ "path": "/home/paul/a" }))["changed"], false);
+    assert_eq!(Prefs::from_json(&s.prefs().to_json()).recent, s.recent(), "saved");
+    run(&mut s, "nav.recent.remove", json!({ "all": true }));
+    assert!(s.recent().is_empty());
+    assert!(matches!(s.execute("nav.recent.remove", &json!({})), Err(CmdError::BadParams(_))));
+
+    let pictures = PathBuf::from("/home/paul/Pictures");
+    let shown = |s: &Session| s.system_places().iter().any(|(_, p)| *p == pictures);
+    assert!(shown(&s));
+    let r = run(&mut s, "nav.place.hide", json!({ "path": "/home/paul/Pictures" }));
+    assert_eq!(r["changed"], true);
+    assert!(!shown(&s), "hidden from Favorites");
+    let saved = Prefs::from_json(&s.prefs().to_json());
+    assert_eq!(saved.hidden_places, vec![pictures.clone()], "kept in prefs");
+    let again = Session::new(
+        Arc::new(
+            FakeFs::new().known(KnownFolder::Home, "/home/paul").known(KnownFolder::Pictures, "/home/paul/Pictures"),
+        ),
+        Arc::new(RecordingLauncher::default()),
+        saved,
+    );
+    assert!(!again.system_places().iter().any(|(_, p)| *p == pictures), "still hidden after a restart");
+    run(&mut s, "nav.place.hide", json!({ "path": "/home/paul/Pictures", "hidden": false }));
+    assert!(shown(&s));
+    run(&mut s, "nav.place.hide", json!({ "path": "/home/paul/Pictures" }));
+    let r = run(&mut s, "nav.place.hide", json!({ "showAll": true }));
+    assert_eq!((r["changed"].as_bool(), r["hidden"].as_array().map(Vec::len)), (Some(true), Some(0)));
+    assert!(shown(&s));
+}

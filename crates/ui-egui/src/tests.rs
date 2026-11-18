@@ -501,6 +501,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::Save => {
                 used.insert("storyboard.save");
             }
+            MenuAction::Setup => {
+                used.insert("storyboard.frame");
+            }
             MenuAction::SaveAs => {
                 used.insert("storyboard.saveAs");
             }

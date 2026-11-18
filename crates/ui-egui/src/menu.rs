@@ -48,6 +48,9 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.musicImport",
     // The Folders panel's My Folders context menu drives it.
     "nav.favorite.scope",
+    // The Folders panel's right-click menu drives these (Favorites › Recent and System).
+    "nav.recent.remove",
+    "nav.place.hide",
     "app.workingFolder",
     "storyboard.preview",
     "track.preview",
@@ -68,9 +71,11 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.slip",
     // The corner handles on the AUDIO row's sections drive it (cut-editing.md V4).
     "storyboard.fade",
-    // The storyboard setup drives them (frame-settings.md F4); until then the CLI and MCP.
-    "storyboard.frame",
+    // The Setup window and the Start screen's Frame row drive these (frame-settings.md F4).
     "storyboard.framePresets",
+    "storyboard.defaultFrame",
+    "storyboard.layout",
+    "storyboard.region",
     // Ctrl+K at the playhead on the Strip drives it (cut-editing.md C3).
     "storyboard.split",
     // The Song slider in the Strip's transport controls drives it (V1).
@@ -135,6 +140,8 @@ pub enum MenuAction {
     ExportVideo,
     /// File → Save as Template…: the name window, then `storyboard.saveTemplate`.
     SaveTemplate,
+    /// File → Storyboard Setup…: the frame window (`storyboard.frame`; F4).
+    Setup,
     /// File → Exit.
     Exit,
     /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
@@ -561,6 +568,17 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         "storyboard.saveAs" => {
             vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveAs)]
         }
+        "storyboard.frame" => {
+            let enabled = s.enabled(spec.id);
+            vec![MenuEntry::Item {
+                label: "Storyboard Setup…".into(),
+                shortcut: None,
+                enabled: enabled.is_ok(),
+                checked: None,
+                tooltip: enabled.err().or_else(|| Some("The frame: size, frame rate and crop".into())),
+                action: MenuAction::Setup,
+            }]
+        }
         "storyboard.exportVideo" => {
             let enabled = s.enabled(spec.id);
             vec![
@@ -677,6 +695,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         }
         MenuAction::ExportVideo => crate::export_view::open(nav),
         MenuAction::SaveTemplate => crate::template_view::open(nav),
+        MenuAction::Setup => crate::setup_view::open(nav),
         MenuAction::Exit => crate::document_view::request_exit(nav, ctx),
     }
 }

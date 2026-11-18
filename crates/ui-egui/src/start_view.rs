@@ -1101,6 +1101,13 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
             .on_hover_text("Places the Organizer's files into the empty clips in order (Quick fill's Auto-fill rest)");
             ui.add_space(12.0);
         }
+        // The frame (frame-settings.md F4): the new storyboard's dimension, frame rate and crop,
+        // remembered for the next one (`storyboard.defaultFrame`).
+        egui::CollapsingHeader::new(RichText::new(frame_heading(nav)).strong())
+            .id_salt("start-frame")
+            .default_open(false)
+            .show(ui, |ui| crate::setup_view::controls(nav, ui, crate::setup_view::Target::Default, "start"));
+        ui.add_space(12.0);
         // The credits clip (Paul, 2026-11-06): one checkbox, remembered; the clip is the
         // user's own template once edited.
         let mut credits = nav.session.credits_on();
@@ -1142,6 +1149,17 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
             }
         }
     });
+}
+
+/// The Start screen's Frame heading: what new storyboards will be, e.g. `Frame · Vertical 9:16, 30 fps`.
+fn frame_heading(nav: &Navigator) -> String {
+    let f = nav.session.default_frame();
+    let name = f
+        .preset
+        .as_deref()
+        .and_then(assetcraft_storyboard::frame_preset)
+        .map_or_else(|| format!("{} × {}", f.width, f.height), |p| p.name.to_owned());
+    format!("Frame · {name}, {} fps", f.fps)
 }
 
 pub(crate) fn create_board(nav: &mut Navigator) {

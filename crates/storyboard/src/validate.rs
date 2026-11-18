@@ -118,6 +118,9 @@ impl Storyboard {
         if let Some(problem) = self.frame.as_ref().and_then(crate::FrameSpec::problem) {
             return Err(BoardError::Invalid(format!("the frame: {problem}")));
         }
+        if let Some(problem) = self.layout.as_ref().and_then(crate::Layout::problem) {
+            return Err(BoardError::Invalid(format!("the layout: {problem}")));
+        }
         if self.version > FORMAT_VERSION {
             return Err(BoardError::NewerVersion(self.version));
         }

@@ -173,6 +173,9 @@ pub struct Session {
     pins_file: Option<PathBuf>,
     /// Recent folders, newest first (saved).
     recent: Vec<PathBuf>,
+    /// Favorites hidden from Favorites › System in AssetCraft (`nav.place.hide`; saved). The OS's
+    /// own sidebar is never changed.
+    hidden_places: Vec<PathBuf>,
     /// Whether the working folder existed at the last check (see `working_folder_exists`).
     working_exists: bool,
     /// The OS sidebar's folders (rescanned with the volumes).
@@ -231,6 +234,8 @@ pub struct Session {
     credits: bool,
     /// Snapping for the cut tools (`storyboard.snapping`; saved in prefs).
     snapping: bool,
+    /// The frame new storyboards start with (`storyboard.defaultFrame`; saved in prefs).
+    pub(crate) default_frame: Option<assetcraft_storyboard::FrameSpec>,
     /// The Strip's zoom (`storyboard.zoom`, Z1): 1 = 44 pt a second.
     strip_zoom: f32,
     /// Video frames for the Viewer (P1), started on first use.
@@ -256,6 +261,7 @@ impl Session {
             pins: prefs.favorites.iter().map(|p| places::Pin::legacy(p.clone())).collect(),
             pins_file: None,
             recent: prefs.recent.clone(),
+            hidden_places: prefs.hidden_places.clone(),
             working_exists: false,
             sidebar: Vec::new(),
             view: prefs.view,
@@ -288,6 +294,7 @@ impl Session {
             recent_storyboards: prefs.recent_storyboards.iter().take(document_cmd::MAX_RECENT).cloned().collect(),
             credits: prefs.credits,
             snapping: prefs.snapping,
+            default_frame: prefs.frame.clone(),
             strip_zoom: 1.0,
             video: std::sync::OnceLock::new(),
         };
@@ -569,6 +576,8 @@ impl Session {
             recent_storyboards: self.recent_storyboards.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
             credits: self.credits,
             snapping: self.snapping,
+            frame: self.default_frame.clone(),
+            hidden_places: self.hidden_places.iter().filter(|p| p.to_str().is_some()).cloned().collect(),
         }
     }
 
@@ -600,6 +609,11 @@ impl Session {
     /// The Strip's zoom (Z1): 1 = 44 pt a second, from [`STRIP_ZOOM_RANGE`].
     pub fn strip_zoom(&self) -> f32 {
         self.strip_zoom
+    }
+
+    /// The frame new storyboards start with (`storyboard.defaultFrame`; F4).
+    pub fn default_frame(&self) -> assetcraft_storyboard::FrameSpec {
+        self.default_frame.clone().unwrap_or_default()
     }
 
     /// Whether the cut tools snap (`storyboard.snapping`; remembered).

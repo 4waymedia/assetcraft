@@ -203,6 +203,8 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
         }
     }
     let lengths = fit_lengths(&cue);
+    // The workspace's frame (F4), unless the call names one.
+    board.frame = crate::storyboard::frame_param(s, p)?;
     s.boards.checkpoint();
     s.boards.selected = next_empty(&board);
     s.boards.board = Some(board);

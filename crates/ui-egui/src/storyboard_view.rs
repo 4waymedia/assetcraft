@@ -418,6 +418,7 @@ pub(crate) fn inspector(nav: &mut Navigator, ui: &mut Ui) {
         }
         crate::strip_view::duration_field(nav, ui, &board, &clip);
         crate::strip_view::in_field(nav, ui, &clip);
+        crate::setup_view::region_field(nav, ui, &board, &clip);
         field(ui, "Transitions", &format!("{:?} in · {:?} out", clip.transition_in, clip.transition_out));
         if clip.sync_to_downbeat {
             ui.label(RichText::new("◆ Start locked to downbeat").color(AI_TEXT));

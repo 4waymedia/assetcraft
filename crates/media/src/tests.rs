@@ -114,10 +114,23 @@ fn nothing_past_the_end_and_stand_ins_never_run_ahead() {
             Lookup::Ready(f) => assert_eq!(f.index, 23),
             other => panic!("past the end: {other:?}"),
         }
-        // A size not decoded yet: the stand-in is the nearest frame at or before the one asked.
+        // A size not decoded yet: the stand-in is the nearest frame at or before the one asked,
+        // never a later one — frame 0 has nothing earlier, so no stand-in at all.
         v.stop_ahead();
         if let Lookup::Pending(Some(f)) = v.frame(&path, 1.0, 32) {
             assert!(f.index <= 12, "{workers} worker(s): stand-in {} for frame 12", f.index);
+        }
+        let fresh = VideoFrames::with_workers(workers);
+        fresh.ahead(&path, 1.0, 1.0, 64);
+        let until = Instant::now() + Duration::from_secs(10);
+        while !matches!(fresh.frame(&path, 1.5, 64), Lookup::Ready(_)) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        fresh.stop_ahead();
+        match fresh.frame(&path, 0.0, 64) {
+            Lookup::Pending(Some(f)) => panic!("{workers} worker(s): frame {} stood in for frame 0", f.index),
+            Lookup::Ready(f) => assert_eq!(f.index, 0),
+            _ => {}
         }
     }
 }

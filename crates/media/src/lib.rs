@@ -213,15 +213,15 @@ impl VideoFrames {
             return Lookup::Ready(f);
         }
         // A stand-in while it decodes: the nearest frame at or before the one asked (so playback
-        // never shows a later frame and then steps back), else the nearest after. None until the
-        // file's rate is known.
+        // never shows a later frame and then steps back). Never a later one: a read-ahead chunk
+        // can land before the frame asked for (Paul's Windows run, 2026-11-17: `[0, 0, 12, 0, …]`),
+        // so with nothing earlier at hand the caller keeps what it shows. None until the file's
+        // rate is known.
         let near = index.and_then(|want| {
-            let frames = s.cache.iter().filter(|(p, _, sz, _)| p == path && *sz >= side);
-            frames
-                .clone()
-                .filter(|(_, i, ..)| *i <= want)
+            s.cache
+                .iter()
+                .filter(|(p, i, sz, _)| p == path && *sz >= side && *i <= want)
                 .max_by_key(|(_, i, ..)| *i)
-                .or_else(|| frames.min_by_key(|(_, i, ..)| *i))
                 .map(|c| Arc::clone(&c.3))
         });
         s.want = Some(Want { path: path.to_path_buf(), secs, side });
