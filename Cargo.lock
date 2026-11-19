@@ -373,6 +373,7 @@ dependencies = [
  "assetcraft-probe",
  "assetcraft-storyboard",
  "assetcraft-thumbs",
+ "assetcraft-titles",
  "assetcraft-video",
  "assetcraft-watch",
  "filmcraft-edit",

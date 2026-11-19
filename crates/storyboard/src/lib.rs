@@ -84,8 +84,8 @@ pub use text::{
     TextKind, TextPosition, TextStyle, TextTheme, Timing, accent_bar, set_text_kind, set_text_style, set_text_timing,
 };
 pub use theme::{
-    BUNDLED_FONTS, Background, BackgroundKind, Decor, Face, MAX_THEME_BYTES, THEME_SUFFIX, Theme, ThemeError, contrast,
-    luminance, parse_color,
+    BUNDLED_FONTS, Background, BackgroundKind, DESIGN_ROLES, DESIGN_SUFFIX, DESIGNS_DIR, Decor, Face, MAX_THEME_BYTES,
+    PACK_THEME_FILE, THEME_SUFFIX, Theme, ThemeError, contrast, design_path, luminance, parse_color,
 };
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};
 pub use validate::{BoardError, FORMAT_VERSION, Limits};

@@ -406,6 +406,22 @@ impl Design {
         out
     }
 
+    /// The design as an `.ectemplate` file (a stored ZIP: `manifest.json` and `project.ecproj`),
+    /// as EffectCraft's File › Save as Template writes one, so it opens there and here.
+    pub fn to_template(&self) -> Vec<u8> {
+        let manifest = serde_json::json!({
+            "format": TEMPLATE_FORMAT,
+            "version": TEMPLATE_VERSION,
+            "kind": "comp",
+            "comp": self.comp.0,
+            "name": self.name,
+        });
+        effectcraft_lottie::zip::store(&[
+            ("manifest.json".to_string(), manifest.to_string().into_bytes()),
+            ("project.ecproj".to_string(), self.project.to_json().into_bytes()),
+        ])
+    }
+
     /// The scale that fits the design inside `max_width` × `max_height` (the caller places it).
     pub fn fit_scale(&self, max_width: u32, max_height: u32) -> f64 {
         let s = (f64::from(max_width) / f64::from(self.width)).min(f64::from(max_height) / f64::from(self.height));

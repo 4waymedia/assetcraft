@@ -23,6 +23,7 @@ assetcraft-analysis = { workspace = true }
 assetcraft-cache = { workspace = true }
 assetcraft-mesh = { workspace = true }
 assetcraft-animatic = { workspace = true }
+assetcraft-titles = { workspace = true }
 assetcraft-video = { workspace = true }
 # The cut tools run FilmCraft's edit algebra (docs/design/cut-editing.md §4.1).
 filmcraft-edit = { workspace = true }

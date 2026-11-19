@@ -96,6 +96,22 @@ fn laser_trace_takes_the_themes_accent_and_words() {
     assert!(near(&hold, [246, 248, 250], 12) < near(&long, [246, 248, 250], 12));
 }
 
+#[test]
+fn builtins_save_as_templates_that_read_back_the_same() {
+    let fill = Fill::default().text(Slot::Headline, "ISTANBUL");
+    for id in BUILTINS {
+        let d = builtin::builtin(id).expect("listed").expect("builds");
+        let back = Design::read(&d.to_template()).expect("reads back");
+        assert_eq!(back.name(), d.name(), "{id}");
+        assert_eq!(back.controls(), d.controls(), "{id}");
+        assert_eq!(
+            back.render(&fill, 3.0, 0.25).expect("renders"),
+            d.render(&fill, 3.0, 0.25).expect("renders"),
+            "{id}"
+        );
+    }
+}
+
 fn stack() -> Design {
     builtin::builtin(STACK).expect("listed").expect("builds")
 }

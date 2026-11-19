@@ -26,6 +26,14 @@ pub const THEME_VERSION: u32 = 1;
 pub const THEME_SUFFIX: &str = ".theme.json";
 /// The minimum contrast of text on its background (WCAG AA).
 pub const MIN_CONTRAST: f64 = 4.5;
+/// The file a theme pack (a folder in Themes) keeps its theme in (theme-packs.md §3, TD1).
+pub const PACK_THEME_FILE: &str = "theme.json";
+/// What a pack's designs are for (theme-packs.md TD3; `card` and `banner` first).
+pub const DESIGN_ROLES: [&str; 4] = ["card", "banner", "lowerThird", "endCard"];
+/// A pack's designs live in this folder, as `.ectemplate` files made in EffectCraft.
+pub const DESIGNS_DIR: &str = "designs";
+/// The suffix of a design file.
+pub const DESIGN_SUFFIX: &str = ".ectemplate";
 /// The fonts titles can draw today (anything else falls back to the first).
 pub const BUNDLED_FONTS: [&str; 1] = ["Inter"];
 
@@ -65,6 +73,10 @@ pub struct Theme {
     /// Shapes the theme adds (themes 1d: the accent bar).
     #[serde(default, skip_serializing_if = "Decor::is_none")]
     pub decor: Decor,
+    /// A pack's EffectCraft designs by role (theme-packs.md TP1): `"banner"` →
+    /// `"designs/banner.ectemplate"`, relative to the pack folder.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub designs: std::collections::BTreeMap<String, String>,
 }
 
 /// Shapes a theme draws besides the text (themes 1d–1e), in `color.accent` (a pattern in
@@ -344,6 +356,28 @@ pub fn contrast(a: u32, b: u32) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
+/// A design's path in its pack: `designs/<name>.ectemplate`, relative, `/`-separated, no
+/// `..`, no drive or root, at most 200 characters. Returns its parts (`["designs", name]`).
+pub fn design_path(path: &str) -> Result<Vec<&str>, String> {
+    if path.is_empty() || path.chars().count() > 200 || path.chars().any(char::is_control) {
+        return Err("the path is empty, too long or has control characters".into());
+    }
+    if path.contains('\\') || path.contains(':') || path.starts_with('/') {
+        return Err(format!("{path:?} must be a relative path with / separators"));
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.iter().any(|p| p.is_empty() || *p == "." || *p == "..") {
+        return Err(format!("{path:?} must stay inside the pack"));
+    }
+    if parts.len() != 2 || parts[0] != DESIGNS_DIR {
+        return Err(format!("{path:?} must be in the pack's {DESIGNS_DIR}/ folder"));
+    }
+    if !parts[1].to_ascii_lowercase().ends_with(DESIGN_SUFFIX) {
+        return Err(format!("{path:?} must be an {DESIGN_SUFFIX} file"));
+    }
+    Ok(parts)
+}
+
 fn color(field: &str, s: &str) -> Result<u32, ThemeError> {
     parse_color(s).ok_or_else(|| ThemeError(format!("{field} must be #RRGGBB, not {s:?}")))
 }
@@ -464,6 +498,12 @@ impl Theme {
         known("titleOut", &m.title_out, |id| TextExit::from_id(id).is_some())?;
         if let Some(secs) = m.title_seconds {
             within("motion.titleSeconds", secs, 0.5, 600.0)?;
+        }
+        for (role, path) in &self.designs {
+            if !DESIGN_ROLES.contains(&role.as_str()) {
+                return Err(ThemeError(format!("designs.{role} isn't a design role ({})", DESIGN_ROLES.join(", "))));
+            }
+            design_path(path).map_err(|why| ThemeError(format!("designs.{role}: {why}")))?;
         }
         Ok(warnings)
     }
@@ -591,6 +631,7 @@ impl Theme {
                 frame: l.decor.frame,
                 pattern: l.decor.pattern,
             },
+            designs: Default::default(),
         }
     }
 

@@ -1651,3 +1651,36 @@ fn a_song_board_carries_the_songs_downbeats_and_hits() {
     assert!(drops.len() >= 3 && drops[0] == 0.0, "a drop each time round: {drops:?}");
     assert!(looped.downbeats.windows(2).all(|w| w[0] < w[1]));
 }
+
+#[test]
+fn theme_designs_must_name_a_role_and_stay_in_the_packs_designs_folder() {
+    use crate::{Theme, design_path};
+    assert_eq!(design_path("designs/banner.ectemplate"), Ok(vec!["designs", "banner.ectemplate"]));
+    assert!(design_path("designs/Banner.ECTEMPLATE").is_ok(), "any case suffix");
+    for bad in [
+        "",
+        "banner.ectemplate",
+        "images/banner.ectemplate",
+        "designs/sub/banner.ectemplate",
+        "designs/../theme.json",
+        "../designs/banner.ectemplate",
+        "/designs/banner.ectemplate",
+        "designs\\banner.ectemplate",
+        "C:designs/banner.ectemplate",
+        "designs//banner.ectemplate",
+        "designs/banner.png",
+        "designs/ban\u{7}ner.ectemplate",
+    ] {
+        assert!(design_path(bad).is_err(), "{bad:?}");
+    }
+    let mut t = Theme::builtin(crate::TextTheme::Bold);
+    t.id = "pack".into();
+    t.designs.insert("banner".into(), "designs/banner.ectemplate".into());
+    let (back, _) = Theme::parse(t.to_json().as_bytes(), false).unwrap();
+    assert_eq!(back.designs, t.designs, "round trip");
+    t.designs.insert("poster".into(), "designs/poster.ectemplate".into());
+    let e = Theme::parse(t.to_json().as_bytes(), false).unwrap_err().to_string();
+    assert!(e.contains("designs.poster") && e.contains("lowerThird"), "{e}");
+    // A theme without designs writes no designs field (files from before TP1 are unchanged).
+    assert!(!Theme::builtin(crate::TextTheme::Bold).to_json().contains("designs"));
+}

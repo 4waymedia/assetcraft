@@ -297,9 +297,11 @@ Built so far: AssetCraft reads, fills and renders these designs (`crates/titles`
 ships the two **Banner Build Moves** as built-in banner designs made the same way (M1c):
 **Laser Trace** (four beams fling in and trace the border, the fill wipes, the words decode) and
 **Stack** (the banner, words included, drops in as 2–4-cell pieces, bottom row first; out, a line
-clear). Both take a pack's Headline, Caption, Accent, Surface and Headline Font. Next: packs listed
-with the themes, then cards and banners drawn through a pack's design. The built-in themes above
-stay on AssetCraft's
+clear). Both take a pack's Headline, Caption, Accent, Surface and Headline Font.
+`storyboard.themes` lists packs (`source: "pack"`) with each design's size, length and the controls
+it fills, and lists the built-in banners under `builtinDesigns`; a missing or broken design is a
+warning on its theme. Next: cards and banners drawn through a pack's design (TP2). The built-in
+themes above stay on AssetCraft's
 own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs

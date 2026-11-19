@@ -276,7 +276,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Themes",
         "Storyboard",
         None,
-        "{} → {themes: [{id, name, tags, source: builtin|user, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?}], problems: [{path, reason}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json)",
+        "{} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate)",
         crate::theme_cmd::sb_themes
     ),
     cmd!(
