@@ -1,0 +1,23 @@
+[package]
+name = "assetcraft-titles"
+description = "Theme-pack designs: EffectCraft templates filled with a clip's words and a theme's colours, rendered in-process (docs/design/theme-packs.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+effectcraft-project = { workspace = true }
+effectcraft-render = { workspace = true }
+effectcraft-keyframe = { workspace = true }
+effectcraft-time = { workspace = true }
+effectcraft-lottie = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+effectcraft-color = { workspace = true }

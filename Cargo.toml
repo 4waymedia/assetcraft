@@ -28,6 +28,7 @@ assetcraft-cache = { path = "crates/cache" }
 assetcraft-video = { path = "crates/video" }
 assetcraft-media = { path = "crates/media" }
 assetcraft-animatic = { path = "crates/animatic" }
+assetcraft-titles = { path = "crates/titles" }
 # external
 # SoundCraft's audio file I/O (MIT OR Apache-2.0; symphonia inside, MPL-2.0 by decision AD1).
 # Pinned to SoundCraft 0.7.0, the commit docs/track-analysis.md was written against.
@@ -54,12 +55,14 @@ notify = "8.2"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "pollster"] }
 # The suite (docs/design/suite-reuse.md, cut-editing.md §5): sibling crates pinned by release tag
 # (policy P1). Check with `cargo xtask suite`; bump in a commit of its own (P5).
-# EffectCraft v0.24.1 (582344d): title compositions and their renderer (crates/titles, step M1).
+# EffectCraft v0.24.1 (582344d): theme-pack designs and their renderer (crates/titles; theme-packs.md, M1b).
 effectcraft-project = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-render = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-keyframe = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-time = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-color = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+# The stored-ZIP reader for `.ectemplate` files (until R-U6 gives templates a crate of their own).
+effectcraft-lottie = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 # FilmCraft v0.20.1 (cedf0c9): the cut tools' edit algebra (roll, trim, split; cut-editing.md C1-C4).
 filmcraft-edit = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 filmcraft-project = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }

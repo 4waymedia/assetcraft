@@ -1,6 +1,6 @@
 # Suite reuse: what AssetCraft takes from EffectCraft and craft-libs, and what it builds
 
-_2026-11-18 · Stage 4 (Storyboard) → suite · decision proposed; spike S0 done 2026-11-14, M1a measured 2026-11-18_
+_2026-11-18 · Stage 4 (Storyboard) → suite · D-M1a decided (hybrid + theme packs); spike S0 2026-11-14, M1a measured and M1b built 2026-11-18_
 
 - **Scope:** every part of AssetCraft that draws, animates, sets type, encodes or muxes, set against
   the suite's shared Rust crates (`storytold/effectcraft`, `storytold/craft-libs`).
@@ -89,7 +89,12 @@ same colour as a **solid** layer costs 115–125 ms. Backgrounds are solids (gra
 **Recommendation (Claude, 2026-11-18):** go on to M1b at the existing pin. The costs are a one-time
 clean-build cost and +16 MB per binary, with licences clean and no duplicated crates. In parallel,
 propose R-U5 to EffectCraft; when it lands, the build and size cost roughly halve with no change
-on our side beyond a feature flag. Decision for Paul: **D-M1a** (accept and continue / wait for R-U5).
+on our side beyond a feature flag.
+
+**D-M1a (Paul, 2026-11-18): the hybrid, plus theme packs.** AssetCraft's renderer keeps the built-in
+looks; EffectCraft draws what users design in it for branding ("having just solid backgrounds is
+too general… users will want to create a 'theme' pack in EffectCraft"). Plan and steps:
+[theme-packs.md](theme-packs.md).
 
 ## 3. The split
 
@@ -157,11 +162,11 @@ Each step ends green (`cargo xtask ci`) and changes no user file format.
 
 | Step | What                                                                                                                         | Proves                                                                 |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| M1   | **M1a measured 2026-11-18 (§2b).** M1b: `crates/titles`: pin EffectCraft by rev; `title_comp(look, timing, words, size) -> (Project, ItemId)` for a Card with plate, words, fade | A test renders Bold and Neon Night cards; words, colours and the fade's alpha at set times match today's renderer within tolerance |
-| M2   | The export draws title cards and overlays through `crates/titles`                                                             | Export tests pass; filmstrip proof matches `themes-1g-motion.png`      |
-| M3   | The Viewer shows the same frames (640×360, cached per clip and time)                                                           | Viewer and export frames agree                                         |
-| M4   | Map every theme field (backdrop, decor, finish, motion) to comp properties; retire `decor.rs`, `Backdrop`, `finish_passes`, `animatic/text.rs` | All 1d–1g tests pass on the new path                             |
-| M5   | Stack and Laser Trace as comp recipes (`motion.bannerIn` / `bannerOut`)                                                       | Filmstrip proof against the Banner Build Moves mock                    |
+| M1   | **Re-planned by D-M1a.** M1a measured (§2b); M1b built 2026-11-18: `crates/titles` reads a user's `.ectemplate` design, fills it by control name and renders it ([theme-packs.md](theme-packs.md) §4) | 8 tests: read back, fill words / accent / font, unnamed controls kept, hold at the end, scale, bad files refused, the test library read without a crash |
+| M2   | → theme-packs TP2: title cards and banners whose theme has a design draw through `crates/titles` in the export | Export tests |
+| M3   | → theme-packs TP2: the Viewer shows the same frames (640×360, cached per clip and time) | Viewer and export frames agree |
+| M4   | **Not planned (D-M1a):** AssetCraft's renderer keeps the built-in looks; revisit after R-U5 | — |
+| M5   | → theme-packs M1c: Stack and Laser Trace as built-in designs made in code, with the same controls as a pack's | Filmstrip proof against the Banner Build Moves mock |
 | M6   | "Open in EffectCraft…": save the title comp as `.ecproj`                                                                      | The file opens in EffectCraft and renders the same frame               |
 | M7   | R-M1 spike, then the switch if it matches D-SF6                                                                               | Export tests; file sizes and PSNR recorded beside D-SF6                |
 | M0   | Suite pins (cut-editing.md step S1): EffectCraft by tag, one craft-libs rev, `cargo xtask suite` | Builds green; `xtask suite` reports the pins |
