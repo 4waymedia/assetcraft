@@ -294,10 +294,12 @@ the words or the face change. Change a colour in the theme file and every design
 follows.
 
 Built so far: AssetCraft reads, fills and renders these designs (`crates/titles`, step M1b), and
-ships **Laser Trace** as a built-in banner design made the same way (M1c-a: four beams fling in
-and trace the border, the fill wipes, the words decode; it takes a pack's Headline, Caption,
-Accent, Surface and Headline Font). Next: Stack, then packs listed with the themes, then cards and
-banners drawn through a pack's design. The built-in themes above stay on AssetCraft's
+ships the two **Banner Build Moves** as built-in banner designs made the same way (M1c):
+**Laser Trace** (four beams fling in and trace the border, the fill wipes, the words decode) and
+**Stack** (the banner, words included, drops in as 2–4-cell pieces, bottom row first; out, a line
+clear). Both take a pack's Headline, Caption, Accent, Surface and Headline Font. Next: packs listed
+with the themes, then cards and banners drawn through a pack's design. The built-in themes above
+stay on AssetCraft's
 own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs
