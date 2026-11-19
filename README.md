@@ -262,15 +262,21 @@ clip is themes step 1b-ii.
 
 For branding beyond what a theme file describes (custom shapes, a logo, a move of your own),
 you design the title piece in **EffectCraft** and AssetCraft fills it in. A pack is a folder in
-Themes:
+Themes, with its own images, sounds, video clips and fonts:
 
 ```text
 Themes\acme-brand\
-├── acme-brand.theme.json     colours, fonts, moves (as above)
-└── designs\
-    ├── card.ectemplate       made in EffectCraft: File › Save as Template…
-    └── banner.ectemplate
+├── theme.json        colours, fonts, moves (as above), plus `designs` and `assets`
+├── designs\          card.ectemplate, banner.ectemplate (EffectCraft: File › Save as Template…)
+├── images\           logo, textures, background images (PNG, JPEG, WebP)
+├── sounds\           title sting, transition whoosh, music bed (WAV, MP3)
+├── video\            intro, outro, background loop (MP4, MOV, WebM)
+└── fonts\            brand faces (TTF, OTF; OFL-1.1 only)
 ```
+
+Every file a pack uses is listed in `theme.json`'s `assets` with a role and a licence (`own`,
+`CC0-1.0`, `CC-BY-4.0` with a credit, or `OFL-1.1` for fonts). Unlisted files are ignored. The
+roles and rules are in [docs/design/theme-packs.md](docs/design/theme-packs.md) §3.
 
 In EffectCraft, add the fields you want AssetCraft to fill to the Essential Graphics panel and give
 them these names (any case):
@@ -280,16 +286,18 @@ them these names (any case):
 | `Headline`, `Caption`                                            | Text  | The clip's words                        |
 | `Background`, `Surface`, `Text`, `Muted`, `Accent`, `Accent 2`   | Color | The theme file's `color` of that name   |
 | `Headline Font`, `Body Font`                                     | Font  | The theme file's `type.display` / `body` |
-| `Logo`                                                           | Media | The theme's logo (planned, TP3)         |
+| `Logo`, `Texture`, `Background Image`, `Background Video`        | Media | The pack's asset of that role (planned, TP3) |
 
 Every other control keeps the value you gave it, so a colour you don't want to change can be
 locked by giving its control another name. Text keeps the design's size, colour and moves; only
 the words or the face change. Change a colour in the theme file and every design in the pack
 follows.
 
-Built so far: AssetCraft reads, fills and renders these designs (`crates/titles`, step M1b). Next:
-the Banner moves (Stack, Laser Trace) as built-in designs, then packs listed with the themes, then
-cards and banners drawn through a pack's design. The built-in themes above stay on AssetCraft's
+Built so far: AssetCraft reads, fills and renders these designs (`crates/titles`, step M1b), and
+ships **Laser Trace** as a built-in banner design made the same way (M1c-a: four beams fling in
+and trace the border, the fill wipes, the words decode; it takes a pack's Headline, Caption,
+Accent, Surface and Headline Font). Next: Stack, then packs listed with the themes, then cards and
+banners drawn through a pack's design. The built-in themes above stay on AssetCraft's
 own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs

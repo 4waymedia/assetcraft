@@ -460,6 +460,7 @@ dependencies = [
  "effectcraft-project",
  "effectcraft-render",
  "effectcraft-time",
+ "image",
  "serde_json",
 ]
 

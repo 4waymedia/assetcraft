@@ -173,4 +173,4 @@ with one (pin + line + label). Anything fancier: EffectCraft (TH6).
 | ID   | Question                                                                 | Recommendation                                                     |
 |------|--------------------------------------------------------------------------|--------------------------------------------------------------------|
 | TH3  | Bundle display fonts in AssetCraft (F1) or offer them to craft-fonts first? | AssetCraft first (ships sooner); offer upstream after              |
-| TH4  | Theme textures and backgrounds: generated (gradients, grain) only in v1, or ship CC0 images too? | Generated only in v1: no licences to track, tiny files |
+| TH4  | Theme textures and backgrounds: generated (gradients, grain) only in v1, or ship CC0 images too? | Generated only for the built-ins. **Revised 2026-11-18 (Paul, TD1):** user theme packs carry images, sounds, video and fonts, each listed in `assets` with a licence ([theme-packs.md](theme-packs.md) §3) |

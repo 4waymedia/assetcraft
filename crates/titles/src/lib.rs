@@ -89,8 +89,14 @@ pub enum Slot {
     HeadlineFont,
     /// `type.body`.
     BodyFont,
-    /// The theme's `logo` asset (TP3).
+    /// The pack's `logo` asset (TP3).
     Logo,
+    /// The pack's `texture` asset (TP3).
+    Texture,
+    /// The pack's `backgroundImage` asset (TP3).
+    BackgroundImage,
+    /// The pack's `backgroundVideo` asset (TP3).
+    BackgroundVideo,
 }
 
 /// What kind of control a slot fills.
@@ -110,7 +116,7 @@ pub enum ControlKind {
 
 impl Slot {
     /// Every slot, in the theme-packs.md §3 order.
-    pub const ALL: [Slot; 11] = [
+    pub const ALL: [Slot; 14] = [
         Slot::Headline,
         Slot::Caption,
         Slot::Background,
@@ -122,6 +128,9 @@ impl Slot {
         Slot::HeadlineFont,
         Slot::BodyFont,
         Slot::Logo,
+        Slot::Texture,
+        Slot::BackgroundImage,
+        Slot::BackgroundVideo,
     ];
 
     /// The control name a designer gives the field in EffectCraft.
@@ -138,6 +147,9 @@ impl Slot {
             Slot::HeadlineFont => "Headline Font",
             Slot::BodyFont => "Body Font",
             Slot::Logo => "Logo",
+            Slot::Texture => "Texture",
+            Slot::BackgroundImage => "Background Image",
+            Slot::BackgroundVideo => "Background Video",
         }
     }
 
@@ -152,7 +164,7 @@ impl Slot {
         match self {
             Slot::Headline | Slot::Caption => ControlKind::Text,
             Slot::HeadlineFont | Slot::BodyFont => ControlKind::Font,
-            Slot::Logo => ControlKind::Media,
+            Slot::Logo | Slot::Texture | Slot::BackgroundImage | Slot::BackgroundVideo => ControlKind::Media,
             _ => ControlKind::Color,
         }
     }
@@ -423,5 +435,9 @@ impl Design {
     }
 }
 
+pub mod builtin;
+
+#[cfg(test)]
+mod builtin_tests;
 #[cfg(test)]
 mod tests;
