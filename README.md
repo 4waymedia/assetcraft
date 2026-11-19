@@ -70,9 +70,11 @@ contain no HEVC code.
 
 ### Video poster frames
 
-Video thumbnails (MP4, MOV, MKV/WebM, AVI) come from FilmCraft's `filmcraft-cli`, run as a
-separate program. Put it on `PATH` or set `ASSETCRAFT_FILMCRAFT_CLI` to its full path, then
-restart AssetCraft. Without it, videos show a type icon.
+Video thumbnails (MP4, MOV, MKV/WebM, AVI) are decoded inside AssetCraft, from the frame one
+second in (or the last frame of a shorter clip). For a file the built-in decoder can't read,
+AssetCraft falls back to FilmCraft's `filmcraft-cli` when it is installed: put it on `PATH` or set
+`ASSETCRAFT_FILMCRAFT_CLI` to its full path, then restart AssetCraft. Without either, the video
+shows a type icon.
 
 <img width="1434" height="862" alt="Screenshot 2026-11-05 185302" src="https://github.com/user-attachments/assets/75adb866-01bd-4acd-b4c9-5aaa5b94104c" />
 
@@ -160,7 +162,7 @@ lists all 69).
 | Area | Shipped |
 |------|---------|
 | Browse (Organizer) | Bridge-style navigator: Computer, Folders panel (Computer · Favorites · Craft tabs; Explorer Quick Access pins, Finder favorites, My Folders shared with the suite in `places.json`), recent, back / forward / up, grid / list, sort, selection, hidden files, live folder watching |
-| Formats | Thumbnails and previews for PNG, JPEG, GIF, BMP, WebP, TIFF, camera raw, PSD, HEIC / HEIF (opt-in), AVIF, PDF, video poster frames (via `filmcraft-cli`), WAV / MP3 facts, GLB / glTF / OBJ; type icons for ZIP and the rest |
+| Formats | Thumbnails and previews for PNG, JPEG, GIF, BMP, WebP, TIFF, camera raw, PSD, HEIC / HEIF (opt-in), AVIF, PDF, video poster frames (decoded in-process; `filmcraft-cli` as a fallback), WAV / MP3 facts, GLB / glTF / OBJ; type icons for ZIP and the rest |
 | 3D | Viewer with orbit / zoom / pan, shaded / wireframe / normals / UV checker, backgrounds, turntable; light copy for dense models; Polygons and Textures in Metadata; `assetcraft-cli info` — see § 3D assets |
 | Metadata | Header facts per file (`item.probe`), mesh facts (`asset.meshInfo`), track summary (`track.summary`) |
 | Open In | PhotoCraft, LightCraft, FilmCraft, EffectCraft when installed (`file.openIn`, `app.openInTargets`); reveal in Explorer / Finder; run |
@@ -178,6 +180,118 @@ recipes and hot folders (6).
 AI is optional. Each capability uses a provider chosen in Preferences: **Local**, **API**, or
 **ArtCraft account** (Stage 5).
 
+## Themes
+
+A theme is the look and feel of a Cut's text: its title cards and overlays. It sets colours,
+fonts, the background, decor and the text's moves. Themes are separate from presets: any theme
+works with any Style › Preset, so the timing and the look are chosen apart.
+
+### The built-in themes
+
+| Id            | Name        | Feel                                                   | Moves (in / while up / out) |
+| ------------- | ----------- | ------------------------------------------------------ | --------------------------- |
+| `bold`        | Bold        | Red card, white heavy capitals, shadow                 | Fade / – / Fade             |
+| `minimal`     | Minimal     | Near-black, light text, no plate                       | Fade / – / Fade             |
+| `cinematic`   | Cinematic   | Black, warm capitals with wide tracking                | Fade / Push / Fade          |
+| `paper`       | Paper       | Off-white card, dark text, a frame                     | Rise / – / Sink             |
+| `noir-gold`   | Noir Gold   | 1920s luxury: black, cream and gold, rules and corners | Fade / Push / Fade          |
+| `neon-night`  | Neon Night  | Synthwave purple, magenta glow, scanlines              | Zoom / Pulse / Zoom         |
+| `field-notes` | Field Notes | Notebook dots, a rule under the title                  | Rise / Drift / Fade         |
+| `blueprint`   | Blueprint   | Grid, corners and a frame                              | Typewriter / – / Erase      |
+
+### Using a theme
+
+- **In the app:** select a text clip (a card or an overlay) and pick it in the Inspector's TEXT
+  section under **Theme**. In, Duration, Effect and Out start as "Theme (…)": they follow the
+  theme until you choose your own, and choosing "Theme" again goes back.
+- **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,
+  effect?, exit?, position?}`; `"theme"` for a move follows the theme again). To see every theme
+  with its colours, moves and any load problems:
+
+  ```powershell
+  assetcraft-cli exec storyboard.themes
+  ```
+
+### Your own theme files
+
+Put `.theme.json` files in the **Themes** folder of your working folder (by default
+`Documents\AssetCraft\Themes\`). `storyboard.themes` lists them after the built-ins, and lists any
+file that didn't load with the reason. A bad file is never fatal. This example loads with no
+warnings:
+
+```json
+{
+  "version": 1,
+  "id": "acme-brand",
+  "name": "Acme Brand",
+  "tags": ["corporate", "dark"],
+  "credit": { "author": "Acme Studio", "license": "own" },
+  "color": {
+    "background": "#101418", "surface": "#1C232B", "text": "#F4F6F8",
+    "muted": "#8A96A3", "accent": "#FF6B1A", "accent2": "#2D9CDB"
+  },
+  "type": {
+    "display": { "family": "Inter", "weight": 700, "tracking": 0.08, "uppercase": true, "finish": "shadow" },
+    "body":    { "family": "Inter", "weight": 400 },
+    "scale":   { "card": 0.12, "overlay": 0.05, "caption": 0.035 }
+  },
+  "background": { "kind": "gradient", "stops": ["#101418", "#1C232B"], "angle": 90, "grain": 0.04, "vignette": 0.3 },
+  "decor": { "accentBar": true, "corners": true },
+  "motion": { "titleIn": "rise", "titleEffect": "push", "titleOut": "fade", "titleSeconds": 3 }
+}
+```
+
+| Field        | What it sets                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| `color`      | `background`, `surface` (plates, bars), `text`, `muted`, `accent`, `accent2`: `#RRGGBB`       |
+| `type`       | `display` (titles) and `body` faces: family, weight, tracking −0.1–0.5, uppercase; `display.finish` none · shadow · outline · glow; `scale` sizes as fractions of the frame's height |
+| `background` | `solid`, `gradient` (2–4 stops, angle) or `radial`; `grain` and `vignette` 0–1                 |
+| `decor`      | `accentBar`, `rules` (none · below · both · double), `corners`, `frame`, `pattern` (none · grid · dots · scanlines) |
+| `motion`     | `titleIn` (fade · rise · zoom · typewriter), `titleEffect` (push · drift · pulse), `titleOut` (fade · sink · zoom · erase), `titleSeconds` |
+
+Each file is checked as untrusted input: at most 64 KiB, known fields only, `version` 1, an id of
+`a-z`, `0-9` and `-`, colours that parse, and sizes and amounts in range. Text that is hard to read
+on its background (under 4.5:1 contrast) and a font that isn't installed are warnings: the theme
+still loads, and the font falls back to `body`, then Inter. The full format and rules are in
+[docs/design/themes.md](docs/design/themes.md) §2.
+
+**Not yet:** a text clip can only pick one of the eight built-ins. Picking your own theme file on a
+clip is themes step 1b-ii.
+
+### Theme packs: brand designs from EffectCraft (building)
+
+For branding beyond what a theme file describes (custom shapes, a logo, a move of your own),
+you design the title piece in **EffectCraft** and AssetCraft fills it in. A pack is a folder in
+Themes:
+
+```text
+Themes\acme-brand\
+├── acme-brand.theme.json     colours, fonts, moves (as above)
+└── designs\
+    ├── card.ectemplate       made in EffectCraft: File › Save as Template…
+    └── banner.ectemplate
+```
+
+In EffectCraft, add the fields you want AssetCraft to fill to the Essential Graphics panel and give
+them these names (any case):
+
+| Control name                                                     | Type  | Filled with                             |
+| ---------------------------------------------------------------- | ----- | --------------------------------------- |
+| `Headline`, `Caption`                                            | Text  | The clip's words                        |
+| `Background`, `Surface`, `Text`, `Muted`, `Accent`, `Accent 2`   | Color | The theme file's `color` of that name   |
+| `Headline Font`, `Body Font`                                     | Font  | The theme file's `type.display` / `body` |
+| `Logo`                                                           | Media | The theme's logo (planned, TP3)         |
+
+Every other control keeps the value you gave it, so a colour you don't want to change can be
+locked by giving its control another name. Text keeps the design's size, colour and moves; only
+the words or the face change. Change a colour in the theme file and every design in the pack
+follows.
+
+Built so far: AssetCraft reads, fills and renders these designs (`crates/titles`, step M1b). Next:
+the Banner moves (Stack, Laser Trace) as built-in designs, then packs listed with the themes, then
+cards and banners drawn through a pack's design. The built-in themes above stay on AssetCraft's
+own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
+
 ## Docs
 
 | Doc                                                        | What it covers                                        |
@@ -189,6 +303,8 @@ AI is optional. Each capability uses a provider chosen in Preferences: **Local**
 | [docs/storyboard-plan.md](docs/storyboard-plan.md)         | Storyboard mode plan (Stage 4)                        |
 | [docs/track-analysis.md](docs/track-analysis.md)           | Music analysis, cue maps, Fit to length               |
 | [docs/design/cache.md](docs/design/cache.md)               | Suite cache design                                    |
+| [docs/design/themes.md](docs/design/themes.md)             | Theme file format, built-in themes, steps             |
+| [docs/design/theme-packs.md](docs/design/theme-packs.md)   | Theme packs: EffectCraft designs filled by AssetCraft |
 | [docs/cli.md](docs/cli.md)                                 | `assetcraft-cli`: shipped and target surface          |
 | [docs/control-protocol.md](docs/control-protocol.md)       | Loopback control channel (spec)                       |
 | [docs/mcp.md](docs/mcp.md)                                 | MCP server (spec)                                     |
