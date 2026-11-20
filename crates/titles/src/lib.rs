@@ -273,6 +273,32 @@ pub struct Design {
     height: u32,
     seconds: f64,
     frame_seconds: f64,
+    /// Where the words come to rest and where they leave, from the comp's markers (R-T16).
+    phases: (Option<f64>, Option<f64>),
+}
+
+/// The comp markers that time a design (R-T16; matched by comment, case-insensitive):
+/// [`HOLD_MARKER`] where its in has finished and the words rest (its duration, if any, ends the
+/// hold), [`OUT_MARKER`] where its out begins.
+pub const HOLD_MARKER: &str = "hold";
+/// See [`HOLD_MARKER`].
+pub const OUT_MARKER: &str = "out";
+
+/// Where `markers` say the hold and the out start, each kept only if it lies inside a design
+/// `len` seconds long (and the hold before the out).
+fn phases_of(markers: &[effectcraft_project::Marker], len: f64) -> (Option<f64>, Option<f64>) {
+    let named = |n: &str| markers.iter().find(|m| m.comment.trim().eq_ignore_ascii_case(n));
+    let inside = |t: f64| (t.is_finite() && t > 0.0 && t < len).then_some(t);
+    let hold = named(HOLD_MARKER);
+    let rest = hold.and_then(|m| inside(m.time.seconds()));
+    let out = named(OUT_MARKER)
+        .map(|m| m.time.seconds())
+        .or_else(|| hold.map(|m| m.duration.seconds()).filter(|d| *d > 0.0).and_then(|d| rest.map(|r| r + d)))
+        .and_then(inside);
+    match (rest, out) {
+        (Some(r), Some(o)) if r > o => (None, None),
+        p => p,
+    }
 }
 
 impl Design {
@@ -411,7 +437,8 @@ impl Design {
             .or_else(|| project.item(comp).map(|i| i.name.clone()))
             .unwrap_or_default();
         let (width, height) = (c.width, c.height);
-        Ok(Design { project, comp, name, width, height, seconds, frame_seconds })
+        let phases = phases_of(&c.markers, seconds);
+        Ok(Design { project, comp, name, width, height, seconds, frame_seconds, phases })
     }
 
     /// The design's name (the manifest's, else its Essential Graphics name, else the comp's).
@@ -422,6 +449,13 @@ impl Design {
     /// The composition's own size (the design's native size).
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Where the design's words come to rest and where they start to leave, in seconds, as its
+    /// comp's [`HOLD_MARKER`] / [`OUT_MARKER`] markers say (R-T16); `None` for one not marked (or
+    /// marked outside the design, or a hold after the out).
+    pub fn phases(&self) -> (Option<f64>, Option<f64>) {
+        self.phases
     }
 
     /// The design's length: its move. A longer clip holds the last frame.

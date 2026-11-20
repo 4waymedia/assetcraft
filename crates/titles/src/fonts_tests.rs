@@ -102,3 +102,44 @@ fn an_edit_saves_into_its_template() {
     assert!(super::template_with_project(&template, "{ nope").is_err());
     assert!(super::template_with_project(b"not a zip", &edit).is_err());
 }
+
+/// R-T16: a design's comp markers say where its words rest (`hold`, its duration ending the
+/// hold) and leave (`out`); a marker outside the design, or a hold after the out, is ignored.
+#[test]
+fn comp_markers_time_a_designs_in_and_out() {
+    use effectcraft_project::Marker;
+    let m = |t: f64, d: f64, c: &str| Marker {
+        time: Tick::from_seconds_f64(t),
+        duration: Tick::from_seconds_f64(d),
+        comment: c.into(),
+        ..Default::default()
+    };
+    let ph = |ms: Vec<Marker>| super::phases_of(&ms, 6.0);
+    let close = |p: (Option<f64>, Option<f64>), a: Option<f64>, b: Option<f64>| {
+        let near = |x: Option<f64>, y: Option<f64>| match (x, y) {
+            (Some(x), Some(y)) => (x - y).abs() < 1e-6,
+            (None, None) => true,
+            _ => false,
+        };
+        near(p.0, a) && near(p.1, b)
+    };
+    assert!(close(ph(vec![]), None, None));
+    assert!(close(ph(vec![m(1.5, 0.0, "hold"), m(4.0, 0.0, "out")]), Some(1.5), Some(4.0)));
+    assert!(close(ph(vec![m(1.5, 2.0, " Hold ")]), Some(1.5), Some(3.5)), "a hold's duration ends it");
+    assert!(close(ph(vec![m(1.5, 2.0, "hold"), m(4.5, 0.0, "OUT")]), Some(1.5), Some(4.5)), "an out marker wins");
+    assert!(close(ph(vec![m(4.2, 0.0, "out")]), None, Some(4.2)), "one end alone");
+    assert!(close(ph(vec![m(0.0, 0.0, "hold"), m(6.5, 0.0, "out")]), None, None), "outside the design");
+    assert!(close(ph(vec![m(4.0, 0.0, "hold"), m(2.0, 0.0, "out")]), None, None), "a hold after the out");
+    assert!(close(ph(vec![m(1.0, 0.0, "chapter 1")]), None, None), "other markers");
+    // The built-ins are marked (and keep it through a template).
+    for id in builtin::BUILTINS {
+        let d = builtin::builtin(id).expect("listed").expect("builds");
+        let (hold, out) = d.phases();
+        assert!(
+            hold.is_some_and(|h| h > 0.5 && h < 3.0) && out.is_some_and(|o| (o - 4.4).abs() < 1e-6),
+            "{id}: {:?}",
+            d.phases()
+        );
+        assert_eq!(Design::read(&d.to_template()).expect("reads back").phases(), d.phases(), "{id}");
+    }
+}

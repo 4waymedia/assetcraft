@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dev-dependencies]
+# R-T16's test strips a design's markers in its project JSON.
+serde_json = { workspace = true }
+
 [lints]
 workspace = true
 

@@ -294,7 +294,7 @@ them these names (any case):
 | `Headline`, `Caption`                                            | Text  | The clip's words                        |
 | `Background`, `Surface`, `Text`, `Muted`, `Accent`, `Accent 2`   | Color | The theme file's `color` of that name   |
 | `Headline Font`, `Body Font`                                     | Font  | The theme file's `type.display` / `body` |
-| `Logo`, `Texture`, `Background Image`, `Background Video`        | Media | The pack's asset of that role (planned, TP3) |
+| `Logo`, `Texture`, `Background Image`, `Background Video`        | Media | The pack's asset of that role (a logo fits inside its placeholder; the others cover it) |
 
 Every other control keeps the value you gave it, so a colour you don't want to change can be
 locked by giving its control another name. Text keeps the design's size, colour and moves; only
@@ -313,7 +313,21 @@ or an overlay whose pack has a `banner` design, is drawn through that design: th
 is the Headline, the rest the Caption, and the theme's colours and fonts fill the rest. The Viewer
 shows the same frames (rendered in the background and read ahead while playing), and the
 Inspector says when a clip is drawn through a design. The built-in themes above stay on AssetCraft's
-own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
+own renderer.
+
+A pack's fonts set its designs' text and its built-in looks' words; its title sound plays under
+its titles; its intro and outro can open and end a new storyboard (Start screen), and the CC-BY
+lines of the files a storyboard uses go into its credits card. **Edit in EffectCraft…** (Inspector,
+Design row) opens a pack design's edit copy; a save shows by itself, and **Save into Template**
+keeps it in the pack.
+
+**Timing a design for short clips.** A clip shorter than the design still plays its in and out
+whole; the hold in between is squeezed, keeping at least a third of the clip. Mark where your
+design's words come to rest and where they leave with two composition markers in EffectCraft,
+commented `hold` and `out` (any case; or one `hold` marker whose duration spans the hold).
+Without them AssetCraft takes the first and last 2 seconds as the in and the out.
+
+Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs
 

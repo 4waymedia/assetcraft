@@ -328,6 +328,7 @@ dependencies = [
  "assetcraft-storyboard",
  "assetcraft-thumbs",
  "assetcraft-titles",
+ "serde_json",
 ]
 
 [[package]]

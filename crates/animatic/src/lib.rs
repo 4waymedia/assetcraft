@@ -216,34 +216,44 @@ pub fn design_fill(d: &ThemeDesign, words: &str) -> assetcraft_titles::Fill {
     fill
 }
 
-/// How much of a design's start and end is its in and its out, kept whole on a short clip
-/// (R-T15): up to this many seconds each, a third of the design at most.
+/// How much of a design's start and end is its in and its out when it doesn't mark them
+/// (R-T15): this many seconds each, a third of the design at most.
 pub const DESIGN_EDGE_SECS: f64 = 2.0;
 
+/// A design's in and out, in seconds of design time: where its `hold` / `out` markers say
+/// (R-T16), else [`DESIGN_EDGE_SECS`] (a third of it at most) for the end not marked.
+pub fn design_edges(d: &ThemeDesign) -> (f64, f64) {
+    let len = d.design.seconds();
+    let edge = DESIGN_EDGE_SECS.min(len / 3.0);
+    let (hold, out) = d.design.phases();
+    (hold.unwrap_or(edge), out.map_or(edge, |o| len - o))
+}
+
 /// The time a design shows at `elapsed` into a text `shown` seconds long (its clip, or its
-/// duration if shorter): at rest (not finite), half way (the hold). Shown at least as long as the
-/// design, it plays as made. Shorter (R-T15; Paul, 2026-11-20: Laser Trace ran unfinished on a
-/// short title), its in and its out (its first and last [`DESIGN_EDGE_SECS`]) play whole, each in
-/// up to that long but no more than a third of the text (sped up to fit), and the hold between
-/// gets the rest, at least a third, so the words rest to be read; it ends with the text.
+/// duration if shorter): at rest (not finite), the middle of its hold. Shown at least as long as
+/// the design, it plays as made. Shorter (R-T15; Paul, 2026-11-20: Laser Trace ran unfinished on
+/// a short title), its in and its out ([`design_edges`]) play whole and the hold between is
+/// squeezed; the hold keeps at least a third of the text, so the words rest to be read, the in
+/// and out speeding up together when that needs it; it ends with the text.
 pub fn design_secs(d: &ThemeDesign, elapsed: f64, shown: f64) -> f64 {
     let len = d.design.seconds();
+    let (a, b) = design_edges(d);
     if !elapsed.is_finite() {
-        return len / 2.0;
+        return a + (len - a - b) / 2.0;
     }
     let e = elapsed.max(0.0);
     if !shown.is_finite() || shown <= 0.0 || shown >= len || len <= 0.0 {
         return e;
     }
-    // Design time in each edge, and the text time it gets.
-    let edge = DESIGN_EDGE_SECS.min(len / 3.0);
-    let room = edge.min(shown / 3.0);
-    if e <= room {
-        e * edge / room
-    } else if e >= shown - room {
-        (len - (shown - e) * edge / room).min(len)
+    // The text time each edge gets: its own, unless the hold would have less than a third.
+    let fit = if a + b > 0.0 { (shown * 2.0 / 3.0 / (a + b)).min(1.0) } else { 1.0 };
+    let (ra, rb) = (a * fit, b * fit);
+    if e <= ra {
+        e * a / ra
+    } else if e >= shown - rb {
+        (len - (shown - e) * b / rb).min(len)
     } else {
-        edge + (e - room) * (len - 2.0 * edge) / (shown - 2.0 * room)
+        a + (e - ra) * (len - a - b) / (shown - ra - rb)
     }
 }
 

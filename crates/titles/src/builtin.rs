@@ -108,6 +108,16 @@ impl Rng {
     }
 }
 
+/// Mark where a built-in's words rest and where they leave (R-T16), as a designer would in
+/// EffectCraft: comp markers commented `hold` and `out`.
+fn mark_phases(p: &mut Project, cid: ItemId, hold: f64, out: f64) {
+    if let Some(c) = p.comp_mut(cid) {
+        for (t, name) in [(hold, crate::HOLD_MARKER), (out, crate::OUT_MARKER)] {
+            c.markers.push(effectcraft_project::Marker { time: tick(t), comment: name.into(), ..Default::default() });
+        }
+    }
+}
+
 /// The project, its comp and the empty comp value to build layers against.
 fn stage(name: &str) -> (Project, ItemId, Comp) {
     let mut p = Project::default();
@@ -458,6 +468,8 @@ pub fn laser_trace() -> Result<Design, DesignError> {
         }
         c.essential = Some(EssentialGraphics { name: "Laser Trace".into(), controls });
     }
+    // R-T16: the words rest once the detail line has decoded; they leave at OUT.
+    mark_phases(&mut p, cid, fill0 + 1.0, OUT);
     Design::from_project(p, cid)
 }
 
@@ -852,5 +864,7 @@ pub fn stack() -> Result<Design, DesignError> {
         }
         c.essential = Some(EssentialGraphics { name: "Stack".into(), controls });
     }
+    // R-T16: the banner rests once the seams have closed; the line clear starts at OUT.
+    mark_phases(&mut p, cid, settled, OUT);
     Design::from_project(p, cid)
 }
