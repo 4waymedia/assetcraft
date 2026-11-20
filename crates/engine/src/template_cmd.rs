@@ -162,6 +162,41 @@ impl Session {
 }
 
 /// Append the credits clip when `p.credits` is true (New and Generate).
+/// `intro` / `outro` on `storyboard.generate` and `storyboard.new` (TP5d): a video that opens
+/// and one that ends the new storyboard (a theme pack's, offered on the Start screen). Each must
+/// be a rooted path to a video that plays; its length is the clip's, up to
+/// [`assetcraft_storyboard::MAX_BOOKEND_SECS`]. Absent or null: none.
+pub(crate) fn bookends_param(
+    s: &Session,
+    p: &Value,
+) -> Result<(Option<assetcraft_storyboard::Bookend>, Option<assetcraft_storyboard::Bookend>), CmdError> {
+    let one = |key: &str| -> Result<Option<assetcraft_storyboard::Bookend>, CmdError> {
+        let path = match p.get(key) {
+            None | Some(Value::Null) => return Ok(None),
+            Some(Value::String(v)) if !v.trim().is_empty() && v.len() <= 4096 => std::path::PathBuf::from(v.trim()),
+            Some(_) => return Err(CmdError::BadParams(format!("`{key}` must be a video's path"))),
+        };
+        if !path.has_root() || !crate::is_video(&path) {
+            return Err(CmdError::BadParams(format!("`{key}` must be a video's full path")));
+        }
+        let is_file = s.services.entry(&path).is_ok_and(|e| e.kind == assetcraft_fs::EntryKind::File);
+        if !is_file {
+            return Err(CmdError::BadParams(format!("`{key}`: {} isn't there", path.display())));
+        }
+        let secs = assetcraft_media::seconds(&path)
+            .map_err(|e| CmdError::BadParams(format!("`{key}`: {} can't be played ({e})", path.display())))?;
+        let secs = secs.min(assetcraft_storyboard::MAX_BOOKEND_SECS);
+        let duration = assetcraft_storyboard::Ticks::from_secs_f64(secs)
+            .filter(|t| !t.is_zero())
+            .ok_or_else(|| CmdError::BadParams(format!("`{key}`: {} has no length", path.display())))?;
+        Ok(Some(assetcraft_storyboard::Bookend {
+            asset: assetcraft_storyboard::AssetId(path.to_string_lossy().into_owned()),
+            duration,
+        }))
+    };
+    Ok((one("intro")?, one("outro")?))
+}
+
 pub(crate) fn append_credits_if(s: &Session, p: &Value, board: &mut Storyboard) -> usize {
     if p.get("credits").and_then(Value::as_bool).unwrap_or(false) {
         board.append_credits(&s.credits_template())
@@ -184,15 +219,25 @@ pub(crate) struct Fitted {
 /// title"): the chorus loop by default, cut to the Cut's length with a fade; `whole` plays the
 /// song from the top. The name is prefixed with the song's title when `rename`. Used by
 /// `storyboard.new {template}` and `storyboard.preview {template}`.
-pub(crate) fn fit_to_cue(s: &Session, p: &Value, board: &mut Storyboard, rename: bool) -> Result<Fitted, CmdError> {
+pub(crate) fn fit_to_cue(
+    s: &Session,
+    p: &Value,
+    board: &mut Storyboard,
+    rename: bool,
+    keep: &[assetcraft_storyboard::ClipId],
+) -> Result<Fitted, CmdError> {
     let path = crate::generate_cmd::cue_map_param(p)?;
     let music = music_param(p)?;
     let cue = crate::generate_cmd::read_cue(s, &path)?;
     let track_path = crate::generate_cmd::track_path(s, &path, &cue);
     let bpm = assetcraft_storyboard::Bpm::new(cue.bpm).unwrap_or(assetcraft_storyboard::Bpm::DEFAULT);
     let own = board.total();
-    let report =
-        assetcraft_storyboard::recut(board, bpm, own, assetcraft_storyboard::RecutOptions { keep_title_cards: true });
+    let report = assetcraft_storyboard::recut(
+        board,
+        bpm,
+        own,
+        assetcraft_storyboard::RecutOptions { keep_title_cards: true, keep: keep.to_vec() },
+    );
     for (clip, d) in board.clips.iter_mut().zip(&report.durations) {
         clip.duration = *d;
     }

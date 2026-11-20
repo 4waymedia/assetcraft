@@ -185,7 +185,12 @@ fn recut_fills_the_track_in_whole_beats() {
 #[test]
 fn recut_keeps_proportions() {
     let board = sample();
-    let r = recut(&board, bpm(BPM), Ticks::from_secs(120).unwrap(), RecutOptions { keep_title_cards: false });
+    let r = recut(
+        &board,
+        bpm(BPM),
+        Ticks::from_secs(120).unwrap(),
+        RecutOptions { keep_title_cards: false, ..Default::default() },
+    );
     assert!(r.fits());
     // A 6-beat clip stays longer than a 2-beat clip.
     let (two, six) = (1, 3);
@@ -1820,4 +1825,46 @@ fn title_cards_start_at_least_the_title_minimum() {
         let board = crate::template::bundled(t.id).expect("a bundled template");
         assert_eq!(short(&board), Vec::<(String, f64)>::new(), "template {}", t.id);
     }
+}
+
+/// TP5d: an intro opens the board and an outro ends it, each a video clip in a scene of its own
+/// (an Opening and a Close), the fades moved onto them, the length capped; credits appended
+/// after follow the outro.
+#[test]
+fn bookends_open_and_end_the_board() {
+    use crate::{Bookend, MAX_BOOKEND_SECS, ScenePart};
+    let mut board = crate::sample::sample();
+    let (first, last) = (board.clips[0].id, board.clips.last().unwrap().id);
+    board.clips[0].transition_in = Transition::FadeIn;
+    board.clips.last_mut().unwrap().transition_out = Transition::FadeOut;
+    let secs = |s: f64| Ticks::from_secs_f64(s).unwrap();
+    let added = board.add_bookends(
+        Some(Bookend { asset: AssetId("/v/intro.mp4".into()), duration: secs(4.0) }),
+        Some(Bookend { asset: AssetId("/v/outro.mp4".into()), duration: secs(90.0) }),
+    );
+    assert_eq!(added.len(), 2);
+    let (intro, outro) = (&board.clips[0], board.clips.last().unwrap());
+    assert_eq!((intro.id, outro.id), (added[0], added[1]));
+    assert_eq!((intro.description.as_str(), outro.description.as_str()), ("Intro", "Outro"));
+    assert_eq!(intro.asset_ids, [AssetId("/v/intro.mp4".into())]);
+    assert_eq!(intro.duration, secs(4.0));
+    assert_eq!(outro.duration, secs(MAX_BOOKEND_SECS), "capped");
+    assert_eq!(board.scenes[0].part, ScenePart::Opening);
+    assert_eq!(board.scenes.last().unwrap().part, ScenePart::Close);
+    assert_eq!(board.scenes[0].id, intro.scene_id);
+    // The board fades in on the intro and out on the outro.
+    assert_eq!(intro.transition_in, Transition::FadeIn);
+    assert_eq!(board.clip(first).unwrap().transition_in, Transition::Cut);
+    assert_eq!(outro.transition_out, Transition::FadeOut);
+    assert_eq!(board.clip(last).unwrap().transition_out, Transition::Cut);
+    // Credits come after the outro.
+    let n = board.append_credits(&crate::credits_template());
+    assert!(n > 0);
+    let at = board.clips.iter().position(|c| c.id == added[1]).unwrap();
+    assert_eq!(at, board.clips.len() - 1 - n);
+    // None asked: nothing changes.
+    let before = board.clone();
+    assert!(board.add_bookends(None, None).is_empty());
+    assert_eq!(board, before);
+    assert_eq!(board.validate(&crate::Limits::default()), Ok(()), "still a valid board");
 }

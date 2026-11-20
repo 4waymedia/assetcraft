@@ -240,7 +240,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard",
         "File",
         None,
-        "{name?, sample?: bool, template?: id | path, titleTheme?: theme id (every title card and text overlay takes it; a built-in's or a loaded user theme's), steps?: 1..=12, stepSeconds?: 10..=300, cueMap?, music?: structured | chorus | firstChorus | whole, credits?: bool, inset?: {kind?, corner?, size?, mixAudio?, addTo?: every | first}, voiceover?: path} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — every repeating section a title card + three shots of `stepSeconds` (30); with `cueMap` the song becomes its track as `music` says — intro · a chorus starting on each section's title · outro (default), the chorus looped, the first chorus only, or the whole song — and the shots snap to its beat at the template's own length); opens Storyboard mode",
+        "{name?, sample?: bool, template?: id | path, titleTheme?: theme id (every title card and text overlay takes it; a built-in's or a loaded user theme's), intro?: video path, outro?: video path (TP5d: an Opening scene first and a Close scene last, before the credits), steps?: 1..=12, stepSeconds?: 10..=300, cueMap?, music?: structured | chorus | firstChorus | whole, credits?: bool, inset?: {kind?, corner?, size?, mixAudio?, addTo?: every | first}, voiceover?: path} (Manual start, the 24-clip handoff sample, or a template: review | tutorial | instructions or a .storyboard.json — every repeating section a title card + three shots of `stepSeconds` (30); with `cueMap` the song becomes its track as `music` says — intro · a chorus starting on each section's title · outro (default), the chorus looped, the first chorus only, or the whole song — and the shots snap to its beat at the template's own length); opens Storyboard mode",
         storyboard::sb_new
     ),
     cmd!(
@@ -249,7 +249,7 @@ static COMMANDS: &[CommandSpec] = &[
         "New Storyboard from Track",
         "File",
         None,
-        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, density?: 0.5..2, name?, credits?: bool, titleTheme?: theme id} (scenes from sections, clips on bars and hits; `credits` appends the credits clip; density: fewer, longer shots below 1, more, shorter above; one undo step)",
+        "{cueMap: path, pacing?: calm|cinematic|energetic|trailer, seconds?: 30|60|90|120|null, fit?: fade|edit, density?: 0.5..2, name?, credits?: bool, titleTheme?: theme id, intro?: video path, outro?: video path (TP5d: the first and last clips, each its video's length up to 30 s, kept when the cut makes room)} (scenes from sections, clips on bars and hits; `credits` appends the credits clip; density: fewer, longer shots below 1, more, shorter above; one undo step)",
         crate::generate_cmd::sb_generate
     ),
     cmd!(

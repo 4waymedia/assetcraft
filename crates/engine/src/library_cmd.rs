@@ -234,7 +234,7 @@ pub(crate) fn preview_board(s: &mut Session, p: &Value, cue: &CueMap, path: &Pat
             )?;
             crate::template_cmd::append_credits_if(s, p, &mut board);
             crate::inset_cmd::apply_defaults(&mut board, p)?;
-            let fitted = crate::template_cmd::fit_to_cue(s, p, &mut board, true)?;
+            let fitted = crate::template_cmd::fit_to_cue(s, p, &mut board, true, &[])?;
             let titles = board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl).count();
             let changes = Some(match fitted.report.resized {
                 0 => format!("Music: {}", fitted.music),

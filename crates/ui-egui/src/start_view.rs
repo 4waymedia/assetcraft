@@ -81,6 +81,9 @@ pub(crate) struct StartUi {
     /// The title theme every title takes (Paul, 2026-11-20): a built-in's or a loaded user
     /// theme's id; `None` keeps the preset's own. Kept for the next storyboard this session.
     pub(crate) title_theme: Option<String>,
+    /// Open with / end with the title theme's pack intro and outro (TP5d), when it has them.
+    pub(crate) use_intro: bool,
+    pub(crate) use_outro: bool,
     /// The analyser's `(done + failed, batches)` last drawn, to refresh the list and notify once.
     pub(crate) seen_analyse: (usize, u64),
     /// How many of the chosen template's repeating section (points, steps); `None` = its default.
@@ -183,6 +186,8 @@ impl Default for StartUi {
             filter: crate::start_tracks::TrackFilter::default(),
             ask_analyse: false,
             title_theme: None,
+            use_intro: true,
+            use_outro: true,
             seen_analyse: (0, 0),
             steps: None,
         }
@@ -1200,6 +1205,26 @@ fn title_theme_picker(nav: &mut Navigator, ui: &mut Ui) {
         .response
         .on_hover_text("Every title card and text overlay starts in this theme (the credits card too); change any later in the Inspector");
     nav.state.storyboard.start.title_theme = pick;
+    // TP5d: the theme's pack intro and outro, offered as the first and last clips.
+    let (intro, outro) = bookends(nav);
+    let start = &mut nav.state.storyboard.start;
+    for (file, on, what) in
+        [(intro, &mut start.use_intro, "Open with its intro"), (outro, &mut start.use_outro, "End with its outro")]
+    {
+        if let Some(file) = file {
+            let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            ui.checkbox(on, format!("{what} ({name})"))
+                .on_hover_text("The pack's clip, its own length (up to 30 s); the credits clip follows the outro");
+        }
+    }
+}
+
+/// The title theme's pack intro and outro (TP5d), if it's a pack theme that has them.
+fn bookends(nav: &Navigator) -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+    let Some(id) = nav.state.storyboard.start.title_theme.as_deref() else { return (None, None) };
+    let Some(u) = nav.session.loaded_themes().iter().find(|u| u.theme.id == id) else { return (None, None) };
+    let first = |role: &str| u.assets.iter().find(|a| a.role == role).map(|a| a.path.clone());
+    (first("intro"), first("outro"))
 }
 
 /// The Start screen's Frame heading: what new storyboards will be, e.g. `Frame · Vertical 9:16, 30 fps`.
@@ -1220,6 +1245,11 @@ pub(crate) fn create_board(nav: &mut Navigator) {
         (start.style, start.track.clone(), start.length, start.autofill, start.density(), start.shape);
     let credits = nav.session.credits_on();
     let title_theme = nav.state.storyboard.start.title_theme.clone();
+    // The pack's intro and outro (TP5d), when offered and ticked.
+    let (intro, outro) = bookends(nav);
+    let pick = |p: Option<std::path::PathBuf>, on: bool| p.filter(|_| on).map(|p| p.to_string_lossy().into_owned());
+    let (intro, outro) =
+        (pick(intro, nav.state.storyboard.start.use_intro), pick(outro, nav.state.storyboard.start.use_outro));
     // Auto-fill only when there is something to fill with: an empty Organizer isn't an error.
     let files = nav.session.items().iter().filter(|e| e.kind == assetcraft_fs::EntryKind::File).count();
     let autofill = autofill && files > 0;
@@ -1234,6 +1264,8 @@ pub(crate) fn create_board(nav: &mut Navigator) {
                 params["name"] = json!(name);
             }
             params["titleTheme"] = json!(title_theme);
+            params["intro"] = json!(intro);
+            params["outro"] = json!(outro);
             let made = nav.run("storyboard.generate", params).is_some();
             if made && autofill {
                 nav.run("storyboard.autofill", json!({}));
@@ -1261,6 +1293,8 @@ pub(crate) fn create_board(nav: &mut Navigator) {
                 params["name"] = json!(name);
             }
             params["titleTheme"] = json!(title_theme);
+            params["intro"] = json!(intro);
+            params["outro"] = json!(outro);
             let made = nav.run("storyboard.new", params).is_some();
             if made && autofill {
                 nav.run("storyboard.autofill", json!({}));
@@ -1268,10 +1302,10 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             made
         }
         Style::Sample => nav
-            .run("storyboard.new", json!({ "sample": true, "credits": credits, "titleTheme": title_theme }))
+            .run("storyboard.new", json!({ "sample": true, "credits": credits, "titleTheme": title_theme, "intro": intro, "outro": outro }))
             .is_some(),
         Style::Blank => {
-            let mut params = json!({ "credits": credits, "titleTheme": title_theme });
+            let mut params = json!({ "credits": credits, "titleTheme": title_theme, "intro": intro, "outro": outro });
             if !name.is_empty() {
                 params["name"] = json!(name);
             }

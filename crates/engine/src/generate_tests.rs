@@ -8,7 +8,7 @@ const SR: u64 = 48_000;
 const BAR: u64 = 2 * SR; // 120 BPM, 4/4
 
 /// A 32-bar cue map (64 s) with a 30 s fade fit, as `tools/cuemap.py` writes it.
-fn cue_json() -> String {
+pub(crate) fn cue_json() -> String {
     let sec = |a: u64, b: u64, l: &str, e: f32| json!({"start": a * BAR, "end": b * BAR, "label": l, "energy": e});
     json!({
         "version": 1,

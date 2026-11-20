@@ -176,6 +176,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     let shape = shape_param(p, s.boards.generated.as_ref().map(|g| g.shape).unwrap_or_default())?;
     let fit_mode = fit_mode_param(p)?;
     let title_theme = crate::text_cmd::title_theme_param(s, p)?;
+    let (intro, outro) = crate::template_cmd::bookends_param(s, p)?;
     let cue = read_cue(s, &path)?;
     let track_path = track_path(s, &path, &cue);
     let name = match p.get("name").and_then(Value::as_str).map(str::trim) {
@@ -193,12 +194,20 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
         shape,
     };
     let (mut board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
-    if crate::template_cmd::append_credits_if(s, p, &mut board) > 0
+    // The intro and outro (TP5d) first, so the credits follow the outro.
+    let bookends = board.add_bookends(intro, outro);
+    let credits = crate::template_cmd::append_credits_if(s, p, &mut board);
+    if (credits > 0 || !bookends.is_empty())
         && let Some(track) = board.track.clone()
     {
-        // The generated clips make room for the credits card, so the Cut still ends with the song.
-        let fit =
-            assetcraft_storyboard::recut(&board, track.bpm, track.duration, RecutOptions { keep_title_cards: true });
+        // The generated clips make room for the credits card and the intro and outro (their own
+        // lengths kept), so the Cut still ends with the song.
+        let fit = assetcraft_storyboard::recut(
+            &board,
+            track.bpm,
+            track.duration,
+            RecutOptions { keep_title_cards: true, keep: bookends.clone() },
+        );
         for (clip, d) in board.clips.iter_mut().zip(&fit.durations) {
             clip.duration = *d;
         }

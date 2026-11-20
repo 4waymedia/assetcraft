@@ -904,3 +904,56 @@ fn a_packs_title_sound_plays_under_its_titles() {
     assert_eq!(plan(&mut s)["audio"], true, "the export mixes the stings");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP5d: `intro` / `outro` open and end a new storyboard (credits after the outro), each its
+/// video's length; with a song, the generated cut makes room for them and still ends with it. A
+/// path that isn't a playable video is refused before anything is made.
+#[test]
+fn an_intro_and_outro_open_and_end_a_new_storyboard() {
+    let (mut s, dir) = session("bookends");
+    let video = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test_data/library/environments/snow_clearing_flythrough.mp4")
+        .canonicalize()
+        .unwrap();
+    let secs = assetcraft_media::seconds(&video).unwrap().min(assetcraft_storyboard::MAX_BOOKEND_SECS);
+    let v = video.to_string_lossy().into_owned();
+    // New, from the sample.
+    run(&mut s, "storyboard.new", json!({ "sample": true, "intro": v, "outro": v, "credits": true }));
+    let b = s.storyboard().unwrap().clone();
+    let intro = &b.clips[0];
+    assert_eq!((intro.description.as_str(), intro.asset_ids[0].0.as_str()), ("Intro", v.as_str()));
+    assert!((intro.duration.as_secs_f64() - secs).abs() < 0.01, "{} vs {secs}", intro.duration.as_secs_f64());
+    let outro_at = b.clips.iter().position(|c| c.description == "Outro").unwrap();
+    assert!(outro_at < b.clips.len() - 1, "the credits follow the outro");
+    assert_eq!(b.clips.last().unwrap().shot_type, assetcraft_storyboard::ShotType::Ttl);
+    // Generated from a song: the cut makes room, the intro keeps its length (in whole beats), and
+    // the Cut still ends with the song.
+    let cue = dir.join("song.cuemap.json");
+    std::fs::write(&cue, crate::generate_tests::cue_json()).unwrap();
+    let r = run(
+        &mut s,
+        "storyboard.generate",
+        json!({ "cueMap": cue.to_string_lossy(), "intro": v, "outro": v, "credits": true }),
+    );
+    assert!(r["clips"].as_u64().unwrap() > 0);
+    let b = s.storyboard().unwrap().clone();
+    let track = b.track.clone().unwrap();
+    assert_eq!(b.clips[0].description, "Intro");
+    let beat = track.bpm.beat().as_secs_f64();
+    assert!((b.clips[0].duration.as_secs_f64() - secs).abs() <= beat, "kept, to the beat");
+    assert!(b.clips.iter().any(|c| c.description == "Outro"));
+    assert_eq!(b.total(), track.duration, "the Cut still ends with the song");
+    // Refused before anything is made.
+    let before = s.storyboard().unwrap().clone();
+    for (p, why) in [
+        (json!({ "sample": true, "intro": "relative/intro.mp4" }), "full path"),
+        (json!({ "sample": true, "outro": dir.join("missing.mp4").to_string_lossy() }), "isn't there"),
+        (json!({ "sample": true, "intro": cue.to_string_lossy() }), "full path"),
+        (json!({ "sample": true, "intro": 3 }), "video's path"),
+    ] {
+        let e = s.execute("storyboard.new", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.storyboard().unwrap(), &before);
+    let _ = std::fs::remove_dir_all(&dir);
+}

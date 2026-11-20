@@ -13,15 +13,17 @@ use crate::model::{ShotType, Storyboard};
 use crate::time::{Bpm, Ticks};
 
 /// Rules for a Re-cut.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecutOptions {
     /// Keep title-card durations as they are (in whole beats at the new tempo).
     pub keep_title_cards: bool,
+    /// More clips kept as they are (TP5d: an intro and an outro clip, the length of their video).
+    pub keep: Vec<crate::model::ClipId>,
 }
 
 impl Default for RecutOptions {
     fn default() -> Self {
-        RecutOptions { keep_title_cards: true }
+        RecutOptions { keep_title_cards: true, keep: Vec::new() }
     }
 }
 
@@ -55,7 +57,11 @@ pub fn recut(board: &Storyboard, bpm: Bpm, len: Ticks, opts: RecutOptions) -> Re
     let available = len.0 / beat.0;
     let old_bpm = board.track.as_ref().map(|t| t.bpm).unwrap_or(bpm);
 
-    let locked: Vec<bool> = board.clips.iter().map(|c| opts.keep_title_cards && c.shot_type == ShotType::Ttl).collect();
+    let locked: Vec<bool> = board
+        .clips
+        .iter()
+        .map(|c| (opts.keep_title_cards && c.shot_type == ShotType::Ttl) || opts.keep.contains(&c.id))
+        .collect();
     let weights: Vec<u64> = board.clips.iter().map(|c| u64::from(old_bpm.ticks_to_beats(c.duration).max(1))).collect();
 
     let mut beats: Vec<u64> = vec![1; board.clips.len()];

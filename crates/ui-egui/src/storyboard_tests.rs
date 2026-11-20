@@ -2641,3 +2641,55 @@ fn an_open_storyboard_picks_up_a_new_theme_pack_by_itself() {
     assert_eq!(nav.session().loaded_themes().len(), 1, "picked up");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP5d: a pack title theme with an intro and an outro offers both on the Start screen (ticked);
+/// Create opens the storyboard with the intro and ends it with the outro, and unticking one
+/// leaves it out.
+#[test]
+fn the_start_screen_offers_a_packs_intro_and_outro() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-bookends-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let pack = dir.join("Themes").join("acme-film");
+    std::fs::create_dir_all(pack.join("video")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let pack = dir.join("Themes").join("acme-film");
+    let clip = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../test_data/library/environments/snow_clearing_flythrough.mp4");
+    for f in ["intro.mp4", "outro.mp4"] {
+        std::fs::copy(&clip, pack.join("video").join(f)).unwrap();
+    }
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Cinematic);
+    t.id = "acme-film".into();
+    t.name = "Acme Film".into();
+    let asset = |role: &str, path: &str| assetcraft_storyboard::ThemeAsset {
+        role: role.into(),
+        path: path.into(),
+        license: "own".into(),
+        credit: None,
+    };
+    t.assets = vec![asset("intro", "video/intro.mp4"), asset("outro", "video/outro.mp4")];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = assetcraft_engine::Prefs { working_folder: Some(dir.clone()), ..assetcraft_engine::Prefs::default() };
+    let mut nav =
+        Navigator::with_one_worker(Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs));
+    let ctx = Context::default();
+    nav.run("app.mode", json!({ "mode": "storyboard" }));
+    nav.state.storyboard.start.choose_template(0, Some(1), None, 30);
+    nav.state.storyboard.start.title_theme = Some("acme-film".into());
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    assert!(nav.state.storyboard.start.use_intro && nav.state.storyboard.start.use_outro, "offered, ticked");
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned().expect("created");
+    assert_eq!(board.clips[0].description, "Intro");
+    assert!(board.clips[0].asset_ids[0].0.ends_with("intro.mp4"));
+    assert!(board.clips.iter().any(|c| c.description == "Outro" && c.asset_ids[0].0.ends_with("outro.mp4")));
+    // Unticked: left out.
+    nav.state.storyboard.start.use_outro = false;
+    nav.state.storyboard.start.open = true;
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    crate::start_view::create_board(&mut nav);
+    let board = nav.session().storyboard().cloned().expect("created");
+    assert_eq!(board.clips[0].description, "Intro");
+    assert!(!board.clips.iter().any(|c| c.description == "Outro"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

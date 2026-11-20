@@ -204,6 +204,7 @@ pub(crate) fn frame_param(s: &Session, p: &Value) -> Result<Option<assetcraft_st
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
     let title_theme = crate::text_cmd::title_theme_param(s, p)?;
+    let (intro, outro) = crate::template_cmd::bookends_param(s, p)?;
     let mut board = match p.get("template") {
         Some(Value::String(which)) => crate::template_cmd::board_from_template(
             s,
@@ -225,7 +226,9 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // A template with a track (Start › New › Template, ST3b / SR2): the whole song becomes the
     // board's track and the shots snap to its beat at the template's own length, title cards
     // kept (`storyboard.preview {template}` builds the same board). The credits clip goes on
-    // before the snap so it is on the beat too.
+    // before the snap so it is on the beat too. The intro and outro (TP5d) go on first, so the
+    // credits follow the outro; the snap keeps their lengths.
+    let bookends = board.add_bookends(intro, outro);
     crate::template_cmd::append_credits_if(s, p, &mut board);
     crate::inset_cmd::apply_defaults(&mut board, p)?;
     // The Start screen's AUDIO TRACK "Voiceover" / "Song + voiceover" (SR4c).
@@ -241,7 +244,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
         }
     }
     let fitted = if p.get("template").is_some() && p.get("cueMap").is_some() {
-        Some(crate::template_cmd::fit_to_cue(s, p, &mut board, p.get("name").is_none())?)
+        Some(crate::template_cmd::fit_to_cue(s, p, &mut board, p.get("name").is_none(), &bookends)?)
     } else {
         None
     };
@@ -415,7 +418,7 @@ pub(crate) fn sb_recut(s: &mut Session, p: &Value) -> CmdResult {
             .ok_or_else(|| CmdError::BadParams("`seconds` must be a positive length up to 6 hours".into()))?,
     };
     let keep_title_cards = p.get("keepTitleCards").and_then(Value::as_bool).unwrap_or(true);
-    let report = recut(board, bpm, len, RecutOptions { keep_title_cards });
+    let report = recut(board, bpm, len, RecutOptions { keep_title_cards, ..Default::default() });
     let mut next = board.clone();
     for (clip, d) in next.clips.iter_mut().zip(&report.durations) {
         clip.duration = *d;

@@ -301,7 +301,67 @@ pub fn credits() -> Storyboard {
     board
 }
 
+/// The longest an intro or outro clip is made, in seconds (TP5d): a pack's sting, not a film.
+pub const MAX_BOOKEND_SECS: f64 = 30.0;
+
+/// An intro or outro clip (TP5d): the video and its length.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bookend {
+    /// The video.
+    pub asset: AssetId,
+    /// Its length on the Cut (capped at [`MAX_BOOKEND_SECS`] when added).
+    pub duration: Ticks,
+}
+
 impl Storyboard {
+    /// Open the board with `intro` and end it with `outro` (TP5d; Paul, 2026-11-20: "the Intro,
+    /// Outro, and Credits are very standard sections to a film"): each a video clip in a scene of
+    /// its own, the intro's an Opening before every other scene, the outro's a Close after them
+    /// (so credits appended later follow it). The board's fade in moves onto the intro and its
+    /// fade out onto the outro. Returns the clips added, in order, for a re-cut to keep.
+    pub fn add_bookends(&mut self, intro: Option<Bookend>, outro: Option<Bookend>) -> Vec<ClipId> {
+        let cap = Ticks::from_secs_f64(MAX_BOOKEND_SECS).unwrap_or(Ticks::ZERO);
+        let mut next_scene = self.scenes.iter().map(|s| s.id.0).max().unwrap_or(0) + 1;
+        let mut next_clip = self.clips.iter().map(|c| c.id.0).max().unwrap_or(0) + 1;
+        let mut added = Vec::new();
+        let mut make = |b: Bookend, what: &str, part: ScenePart| {
+            let scene = SceneId(next_scene);
+            next_scene += 1;
+            let mut clip = Clip::new(ClipId(next_clip), scene, ShotType::Est, b.duration.min(cap).max(Ticks(1)));
+            next_clip += 1;
+            clip.description = what.into();
+            clip.set_assets(vec![b.asset]);
+            let mut sc = Scene::new(scene, None);
+            sc.part = part;
+            (sc, clip)
+        };
+        if let Some(b) = intro {
+            let (sc, mut clip) = make(b, "Intro", ScenePart::Opening);
+            self.scenes.insert(0, sc);
+            if let Some(first) = self.clips.first_mut()
+                && first.transition_in == Transition::FadeIn
+            {
+                first.transition_in = Transition::Cut;
+                clip.transition_in = Transition::FadeIn;
+            }
+            added.push(clip.id);
+            self.clips.insert(0, clip);
+        }
+        if let Some(b) = outro {
+            let (sc, mut clip) = make(b, "Outro", ScenePart::Close);
+            self.scenes.push(sc);
+            if let Some(last) = self.clips.last_mut()
+                && last.transition_out == Transition::FadeOut
+            {
+                last.transition_out = Transition::Cut;
+                clip.transition_out = Transition::FadeOut;
+            }
+            added.push(clip.id);
+            self.clips.push(clip);
+        }
+        added
+    }
+
     /// Append `credits` (a template, usually [`credits`] or the user's own) as the last scene(s)
     /// of this board: scenes and clips renumbered after the board's own, placeholders in the
     /// words filled (`{title}`, `{music}`; a line left empty is dropped), the last clip fading
