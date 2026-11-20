@@ -305,8 +305,10 @@ ships the two **Banner Build Moves** as built-in banner designs made the same wa
 clear). Both take a pack's Headline, Caption, Accent, Surface and Headline Font.
 `storyboard.themes` lists packs (`source: "pack"`) with each design's size, length and the controls
 it fills, and lists the built-in banners under `builtinDesigns`; a missing or broken design is a
-warning on its theme. Next: cards and banners drawn through a pack's design (TP2). The built-in
-themes above stay on AssetCraft's
+warning on its theme. **In the export**, a title card whose theme is a pack with a `card` design,
+or an overlay whose pack has a `banner` design, is drawn through that design: the clip's first line
+is the Headline, the rest the Caption, and the theme's colours and fonts fill the rest. The Viewer
+still shows the theme's own words for now (TP2b). The built-in themes above stay on AssetCraft's
 own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs

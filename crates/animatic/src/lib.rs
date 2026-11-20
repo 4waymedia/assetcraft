@@ -96,6 +96,32 @@ pub struct Compositor {
     failed: HashMap<PathBuf, String>,
     /// The user's loaded themes, for text naming one (TP2a-2); empty = built-ins only.
     user_looks: assetcraft_storyboard::UserLooks,
+    /// Theme packs' designs (TP2a-3): a card or overlay naming a pack theme with a design for
+    /// its role draws through it.
+    designs: std::sync::Arc<Vec<ThemeDesign>>,
+}
+
+/// A theme pack's design for one role, ready to fill (theme-packs.md TP2a-3).
+#[derive(Debug, Clone)]
+pub struct ThemeDesign {
+    /// The pack theme.
+    pub theme: assetcraft_storyboard::ThemeId,
+    /// `card` (a title card) or `banner` (an overlay).
+    pub role: String,
+    /// The design's file, for problems.
+    pub path: PathBuf,
+    /// The design.
+    pub design: std::sync::Arc<assetcraft_titles::Design>,
+    /// The theme's colours and fonts; the clip's words are added when drawn.
+    pub fill: assetcraft_titles::Fill,
+}
+
+/// The design role a text kind draws through.
+pub fn design_role(kind: TextKind) -> &'static str {
+    match kind {
+        TextKind::Card => "card",
+        TextKind::Overlay => "banner",
+    }
 }
 
 /// How many videos a compositor keeps open at once.
@@ -141,6 +167,7 @@ impl Compositor {
             videos: Vec::new(),
             failed: HashMap::new(),
             user_looks: assetcraft_storyboard::UserLooks::default(),
+            designs: std::sync::Arc::new(Vec::new()),
         })
     }
 
@@ -378,6 +405,16 @@ impl Compositor {
                 }
             }
         }
+        // A pack design for this role draws instead of the theme's words (TP2a-3); if it can't,
+        // the words draw as before and the export lists why.
+        if let Some(d) = self.design_for(style.theme_id, kind) {
+            match self.draw_design(out, &d, words, elapsed) {
+                Ok(()) => return,
+                Err(e) => {
+                    self.failed.insert(d.path.clone(), e);
+                }
+            }
+        }
         // Past its duration (and its out) the words are gone; a Card keeps its background.
         if words.trim().is_empty() || anim.is_hidden() {
             return;
@@ -454,12 +491,52 @@ impl Compositor {
         self
     }
 
+    /// Draw cards and overlays whose pack theme has a design through it (TP2a-3).
+    pub fn with_designs(mut self, designs: std::sync::Arc<Vec<ThemeDesign>>) -> Self {
+        self.designs = designs;
+        self
+    }
+
     /// This compositor cropping shots by `frame`'s fill and snap (F3: the board's frame, as the
     /// Viewer shows it); `None` fits the whole picture in, as older boards always did.
     pub fn with_crop(mut self, frame: Option<&assetcraft_storyboard::FrameSpec>) -> Self {
         self.crop =
             frame.map(|f| assetcraft_storyboard::FrameSpec { width: self.width, height: self.height, ..f.clone() });
         self
+    }
+
+    /// The pack design a text with theme `theme` and kind `kind` draws through, if any.
+    fn design_for(&self, theme: Option<assetcraft_storyboard::ThemeId>, kind: TextKind) -> Option<ThemeDesign> {
+        let theme = theme?;
+        let role = design_role(kind);
+        self.designs.iter().find(|d| d.theme == theme && d.role == role).cloned()
+    }
+
+    /// Fill `d` with the clip's words (first line → Headline, the rest → Caption) and draw its
+    /// frame `elapsed` seconds in (at rest: half way, the hold), placed by the board's crop.
+    fn draw_design(&self, out: &mut Rgba, d: &ThemeDesign, words: &str, elapsed: f64) -> Result<(), String> {
+        let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
+        let headline = lines.next().unwrap_or_default().to_string();
+        let caption = lines.collect::<Vec<_>>().join(" ");
+        let mut fill = d.fill.clone().text(assetcraft_titles::Slot::Headline, &headline);
+        if !caption.is_empty() {
+            fill = fill.text(assetcraft_titles::Slot::Caption, &caption);
+        }
+        let (dw, dh) = d.design.size();
+        let (fw, fh) = (self.width as f32, self.height as f32);
+        let [x, y, w, _] = match &self.crop {
+            Some(f) => {
+                let [x, y, w, h] = f.place(dw as f32, dh as f32);
+                [x * fw, y * fh, w * fw, h * fh]
+            }
+            None => draw::contain_rect(self.width, self.height, (dw, dh)),
+        };
+        let scale = f64::from(w) / f64::from(dw.max(1));
+        let secs = if elapsed.is_finite() { elapsed } else { d.design.seconds() / 2.0 };
+        let frame = d.design.render(&fill, secs, scale).map_err(|e| e.to_string())?;
+        let image = Rgba { width: frame.width, height: frame.height, data: frame.rgba };
+        draw::over(out, &image, x.round() as i64, y.round() as i64);
+        Ok(())
     }
 
     /// A shot's picture into the frame by the crop (`FrameSpec::place`, the Viewer's rule).

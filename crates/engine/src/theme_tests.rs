@@ -278,3 +278,47 @@ fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
     }
     out
 }
+
+#[test]
+fn a_packs_designs_are_ready_to_draw_with_its_theme() {
+    let (_, dir) = session("designs-fill");
+    let pack = dir.join("Themes").join("acme-brand");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::STACK).unwrap().unwrap();
+    std::fs::write(pack.join("designs").join("banner.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(pack.join("designs").join("end.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(
+        pack.join("theme.json"),
+        pack_theme("acme-brand", &[("banner", "designs/banner.ectemplate"), ("endCard", "designs/end.ectemplate")]),
+    )
+    .unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let designs = s.theme_designs();
+    assert_eq!(designs.len(), 1, "card and banner only for now (endCard waits for its step)");
+    assert_eq!((designs[0].theme.as_str(), designs[0].role.as_str()), ("acme-brand", "banner"));
+    // The fill is the theme's: Bold's colours and its display face.
+    let t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    let fill = crate::theme_cmd::theme_fill(&t);
+    use assetcraft_titles::{FillValue, Slot};
+    let hex = |slot| match fill.get(slot) {
+        Some(FillValue::Color(c)) => format!(
+            "#{:02X}{:02X}{:02X}",
+            (c[0] * 255.0).round() as u8,
+            (c[1] * 255.0).round() as u8,
+            (c[2] * 255.0).round() as u8
+        ),
+        v => format!("{v:?}"),
+    };
+    assert_eq!(hex(Slot::Background), t.color.background.to_uppercase());
+    assert_eq!(hex(Slot::Accent), t.color.accent.to_uppercase());
+    match fill.get(Slot::HeadlineFont) {
+        Some(FillValue::Font { family, style }) => {
+            assert_eq!(family, &t.type_.display.family);
+            assert!(!style.is_empty());
+        }
+        v => panic!("{v:?}"),
+    }
+    assert_eq!(designs[0].fill, crate::theme_cmd::theme_fill(&s.loaded_themes()[0].theme));
+    let _ = std::fs::remove_dir_all(&dir);
+}

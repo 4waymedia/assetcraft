@@ -55,6 +55,47 @@ pub(crate) struct ThemeLibrary {
     problems: Vec<(PathBuf, String)>,
     /// Each loaded theme's look, for clips that name one (TP2a-2).
     looks: assetcraft_storyboard::UserLooks,
+    /// Each pack's card and banner designs, filled with its theme (TP2a-3).
+    designs: std::sync::Arc<Vec<assetcraft_animatic::ThemeDesign>>,
+}
+
+/// What a theme fills a design with (theme-packs.md §3): its colours and fonts; the clip's words
+/// are added when it draws.
+pub(crate) fn theme_fill(t: &Theme) -> assetcraft_titles::Fill {
+    use assetcraft_titles::Slot;
+    let rgba = |hex: &str| {
+        assetcraft_storyboard::parse_color(hex).map(|c| {
+            let ch = |shift: u32| f64::from((c >> shift) & 0xff) / 255.0;
+            [ch(16), ch(8), ch(0), 1.0]
+        })
+    };
+    let style = |w: u16| match w {
+        0..=150 => "Thin",
+        151..=250 => "ExtraLight",
+        251..=350 => "Light",
+        351..=450 => "Regular",
+        451..=550 => "Medium",
+        551..=650 => "SemiBold",
+        651..=750 => "Bold",
+        751..=850 => "ExtraBold",
+        _ => "Black",
+    };
+    let c = &t.color;
+    let mut fill = assetcraft_titles::Fill::default();
+    for (slot, hex) in [
+        (Slot::Background, Some(&c.background)),
+        (Slot::Surface, Some(&c.surface)),
+        (Slot::Text, Some(&c.text)),
+        (Slot::Muted, Some(&c.muted)),
+        (Slot::Accent, Some(&c.accent)),
+        (Slot::Accent2, c.accent2.as_ref()),
+    ] {
+        if let Some(v) = hex.and_then(|h| rgba(h)) {
+            fill = fill.color(slot, v);
+        }
+    }
+    let (d, b) = (&t.type_.display, &t.type_.body);
+    fill.font(Slot::HeadlineFont, &d.family, style(d.weight)).font(Slot::BodyFont, &b.family, style(b.weight))
 }
 
 impl Session {
@@ -63,7 +104,28 @@ impl Session {
     pub(crate) fn reload_themes(&mut self) {
         let (themes, problems) = self.user_themes();
         let looks = assetcraft_storyboard::UserLooks::new(themes.iter().map(|u| (u.theme.id.as_str(), u.theme.look())));
-        self.themes = ThemeLibrary { themes, problems, looks };
+        let designs = themes
+            .iter()
+            .filter_map(|u| assetcraft_storyboard::ThemeId::new(&u.theme.id).map(|id| (u, id)))
+            .flat_map(|(u, id)| {
+                let fill = theme_fill(&u.theme);
+                u.designs.iter().filter(|d| d.role == "card" || d.role == "banner").map(move |d| {
+                    assetcraft_animatic::ThemeDesign {
+                        theme: id,
+                        role: d.role.clone(),
+                        path: d.path.clone(),
+                        design: std::sync::Arc::new(d.design.clone()),
+                        fill: fill.clone(),
+                    }
+                })
+            })
+            .collect();
+        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(designs) };
+    }
+
+    /// The loaded packs' card and banner designs (TP2a-3).
+    pub fn theme_designs(&self) -> std::sync::Arc<Vec<assetcraft_animatic::ThemeDesign>> {
+        std::sync::Arc::clone(&self.themes.designs)
     }
 
     /// The loaded themes' looks by id: what a clip naming one draws (TP2a-2).

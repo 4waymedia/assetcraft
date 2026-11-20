@@ -327,6 +327,7 @@ dependencies = [
  "assetcraft-probe",
  "assetcraft-storyboard",
  "assetcraft-thumbs",
+ "assetcraft-titles",
 ]
 
 [[package]]

@@ -513,3 +513,52 @@ fn an_export_takes_the_boards_frame() {
     assert_eq!((back.width, back.height), (90, 160), "exported tall");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP2a-3: an overlay whose theme is a pack with a banner design exports through the design
+/// (its accent shows in the decoded file), and a clip naming a theme that isn't loaded is listed.
+#[test]
+fn an_overlay_with_a_pack_banner_exports_through_the_design() {
+    let dir = temp("export-pack");
+    let pack = dir.join("Themes").join("acme-brand");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    std::fs::write(pack.join("designs").join("banner.ectemplate"), banner.to_template()).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-brand".into();
+    t.name = "Acme".into();
+    t.color.accent = "#FF00FF".into();
+    t.designs.insert("banner".into(), "designs/banner.ectemplate".into());
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    assert_eq!(s.theme_designs().len(), 1);
+    run(&mut s, "storyboard.new", json!({ "name": "Banner" }));
+    let board = s.boards.board.as_mut().unwrap();
+    board.scenes.push(assetcraft_storyboard::Scene::new(SceneId(1), None));
+    let mut shot = Clip::new(ClipId(1), SceneId(1), ShotType::Est, Ticks::from_secs(4).unwrap());
+    shot.asset_ids.push(AssetId(library("environments/soul_light_forest.jpg")));
+    shot.overlay = Some("ISTANBUL".into());
+    shot.text_style.theme_id = assetcraft_storyboard::ThemeId::new("acme-brand");
+    let mut gone = Clip::new(ClipId(2), SceneId(1), ShotType::Ttl, Ticks::from_secs(1).unwrap());
+    gone.description = "THE END".into();
+    gone.text_style.theme_id = assetcraft_storyboard::ThemeId::new("not-loaded");
+    board.clips = vec![shot, gone];
+    crate::document_cmd::mark_saved(&mut s, None);
+    let path = dir.join("Banner.mp4");
+    let out = run(
+        &mut s,
+        "storyboard.exportVideo",
+        json!({ "path": path.to_string_lossy(), "size": { "width": 384, "height": 216 }, "fps": 24, "quality": 24, "wait": true }),
+    );
+    assert_eq!(out["status"]["stage"], "done", "{out}");
+    let problems = out["status"]["problems"].to_string();
+    assert!(problems.contains("not-loaded") && !problems.contains("banner.ectemplate"), "{problems}");
+    // 3 s in, the banner holds: its accent bar is magenta (the theme's accent, not the design's gold).
+    let mut reader = assetcraft_media::VideoReader::open(&path).unwrap();
+    let f = reader.frame(3.0, 384).unwrap();
+    let (x, y) = ((134.0 / 1920.0 * f.width as f32) as u32, (834.0 / 1080.0 * f.height as f32) as u32);
+    let i = ((y * f.width + x) * 4) as usize;
+    let p = &f.rgba[i..i + 3];
+    assert!(p[0] > 170 && p[1] < 110 && p[2] > 170, "magenta bar in the exported frame: {p:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

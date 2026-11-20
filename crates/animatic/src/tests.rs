@@ -572,3 +572,44 @@ fn a_card_naming_a_loaded_user_theme_draws_its_look_and_otherwise_its_fallback()
     assert_eq!(a.data, plain.clip_frame(&neon, f64::INFINITY).data, "loaded: the user theme's look");
     assert_eq!(b.data, plain.clip_frame(&paper, f64::INFINITY).data, "not loaded: the built-in fallback");
 }
+
+#[test]
+fn an_overlay_naming_a_pack_theme_draws_through_its_banner_design() {
+    use assetcraft_storyboard::{ThemeId, UserLooks};
+    use assetcraft_titles::{Fill, Slot};
+    let acme = ThemeId::new("acme-brand").unwrap();
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    let designs = Arc::new(vec![crate::ThemeDesign {
+        theme: acme,
+        role: "banner".into(),
+        path: "Themes/acme-brand/designs/banner.ectemplate".into(),
+        design: Arc::new(banner),
+        // A magenta accent: the bar shows it.
+        fill: Fill::default().color(Slot::Accent, [1.0, 0.0, 1.0, 1.0]),
+    }]);
+    let mut shot = clip(5, ShotType::Ws, 6);
+    shot.overlay = Some("ISTANBUL\nTURKEY · 03:47 HRS".into());
+    shot.text_style.theme_id = Some(acme);
+    let looks = UserLooks::new([("acme-brand", assetcraft_storyboard::TextTheme::Bold.look())]);
+    let (w, h) = (480, 270);
+    let mut with = compositor(w, h).with_user_looks(looks.clone()).with_designs(Arc::clone(&designs));
+    let mut without = compositor(w, h).with_user_looks(looks);
+    let a = with.clip_frame(&shot, 3.0);
+    let b = without.clip_frame(&shot, 3.0);
+    assert_ne!(a.data, b.data, "the design draws instead of the theme's words");
+    // The banner's accent bar (left edge of the banner, comp x 128–140 of 1920, y 716–952 of 1080).
+    let (bx, by) = ((134.0 / 1920.0 * w as f32) as u32, (834.0 / 1080.0 * h as f32) as u32);
+    let p = a.get(bx, by);
+    assert!(p[0] > 200 && p[1] < 80 && p[2] > 200, "magenta accent bar: {p:?}");
+    assert!(with.problems().is_empty(), "{:?}", with.problems());
+    // Another theme's clip, and a card (no card design here), draw as before.
+    let mut other = shot.clone();
+    other.text_style.theme_id = ThemeId::new("someone-else");
+    assert_eq!(with.clip_frame(&other, 3.0).data, without.clip_frame(&other, 3.0).data);
+    let mut card = clip(6, ShotType::Ttl, 2);
+    card.description = "ACME".into();
+    card.text_style.theme_id = Some(acme);
+    assert_eq!(with.clip_frame(&card, 1.0).data, without.clip_frame(&card, 1.0).data);
+    // At rest (the Viewer's still): the hold, half way through the design.
+    assert_ne!(with.clip_frame(&shot, f64::INFINITY).data, without.clip_frame(&shot, f64::INFINITY).data);
+}

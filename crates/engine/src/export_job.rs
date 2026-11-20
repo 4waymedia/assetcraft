@@ -326,6 +326,7 @@ pub(crate) fn sb_export_video(s: &mut Session, p: &Value) -> CmdResult {
         look: s.model.render_look(),
         decode: s.decode_options(),
         user_looks: s.user_looks().clone(),
+        designs: s.theme_designs(),
         progress: Arc::clone(&s.exporter.progress),
         cancel: Arc::clone(&s.exporter.cancel),
         rate: Arc::clone(&s.exporter.rate),
@@ -403,6 +404,8 @@ struct Job {
     decode: assetcraft_thumbs::DecodeOptions,
     /// The user's loaded themes, for text naming one (TP2a-2).
     user_looks: assetcraft_storyboard::UserLooks,
+    /// The loaded packs' card and banner designs (TP2a-3).
+    designs: Arc<Vec<assetcraft_animatic::ThemeDesign>>,
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
     rate: Arc<Mutex<Option<f64>>>,
@@ -460,7 +463,8 @@ impl Job {
         let mut compositor = Compositor::new(Arc::clone(&self.services), s.width, s.height, self.look, self.decode)
             .map_err(|e| Stop::Failed(e.to_string()))?
             .with_crop(self.board.frame.as_ref())
-            .with_user_looks(self.user_looks.clone());
+            .with_user_looks(self.user_looks.clone())
+            .with_designs(Arc::clone(&self.designs));
         let mut encoder = VideoEncoder::new(s).map_err(|e| Stop::Failed(e.to_string()))?;
         // Exact for every rate in `FRAME_RATES` (the tick rate is divisible by 24, 25, 30, 50, 60).
         let tick = Ticks(TICKS_PER_SECOND / u64::from(s.fps.max(1)));
