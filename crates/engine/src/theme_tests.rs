@@ -568,3 +568,91 @@ fn a_packs_background_video_plays_in_its_design() {
     assert!(differ(&early, &later) > all / 10, "and plays");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// JetBrains Mono with its family renamed to `to` (14 letters, so every offset holds), in the
+/// Mac and Windows name records: a font no one bundles.
+fn renamed_mono(to: &str) -> Vec<u8> {
+    let from = "JetBrains Mono";
+    assert_eq!(from.len(), to.len());
+    let swap = |bytes: &mut Vec<u8>, a: &[u8], b: &[u8]| {
+        let mut i = 0;
+        while i + a.len() <= bytes.len() {
+            if &bytes[i..i + a.len()] == a {
+                bytes[i..i + a.len()].copy_from_slice(b);
+                i += a.len();
+            } else {
+                i += 1;
+            }
+        }
+    };
+    let wide = |s: &str| s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<u8>>();
+    let mono = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    let mut out = std::fs::read(mono).unwrap();
+    swap(&mut out, from.as_bytes(), to.as_bytes());
+    swap(&mut out, &wide(from), &wide(to));
+    out
+}
+
+/// TP4a: a pack's font is registered when themes load and its designs draw the theme's
+/// `type.display` with it; the "isn't bundled" warnings say what draws with what.
+#[test]
+fn a_packs_font_draws_its_designs_headline() {
+    use assetcraft_titles::{FillValue, Slot};
+    let (_, dir) = session("fonts");
+    let pack = dir.join("Themes").join("acme-type");
+    for f in ["designs", "fonts"] {
+        std::fs::create_dir_all(pack.join(f)).unwrap();
+    }
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    std::fs::write(pack.join("designs/banner.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(pack.join("fonts/AcmePackMono.ttf"), renamed_mono("Acme Pack Mono")).unwrap();
+    // A TrueType header and nothing after it: passes the load check, has no font in it.
+    std::fs::write(pack.join("fonts/broken.ttf"), b"\0\x01\0\0 not a font").unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-type".into();
+    t.name = "Acme Type".into();
+    t.type_.display.family = "Acme Pack Mono".into();
+    t.type_.body.family = "Brand Serif".into();
+    t.designs = [("banner".to_string(), "designs/banner.ectemplate".to_string())].into_iter().collect();
+    let a = |path: &str| assetcraft_storyboard::ThemeAsset {
+        role: "font".into(),
+        path: path.into(),
+        license: "OFL-1.1".into(),
+        credit: None,
+    };
+    t.assets = vec![a("fonts/broken.ttf"), a("fonts/AcmePackMono.ttf")];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let loaded = &s.loaded_themes()[0];
+    let has = |text: &str| loaded.warnings.iter().any(|w| w == text);
+    assert!(has("asset fonts/broken.ttf: no font in the file; not used"), "{:?}", loaded.warnings);
+    assert!(
+        has("Acme Pack Mono is the pack's font: its designs use it; built-in looks use Inter for now"),
+        "{:?}",
+        loaded.warnings
+    );
+    assert!(
+        has("Brand Serif isn't bundled yet: titles use Inter for now (the pack's fonts: Acme Pack Mono)"),
+        "{:?}",
+        loaded.warnings
+    );
+    assert!(assetcraft_titles::has_family("Acme Pack Mono"));
+    // The banner's headline draws with the pack's font (JetBrains Mono's glyphs), not Inter.
+    let designs = s.theme_designs();
+    let d = designs.packs.iter().find(|d| d.role == "banner").expect("the banner");
+    let Some(FillValue::Font { family, style }) = d.fill.get(Slot::HeadlineFont) else { panic!("{:?}", d.fill) };
+    assert_eq!(family, "Acme Pack Mono");
+    let with = |family: &str| {
+        let fill = d.fill.clone().text(Slot::Headline, "ISTANBUL").font(Slot::HeadlineFont, family, style);
+        d.design.render(&fill, 3.0, 0.25).unwrap()
+    };
+    assert_eq!(with("Acme Pack Mono"), with("JetBrains Mono"));
+    assert_ne!(with("Acme Pack Mono"), with("Inter"));
+    // Reloading registers nothing new.
+    let faces = effectcraft_text::fonts::all_faces().len();
+    let mut s = s;
+    s.execute("storyboard.themes", &json!({ "reload": true })).unwrap();
+    assert_eq!(effectcraft_text::fonts::all_faces().len(), faces);
+    let _ = std::fs::remove_dir_all(&dir);
+}

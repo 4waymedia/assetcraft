@@ -61,6 +61,8 @@ effectcraft-render = { git = "https://github.com/storytold/effectcraft", tag = "
 effectcraft-keyframe = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-time = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 effectcraft-color = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
+# The font database designs draw with: a pack's own fonts are registered in it (theme-packs.md, TP4a).
+effectcraft-text = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 # The stored-ZIP reader for `.ectemplate` files (until R-U6 gives templates a crate of their own).
 effectcraft-lottie = { git = "https://github.com/storytold/effectcraft", tag = "v0.24.1" }
 # FilmCraft v0.20.1 (cedf0c9): the cut tools' edit algebra (roll, trim, split; cut-editing.md C1-C4).

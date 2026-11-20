@@ -19,6 +19,7 @@ use effectcraft_project::{FootageKind, ItemId, ItemKind, Project};
 use effectcraft_render::{RenderOpts, Renderer};
 use effectcraft_time::Tick;
 
+pub use fonts::{FontFace, has_family, register_font};
 pub use picture::{Fit, Movie, MovieFrames, Picture};
 
 /// Largest template file read (templates can embed footage; packs keep theirs small).
@@ -540,11 +541,14 @@ impl Design {
 }
 
 pub mod builtin;
+pub mod fonts;
 pub mod frames;
 pub mod picture;
 
 #[cfg(test)]
 mod builtin_tests;
+#[cfg(test)]
+mod fonts_tests;
 #[cfg(test)]
 mod frames_tests;
 #[cfg(test)]

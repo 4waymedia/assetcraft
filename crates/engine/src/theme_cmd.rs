@@ -333,6 +333,7 @@ impl Session {
     fn pack_fill(&self, u: &mut UserTheme) -> assetcraft_titles::Fill {
         use assetcraft_titles::Slot;
         use std::hash::{Hash, Hasher};
+        self.pack_fonts(u);
         let mut fill = theme_fill(&u.theme);
         for a in &u.assets {
             let slot = match a.role.as_str() {
@@ -370,6 +371,53 @@ impl Session {
             }
         }
         fill
+    }
+
+    /// Register `u`'s fonts (TP4a) for its designs: each `font` asset is read (within the cap)
+    /// and added to the designs' font database; one with no font in it is a warning. The
+    /// theme's "isn't bundled" warning for a family the pack brings says what draws with it now;
+    /// for a family it doesn't bring, it names the families the pack has.
+    fn pack_fonts(&self, u: &mut UserTheme) {
+        let mut families: Vec<String> = Vec::new();
+        for a in u.assets.iter().filter(|a| a.role == "font") {
+            let name = u.pack.as_deref().and_then(|p| a.path.strip_prefix(p).ok()).unwrap_or(&a.path);
+            let name = name.to_string_lossy().replace('\\', "/");
+            let faces = self
+                .services
+                .read_head(&a.path, assetcraft_titles::fonts::MAX_FONT_BYTES + 1)
+                .map_err(|e| e.to_string())
+                .and_then(assetcraft_titles::register_font);
+            match faces {
+                Ok(faces) => {
+                    for f in faces {
+                        if !families.iter().any(|g| g.eq_ignore_ascii_case(&f.family)) {
+                            families.push(f.family);
+                        }
+                    }
+                }
+                Err(e) => u.warnings.push(format!("asset {name}: {e}; not used")),
+            }
+        }
+        if families.is_empty() {
+            return;
+        }
+        for face in [&u.theme.type_.display, &u.theme.type_.body] {
+            let unbundled = format!(
+                "{} isn't bundled yet: titles use {} for now",
+                face.family,
+                assetcraft_storyboard::BUNDLED_FONTS[0]
+            );
+            let Some(w) = u.warnings.iter_mut().find(|w| **w == unbundled) else { continue };
+            *w = if families.iter().any(|f| f.eq_ignore_ascii_case(&face.family)) {
+                format!(
+                    "{} is the pack's font: its designs use it; built-in looks use {} for now",
+                    face.family,
+                    assetcraft_storyboard::BUNDLED_FONTS[0]
+                )
+            } else {
+                format!("{unbundled} (the pack's fonts: {})", families.join(", "))
+            };
+        }
     }
 
     /// A pack's video as a design's movie (TP3b-2): opened once here to check it plays and to

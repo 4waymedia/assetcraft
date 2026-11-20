@@ -37,6 +37,7 @@ serde_json = { workspace = true }
 effectcraft-project = { workspace = true }
 effectcraft-color = { workspace = true }
 effectcraft-time = { workspace = true }
+effectcraft-text = { workspace = true }
 
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
