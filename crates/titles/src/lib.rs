@@ -19,7 +19,7 @@ use effectcraft_project::{FootageKind, ItemId, ItemKind, Project};
 use effectcraft_render::{RenderOpts, Renderer};
 use effectcraft_time::Tick;
 
-pub use picture::{Fit, Picture};
+pub use picture::{Fit, Movie, MovieFrames, Picture};
 
 /// Largest template file read (templates can embed footage; packs keep theirs small).
 pub const MAX_FILE: usize = 64 << 20;
@@ -195,6 +195,8 @@ pub enum FillValue {
     },
     /// A picture for a Media control (TP3b), shown in place of the designer's footage.
     Picture(Picture),
+    /// A movie for a Media control (TP3b-2), looped over the design.
+    Movie(Movie),
 }
 
 /// The values AssetCraft fills a design with: the clip's words and the theme's colours and fonts.
@@ -225,6 +227,10 @@ impl Fill {
     /// `slot` takes a picture (a Media control).
     pub fn picture(self, slot: Slot, picture: Picture) -> Self {
         self.set(slot, FillValue::Picture(picture))
+    }
+    /// `slot` takes a movie (a Media control).
+    pub fn movie(self, slot: Slot, movie: Movie) -> Self {
+        self.set(slot, FillValue::Movie(movie))
     }
     /// The value `slot` takes, if any.
     pub fn get(&self, slot: Slot) -> Option<&FillValue> {
@@ -421,21 +427,40 @@ impl Design {
         out
     }
 
-    /// The pictures `fill` gives this design's Media controls: each control, the footage it
-    /// replaces (its placeholder, whose size the picture takes), the picture and its fit.
-    fn media(&self, fill: &Fill) -> Vec<(u64, effectcraft_project::Footage, Picture, Fit)> {
+    /// The pictures `fill` gives this design's Media controls at `secs`: each control, the
+    /// footage it replaces (its placeholder, whose size the picture takes), the picture (a
+    /// movie's frame at that time, about the size it draws at `scale`) and its fit. A movie
+    /// frame that can't be read leaves its placeholder empty.
+    fn media(&self, fill: &Fill, secs: f64, scale: f64) -> Vec<(u64, effectcraft_project::Footage, Picture, Fit)> {
         let Some(eg) = self.project.comp(self.comp).and_then(|c| c.essential.as_ref()) else { return Vec::new() };
         let mut out = Vec::new();
         for control in self.controls() {
             let Some(slot) = control.slot.filter(|s| s.kind() == ControlKind::Media) else { continue };
-            let Some(FillValue::Picture(picture)) = fill.get(slot) else { continue };
+            let value = fill.get(slot);
+            if !matches!(value, Some(FillValue::Picture(_) | FillValue::Movie(_))) {
+                continue;
+            }
             let Some(ctl) = eg.resolve(control.id) else { continue };
             let placeholder = source_media(&self.project, self.comp, ctl).and_then(|i| self.project.item(i));
             let Some(ItemKind::Footage(f)) = placeholder.map(|i| &i.kind) else { continue };
             if f.width == 0 || f.height == 0 {
                 continue;
             }
-            out.push((control.id, f.clone(), picture.clone(), slot.fit()));
+            let picture = match value {
+                Some(FillValue::Picture(p)) => p.clone(),
+                Some(FillValue::Movie(m)) => {
+                    // The size it draws at: the placeholder as rendered, met by the slot's fit;
+                    // never past the movie's own size.
+                    let (mw, mh) = m.size();
+                    let (kx, ky) = (f64::from(f.width) / f64::from(mw), f64::from(f.height) / f64::from(mh));
+                    let k = scale * if slot.fit() == Fit::Cover { kx.max(ky) } else { kx.min(ky) };
+                    let side = ((f64::from(mw.max(mh)) * k).ceil() as u32).min(mw.max(mh));
+                    let Some(p) = m.frame_at(secs, side) else { continue };
+                    p
+                }
+                _ => continue,
+            };
+            out.push((control.id, f.clone(), picture, slot.fit()));
         }
         out
     }
@@ -468,7 +493,7 @@ impl Design {
         let secs = if secs.is_finite() { secs.clamp(0.0, (self.seconds - self.frame_seconds).max(0.0)) } else { 0.0 };
         let scale = if scale.is_finite() && scale > 0.0 { scale.min(4.0) } else { 1.0 };
         let mut overrides = self.overrides(fill);
-        let media = self.media(fill);
+        let media = self.media(fill, secs, scale);
         let image = catch_unwind(AssertUnwindSafe(|| {
             // Each picture becomes a footage item the size of the placeholder it replaces, and
             // its Media control's override names that item (EffectCraft's Media Replacement).

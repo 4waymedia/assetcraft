@@ -428,12 +428,18 @@ fn a_packs_assets_are_checked_listed_and_imported() {
 /// A 320 × 180 card with a dark backdrop and a 100 × 100 `Logo` placeholder in the middle,
 /// exposed as a Media control (as a designer would make one in EffectCraft).
 fn logo_card() -> assetcraft_titles::Design {
+    media_card("Logo", 100, 100)
+}
+
+/// A 320 × 180 card with a dark backdrop and a `w × h` placeholder in the middle, exposed as
+/// the Media control `name`.
+fn media_card(name: &str, w: u32, h: u32) -> assetcraft_titles::Design {
     use effectcraft_color::Label;
     use effectcraft_project::essential::{EgControl, EgKind, EssentialGraphics};
     use effectcraft_project::{Comp, Footage, FootageKind, ItemKind, LayerSource, Project, Solid, build};
     let mut p = Project::default();
     let comp = Comp::new(320, 180, effectcraft_time::FrameRate::FPS_30, effectcraft_time::Tick::from_seconds_f64(2.0));
-    let cid = p.add_item("Logo Card", Label::None, None, ItemKind::Comp(comp.clone().into()));
+    let cid = p.add_item("Media Card", Label::None, None, ItemKind::Comp(comp.clone().into()));
     let sid = p.add_item(
         "Dark",
         Label::None,
@@ -441,22 +447,22 @@ fn logo_card() -> assetcraft_titles::Design {
         ItemKind::Solid(Solid { color: [0.05, 0.05, 0.08], width: 320, height: 180, pixel_aspect: 1.0 }),
     );
     let placeholder = Footage {
-        path: "logo.png".into(),
+        path: "placeholder.png".into(),
         kind: FootageKind::Still,
-        width: 100,
-        height: 100,
+        width: w,
+        height: h,
         has_video: true,
         ..Default::default()
     };
-    let fid = p.add_item("logo.png", Label::None, None, ItemKind::Footage(placeholder));
+    let fid = p.add_item("placeholder.png", Label::None, None, ItemKind::Footage(placeholder));
     let dark = build::layer(&mut p, &comp, "Dark", LayerSource::Solid { item: sid }, (320, 180), None);
-    let logo = build::layer(&mut p, &comp, "Logo", LayerSource::Footage { item: fid }, (100, 100), None);
+    let logo = build::layer(&mut p, &comp, name, LayerSource::Footage { item: fid }, (w, h), None);
     let controls =
-        vec![EgControl { id: p.alloc(), name: "Logo".into(), kind: EgKind::Media { layer: logo.id }, as_type: None }];
+        vec![EgControl { id: p.alloc(), name: name.into(), kind: EgKind::Media { layer: logo.id }, as_type: None }];
     if let Some(c) = p.comp_mut(cid) {
         c.layers.push(logo);
         c.layers.push(dark);
-        c.essential = Some(EssentialGraphics { name: "Logo Card".into(), controls });
+        c.essential = Some(EssentialGraphics { name: "Media Card".into(), controls });
     }
     assetcraft_titles::Design::from_project(p, cid).unwrap()
 }
@@ -506,5 +512,59 @@ fn a_packs_logo_fills_its_designs_media_control() {
     assert_ne!(with, bare);
     let changed = with.rgba.as_chunks::<4>().0.iter().zip(bare.rgba.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
     assert!(changed > 200 && changed <= 100 * 100, "the scythe, only inside the 100 × 100 placeholder: {changed}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// TP3b-2: a pack's background video plays in its card's Background Video placeholder, read
+/// as the card draws; one that can't be played is a warning.
+#[test]
+fn a_packs_background_video_plays_in_its_design() {
+    use assetcraft_titles::{FillValue, Slot};
+    let (_, dir) = session("movies");
+    let pack = dir.join("Themes").join("acme-video");
+    for f in ["designs", "video"] {
+        std::fs::create_dir_all(pack.join(f)).unwrap();
+    }
+    std::fs::write(pack.join("designs/card.ectemplate"), media_card("Background Video", 320, 180).to_template())
+        .unwrap();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    std::fs::copy(lib.join("environments/snow_clearing_flythrough.mp4"), pack.join("video/loop.mp4")).unwrap();
+    // An MP4 header and nothing after it: passes the load check, can't be played.
+    std::fs::write(pack.join("video/broken.mp4"), b"\0\0\0\x18ftypisom not a movie").unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-video".into();
+    t.name = "Acme Video".into();
+    t.designs = [("card".to_string(), "designs/card.ectemplate".to_string())].into_iter().collect();
+    let a = |path: &str| assetcraft_storyboard::ThemeAsset {
+        role: "backgroundVideo".into(),
+        path: path.into(),
+        license: "own".into(),
+        credit: None,
+    };
+    t.assets = vec![a("video/broken.mp4"), a("video/loop.mp4")];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let loaded = &s.loaded_themes()[0];
+    assert!(
+        loaded.warnings.iter().any(|w| w.contains("video/broken.mp4") && w.contains("played")),
+        "{:?}",
+        loaded.warnings
+    );
+    let designs = s.theme_designs();
+    let card = designs.packs.iter().find(|d| d.role == "card").expect("the card");
+    let Some(FillValue::Movie(movie)) = card.fill.get(Slot::BackgroundVideo) else { panic!("{:?}", card.fill) };
+    let seconds = assetcraft_media::seconds(&pack.join("video/loop.mp4")).unwrap();
+    assert!((movie.seconds() - seconds).abs() < 1e-9 && movie.size().0 > 0);
+    // Drawn: the video covers the card, and it moves (a flythrough).
+    let bare = card.design.render(&crate::theme_cmd::theme_fill(&loaded.theme), 0.5, 0.5).unwrap();
+    let early = card.design.render(&card.fill, 0.2, 0.5).unwrap();
+    let later = card.design.render(&card.fill, 1.8, 0.5).unwrap();
+    let differ = |a: &assetcraft_titles::Frame, b: &assetcraft_titles::Frame| {
+        a.rgba.as_chunks::<4>().0.iter().zip(b.rgba.as_chunks::<4>().0).filter(|(x, y)| x != y).count()
+    };
+    let all = (bare.width * bare.height) as usize;
+    assert!(differ(&early, &bare) > all * 9 / 10, "the video covers the backdrop");
+    assert!(differ(&early, &later) > all / 10, "and plays");
     let _ = std::fs::remove_dir_all(&dir);
 }

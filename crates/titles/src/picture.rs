@@ -138,3 +138,73 @@ impl FootageSource for Pictures {
         self.items.iter().find(|(i, _)| *i == item).map(|(_, img)| Arc::clone(img))
     }
 }
+
+/// A movie's frames for a Media control (TP3b-2): read by the caller's decoder (this crate
+/// decodes nothing). Called from render threads, so it may block; it must be safe to call from
+/// several at once.
+pub trait MovieFrames: Send + Sync {
+    /// The frame `secs` into the movie (within `0..seconds`), its longest side about `side`
+    /// pixels; `None` when it can't be read.
+    fn frame(&self, secs: f64, side: u32) -> Option<Picture>;
+}
+
+/// A movie (a pack's background video): its frames, size and length. It loops over a design
+/// longer than it. `id` names it (the caller's hash of its file).
+#[derive(Clone)]
+pub struct Movie {
+    id: u64,
+    width: u32,
+    height: u32,
+    seconds: f64,
+    frames: Arc<dyn MovieFrames>,
+}
+
+impl std::fmt::Debug for Movie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Movie(#{:016x}, {}x{}, {:.3}s)", self.id, self.width, self.height, self.seconds)
+    }
+}
+
+impl PartialEq for Movie {
+    fn eq(&self, other: &Self) -> bool {
+        (self.id, self.width, self.height) == (other.id, other.width, other.height)
+            && self.seconds.to_bits() == other.seconds.to_bits()
+    }
+}
+
+impl Movie {
+    /// A movie `width × height`, `seconds` long; `None` for a side of 0 or over [`MAX_SIDE`],
+    /// or a length that isn't a positive number.
+    pub fn new(id: u64, width: u32, height: u32, seconds: f64, frames: Arc<dyn MovieFrames>) -> Option<Movie> {
+        let sides = 1..=MAX_SIDE;
+        if !sides.contains(&width) || !sides.contains(&height) || !seconds.is_finite() || seconds <= 0.0 {
+            return None;
+        }
+        Some(Movie { id, width, height, seconds, frames })
+    }
+
+    /// Its id.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Its size in pixels.
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Its length in seconds.
+    pub fn seconds(&self) -> f64 {
+        self.seconds
+    }
+
+    /// The time in the movie shown `secs` into the design: looped.
+    pub fn time_at(&self, secs: f64) -> f64 {
+        if secs.is_finite() { secs.max(0.0) % self.seconds } else { 0.0 }
+    }
+
+    /// The frame shown `secs` into the design, its longest side about `side`.
+    pub(crate) fn frame_at(&self, secs: f64, side: u32) -> Option<Picture> {
+        self.frames.frame(self.time_at(secs), side.clamp(16, MAX_SIDE))
+    }
+}

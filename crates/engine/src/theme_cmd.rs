@@ -72,6 +72,40 @@ fn looks_like(ext: &str, head: &[u8]) -> bool {
     }
 }
 
+/// A pack video's frames for its designs (TP3b-2), read on the render thread that asks. Each
+/// reader decodes one frame at a time, so a few are kept: the Viewer's render threads each take
+/// one instead of waiting on another's decode.
+struct PackMovie {
+    path: PathBuf,
+    id: u64,
+    readers: std::sync::Mutex<Vec<assetcraft_media::VideoReader>>,
+}
+
+/// Readers a pack video keeps open (the Viewer's design render threads, at most).
+const MOVIE_READERS: usize = 4;
+
+impl assetcraft_titles::MovieFrames for PackMovie {
+    fn frame(&self, secs: f64, side: u32) -> Option<assetcraft_titles::Picture> {
+        let lock = || self.readers.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let taken = lock().pop();
+        let mut reader = match taken {
+            Some(r) => r,
+            None => assetcraft_media::VideoReader::open(&self.path).ok()?,
+        };
+        let frame = reader.frame(secs, side);
+        {
+            let mut kept = lock();
+            if kept.len() < MOVIE_READERS {
+                kept.push(reader);
+            }
+        }
+        let f = frame.ok()?;
+        // Each frame its own picture: the movie's id and the frame's number and size.
+        let id = self.id ^ f.index.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (u64::from(f.width) << 32);
+        assetcraft_titles::Picture::new(id, f.width, f.height, f.rgba.clone())
+    }
+}
+
 /// A design in a theme pack that opened.
 #[derive(Debug, Clone)]
 pub struct PackDesign {
@@ -305,6 +339,7 @@ impl Session {
                 "logo" => Slot::Logo,
                 "texture" => Slot::Texture,
                 "backgroundImage" => Slot::BackgroundImage,
+                "backgroundVideo" => Slot::BackgroundVideo,
                 _ => continue,
             };
             if fill.get(slot).is_some() {
@@ -313,6 +348,13 @@ impl Session {
             // As theme.json names it (`images/logo.png`).
             let name = u.pack.as_deref().and_then(|p| a.path.strip_prefix(p).ok()).unwrap_or(&a.path);
             let name = name.to_string_lossy().replace('\\', "/");
+            if slot == Slot::BackgroundVideo {
+                match self.pack_movie(&a.path) {
+                    Ok(m) => fill = fill.movie(slot, m),
+                    Err(e) => u.warnings.push(format!("asset {name}: can't be played ({e}); not used")),
+                }
+                continue;
+            }
             let key = assetcraft_thumbs::ThumbKey { path: a.path.clone(), max_side: PICTURE_SIDE, modified: None };
             match assetcraft_thumbs::render(self.services.as_ref(), &key) {
                 Ok(t) => {
@@ -328,6 +370,24 @@ impl Session {
             }
         }
         fill
+    }
+
+    /// A pack's video as a design's movie (TP3b-2): opened once here to check it plays and to
+    /// read its size and length; its frames are read as designs draw ([`PackMovie`]). Named by
+    /// its path, length, size and first bytes, so a replaced file is a new movie in the Viewer's
+    /// cache.
+    fn pack_movie(&self, path: &std::path::Path) -> Result<assetcraft_titles::Movie, String> {
+        use std::hash::{Hash, Hasher};
+        let reader = assetcraft_media::VideoReader::open(path)?;
+        let seconds = assetcraft_media::seconds(path)?;
+        let (width, height) = reader.size();
+        let head = self.services.read_head(path, 64 << 10).map_err(|e| e.to_string())?;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (path, seconds.to_bits(), width, height, &head).hash(&mut h);
+        let frames =
+            PackMovie { path: path.to_path_buf(), id: h.finish(), readers: std::sync::Mutex::new(vec![reader]) };
+        assetcraft_titles::Movie::new(h.finish(), width, height, seconds, std::sync::Arc::new(frames))
+            .ok_or_else(|| format!("an unusable size ({width} × {height}) or length"))
     }
 
     fn pack_assets(&self, pack: &std::path::Path, theme: &Theme, warnings: &mut Vec<String>) -> Vec<PackAsset> {
