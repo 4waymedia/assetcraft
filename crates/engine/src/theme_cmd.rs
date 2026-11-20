@@ -134,6 +134,31 @@ pub(crate) struct ThemeLibrary {
     /// The Themes folder's signature when these were loaded (TP4c-2): a reload `ifChanged`
     /// skips when it's the same.
     signature: u64,
+    /// The loaded packs' sounds (TP5), for the Cut's mix.
+    sounds: std::sync::Arc<PackSounds>,
+}
+
+/// The loaded theme packs' sounds by theme id (TP5): what a title in a pack's theme plays.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackSounds {
+    /// `(theme id, file)`: the pack's `titleSound`, played from the start of each of its titles
+    /// (TP5a).
+    pub title: Vec<(String, PathBuf)>,
+}
+
+impl PackSounds {
+    /// Theme `id`'s title sound, if its pack has one.
+    pub fn title_sound(&self, id: &str) -> Option<&std::path::Path> {
+        self.title.iter().find(|(t, _)| t == id).map(|(_, p)| p.as_path())
+    }
+
+    /// The first asset of `role` in each pack, by theme id.
+    fn first(themes: &[UserTheme], role: &str) -> Vec<(String, PathBuf)> {
+        themes
+            .iter()
+            .filter_map(|u| u.assets.iter().find(|a| a.role == role).map(|a| (u.theme.id.clone(), a.path.clone())))
+            .collect()
+    }
 }
 
 /// The style name a `type` weight asks for (`700` → `Bold`): what a design's font control and a
@@ -227,13 +252,19 @@ impl Session {
             .collect();
         let fonts = themes.iter().zip(display_fonts).filter_map(|(u, f)| Some((u.theme.id.clone(), f?))).collect();
         let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills, fonts };
-        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set), signature };
+        let sounds = std::sync::Arc::new(PackSounds { title: PackSounds::first(&themes, "titleSound") });
+        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set), signature, sounds };
     }
 
     /// Every design a clip can draw through: the packs' card and banner designs (TP2a-3), the
     /// built-in banners and each theme's fill (TP2b-2).
     pub fn theme_designs(&self) -> std::sync::Arc<assetcraft_animatic::DesignSet> {
         std::sync::Arc::clone(&self.themes.designs)
+    }
+
+    /// The loaded packs' sounds (TP5), as the Cut's mix plays them.
+    pub fn pack_sounds(&self) -> std::sync::Arc<PackSounds> {
+        std::sync::Arc::clone(&self.themes.sounds)
     }
 
     /// The loaded themes' looks by id: what a clip naming one draws (TP2a-2).

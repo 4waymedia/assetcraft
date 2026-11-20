@@ -130,7 +130,7 @@ impl Session {
     fn program(&mut self) -> Option<Arc<Program>> {
         let (path, edit_now) = self.board_track()?;
         let board = self.boards.board.clone()?;
-        let wanted = crate::export_job::voices(&board);
+        let wanted = crate::export_job::voices(&board, &self.pack_sounds());
         let mut layers = Vec::new();
         // The song level (V1) is part of the key, so a change rebuilds the program.
         let level = board.track.as_ref().map_or(0, |t| t.level_db);

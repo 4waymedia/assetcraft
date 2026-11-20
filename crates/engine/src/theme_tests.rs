@@ -859,3 +859,48 @@ fn a_new_storyboards_titles_can_take_a_user_theme() {
     assert!(texts.iter().all(|c| c.text_style.theme_id.map(|u| u.as_str().to_owned()) == Some("acme-titles".into())));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP5a: a pack's `titleSound` plays from the start of each title in its theme (title cards
+/// and overlays), for at most the title's length, in playback and the export alike; titles in a
+/// built-in theme play none.
+#[test]
+fn a_packs_title_sound_plays_under_its_titles() {
+    let (_, dir) = session("title-sound");
+    let pack = dir.join("Themes").join("acme-sound");
+    std::fs::create_dir_all(pack.join("sounds")).unwrap();
+    std::fs::write(pack.join("sounds/sting.wav"), crate::audio_tests::wav(2)).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-sound".into();
+    t.name = "Acme Sound".into();
+    t.assets = vec![assetcraft_storyboard::ThemeAsset {
+        role: "titleSound".into(),
+        path: "sounds/sting.wav".into(),
+        license: "own".into(),
+        credit: None,
+    }];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let sting = pack.join("sounds/sting.wav");
+    assert_eq!(s.pack_sounds().title_sound("acme-sound"), Some(sting.as_path()));
+    // Built-in theme titles: no sting, and the sample has no song, so the export has no audio.
+    run(&mut s, "storyboard.new", json!({ "sample": true }));
+    assert!(crate::export_job::voices(s.storyboard().unwrap(), &s.pack_sounds()).is_empty());
+    let out = std::env::temp_dir().join(format!("assetcraft-sting-{}.mp4", std::process::id()));
+    let plan =
+        |s: &mut Session| run(s, "storyboard.exportVideo", json!({ "path": out.to_string_lossy(), "dryRun": true }));
+    assert_eq!(plan(&mut s)["audio"], false);
+    // In the pack's theme: one sting per title, at its start, no longer than it.
+    run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": "acme-sound" }));
+    let board = s.storyboard().unwrap().clone();
+    let voices = crate::export_job::voices(&board, &s.pack_sounds());
+    let titles: Vec<_> = board.clips.iter().zip(board.starts()).filter(|(c, _)| c.text_kind().is_some()).collect();
+    assert_eq!(voices.len(), titles.len());
+    for (v, (c, start)) in voices.iter().zip(&titles) {
+        assert_eq!(std::path::Path::new(&v.path), sting.as_path());
+        assert!((v.start - start.as_secs_f64()).abs() < 1e-9 && (v.length - c.duration.as_secs_f64()).abs() < 1e-9);
+        assert_eq!((v.music_db, v.voice_db, v.speech), (0, 0, false));
+    }
+    assert_eq!(plan(&mut s)["audio"], true, "the export mixes the stings");
+    let _ = std::fs::remove_dir_all(&dir);
+}

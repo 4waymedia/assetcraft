@@ -281,7 +281,8 @@ pub(crate) fn plan(s: &Session, p: &Value) -> Result<ExportPlan, CmdError> {
         return Err(CmdError::BadParams(format!("the Cut is longer than {} hours", MAX_SECONDS / 3600.0)));
     }
     let frames = (seconds * f64::from(fps)).ceil() as usize;
-    let audio = board.track.as_ref().is_some_and(|t| Path::new(&t.id.0).is_absolute()) || !voices(board).is_empty();
+    let audio = board.track.as_ref().is_some_and(|t| Path::new(&t.id.0).is_absolute())
+        || !voices(board, &s.pack_sounds()).is_empty();
     let rate = s.exporter.rate().unwrap_or(ESTIMATE_BYTES_PER_SEC_1080P24);
     Ok(ExportPlan { rate, path, container, settings, frames, seconds, audio })
 }
@@ -327,6 +328,7 @@ pub(crate) fn sb_export_video(s: &mut Session, p: &Value) -> CmdResult {
         decode: s.decode_options(),
         user_looks: s.user_looks().clone(),
         designs: s.theme_designs(),
+        sounds: s.pack_sounds(),
         progress: Arc::clone(&s.exporter.progress),
         cancel: Arc::clone(&s.exporter.cancel),
         rate: Arc::clone(&s.exporter.rate),
@@ -406,6 +408,8 @@ struct Job {
     user_looks: assetcraft_storyboard::UserLooks,
     /// The loaded packs' card and banner designs (TP2a-3).
     designs: Arc<assetcraft_animatic::DesignSet>,
+    /// The loaded packs' sounds (TP5): title stings in the mix.
+    sounds: Arc<crate::theme_cmd::PackSounds>,
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
     rate: Arc<Mutex<Option<f64>>>,
@@ -539,7 +543,7 @@ impl Job {
             }
             None => None,
         };
-        let voices = voices(&self.board);
+        let voices = voices(&self.board, &self.sounds);
         if music.is_none() && voices.is_empty() {
             return Ok((None, Vec::new()));
         }
@@ -679,8 +683,8 @@ pub(crate) fn title_dips(board: &Storyboard) -> Vec<assetcraft_audio::Dip> {
 /// a video with "Mix audio in", each with a rooted path (`has_root`, as
 /// the track check in `audio_out`: on Windows a path like `/clips/a.mp4` has a root but is not
 /// "absolute").
-pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
-    board
+pub(crate) fn voices(board: &Storyboard, sounds: &crate::theme_cmd::PackSounds) -> Vec<Voice> {
+    let mut out: Vec<Voice> = board
         .scenes
         .iter()
         .filter_map(|sc| {
@@ -707,5 +711,33 @@ pub(crate) fn voices(board: &Storyboard) -> Vec<Voice> {
             voice_db: v.voice_db,
             speech: true,
         }))
+        .collect();
+    out.extend(title_sounds(board, sounds));
+    out
+}
+
+/// TP5a: each text (a title card, a clip's overlay) in a loaded pack theme with a `titleSound`
+/// plays it from the clip's start, for at most the clip's length, over the music as it is (the
+/// title dip already softens it under a card).
+pub(crate) fn title_sounds(board: &Storyboard, sounds: &crate::theme_cmd::PackSounds) -> Vec<Voice> {
+    if sounds.title.is_empty() {
+        return Vec::new();
+    }
+    board
+        .clips
+        .iter()
+        .zip(board.starts())
+        .filter(|(c, _)| c.text_kind().is_some())
+        .filter_map(|(c, start)| {
+            let path = sounds.title_sound(c.text_style.theme_id?.as_str())?;
+            Some(Voice {
+                path: path.to_string_lossy().into_owned(),
+                start: start.as_secs_f64(),
+                length: c.duration.as_secs_f64(),
+                music_db: 0,
+                voice_db: 0,
+                speech: false,
+            })
+        })
         .collect()
 }

@@ -5,7 +5,7 @@ use serde_json::json;
 use std::time::Duration;
 
 /// A 16-bit mono WAV at 8 kHz: `secs` seconds of a quiet square wave.
-fn wav(secs: u32) -> Vec<u8> {
+pub(crate) fn wav(secs: u32) -> Vec<u8> {
     let rate = 8_000u32;
     let frames = rate * secs;
     let data = frames * 2;
