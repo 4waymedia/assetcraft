@@ -763,15 +763,90 @@ impl TextPosition {
     }
 }
 
+/// A user theme's id (`a`–`z`, `0`–`9`, `-`; 1–40 bytes, the theme file's own rule), small and
+/// `Copy` so a clip's [`TextStyle`] stays `Copy` (themes 1b-ii, theme-packs TP2a-2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ThemeId {
+    len: u8,
+    bytes: [u8; 40],
+}
+
+impl ThemeId {
+    /// `id` as a theme id, or `None` when it breaks the id rule.
+    pub fn new(id: &str) -> Option<ThemeId> {
+        let ok = !id.is_empty()
+            && id.len() <= 40
+            && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !ok {
+            return None;
+        }
+        let mut bytes = [0u8; 40];
+        bytes[..id.len()].copy_from_slice(id.as_bytes());
+        Some(ThemeId { len: id.len() as u8, bytes })
+    }
+
+    /// The id.
+    pub fn as_str(&self) -> &str {
+        // Only ASCII is ever stored (see `new`).
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Debug for ThemeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ThemeId({:?})", self.as_str())
+    }
+}
+
+impl Serialize for ThemeId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ThemeId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        ThemeId::new(&s).ok_or_else(|| serde::de::Error::custom("a theme id is 1–40 of a–z, 0–9 and -"))
+    }
+}
+
+/// The looks of the user's loaded themes by id: what a clip naming one of them draws. The
+/// session builds it when themes load; the compositor and Viewer read it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UserLooks {
+    looks: Vec<(ThemeId, Look)>,
+}
+
+impl UserLooks {
+    /// Looks for these `(id, look)` pairs (ids that break the rule are skipped).
+    pub fn new<'a>(themes: impl IntoIterator<Item = (&'a str, Look)>) -> UserLooks {
+        UserLooks { looks: themes.into_iter().filter_map(|(id, look)| ThemeId::new(id).map(|i| (i, look))).collect() }
+    }
+
+    /// The look for `id`, if that theme is loaded.
+    pub fn get(&self, id: ThemeId) -> Option<&Look> {
+        self.looks.iter().find(|(i, _)| *i == id).map(|(_, l)| l)
+    }
+
+    /// Whether `id` is loaded.
+    pub fn contains(&self, id: ThemeId) -> bool {
+        self.get(id).is_some()
+    }
+}
+
 /// How a clip's text looks: theme, timing, and (for an Overlay) position. The timing fields
 /// are the clip's own choices; one left empty follows the theme ([`Look::motion`], themes 1g),
 /// so changing the theme changes the moves too. [`TextStyle::timing`] resolves them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TextStyle {
-    /// Theme.
+    /// Theme: a built-in, and the fallback when `theme_id` names one that isn't loaded.
     #[serde(default)]
     pub theme: TextTheme,
+    /// A user theme by id (TP2a-2); `None` = the built-in `theme`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_id: Option<ThemeId>,
     /// The in; `None` = the theme's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<TextAnimation>,
@@ -841,9 +916,25 @@ impl TextStyle {
         *self == TextStyle::default()
     }
 
-    /// The moves this text makes: each of the clip's own choices, or else its theme's.
+    /// What this text draws with: its user theme's look when that is loaded, else its built-in
+    /// theme's.
+    pub fn look_with(&self, user: &UserLooks) -> Look {
+        self.theme_id.and_then(|id| user.get(id).copied()).unwrap_or_else(|| self.theme.look())
+    }
+
+    /// The user theme this text names but that isn't loaded (it draws its built-in fallback).
+    pub fn missing_theme(&self, user: &UserLooks) -> Option<ThemeId> {
+        self.theme_id.filter(|id| !user.contains(*id))
+    }
+
+    /// The moves this text makes with its built-in theme ([`TextStyle::timing_with`] for a user's).
     pub fn timing(&self) -> Timing {
-        let theme = self.theme.look().motion;
+        self.timing_with(&UserLooks::default())
+    }
+
+    /// The moves this text makes: each of the clip's own choices, or else its theme's.
+    pub fn timing_with(&self, user: &UserLooks) -> Timing {
+        let theme = self.look_with(user).motion;
         Timing {
             animation: self.animation.unwrap_or(theme.animation),
             duration_ms: match self.duration_ms {
@@ -864,6 +955,11 @@ impl TextStyle {
     /// The text's frame `elapsed` seconds into a clip `clip_secs` long ([`Timing::frame_at`]).
     pub fn frame_at(&self, elapsed: f64, clip_secs: f64) -> AnimFrame {
         self.timing().frame_at(elapsed, clip_secs)
+    }
+
+    /// [`TextStyle::frame_at`] with the user's themes.
+    pub fn frame_at_with(&self, user: &UserLooks, elapsed: f64, clip_secs: f64) -> AnimFrame {
+        self.timing_with(user).frame_at(elapsed, clip_secs)
     }
 }
 
@@ -935,7 +1031,7 @@ pub fn set_text_kind(board: &mut Storyboard, id: ClipId, kind: TextKind) -> Resu
 pub fn set_text_style(
     board: &mut Storyboard,
     id: ClipId,
-    theme: Option<TextTheme>,
+    theme: Option<ThemeChoice>,
     animation: Option<Option<TextAnimation>>,
     position: Option<TextPosition>,
 ) -> Result<bool, TextError> {
@@ -945,12 +1041,29 @@ pub fn set_text_style(
     }
     let before = clip.text_style;
     let s = &mut clip.text_style;
-    s.theme = theme.unwrap_or(s.theme);
+    match theme {
+        None => {}
+        Some(ThemeChoice::Builtin(t)) => {
+            s.theme = t;
+            s.theme_id = None;
+        }
+        // The built-in stays as the fallback.
+        Some(ThemeChoice::User(u)) => s.theme_id = Some(u),
+    }
     if let Some(a) = animation {
         s.animation = a;
     }
     s.position = position.unwrap_or(s.position);
     Ok(clip.text_style != before)
+}
+
+/// A theme a clip can pick: a built-in, or a user's (loaded) theme by id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeChoice {
+    /// One of the built-ins.
+    Builtin(TextTheme),
+    /// A user theme or pack.
+    User(ThemeId),
 }
 
 /// Clip `id`'s text timing. Each part: `None` leaves it as it is, `Some(None)` follows the

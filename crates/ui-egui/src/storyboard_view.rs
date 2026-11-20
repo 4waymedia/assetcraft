@@ -248,7 +248,7 @@ fn paint_tile(nav: &mut Navigator, ui: &Ui, tile: Rect, clip: &Clip, _scene_star
     let painter = ui.painter();
     let radius = CornerRadius::same(6);
     let card = clip.shot_type == ShotType::Ttl;
-    let look = clip.text_style.theme.look();
+    let look = clip.text_style.look_with(nav.session.user_looks());
     let fill = if card { Some(look.background) } else { clip.shot_type.fill_rgb() };
     match fill {
         Some(fill) => {

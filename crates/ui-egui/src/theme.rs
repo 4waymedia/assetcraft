@@ -46,6 +46,8 @@ pub fn font_definitions() -> FontDefinitions {
 
 /// Fill for the red "unreadable" thumbnail badge (white text; reads on both themes).
 pub const BADGE_ERROR: Color32 = Color32::from_rgb(170, 40, 40);
+/// A note that something is off but still works (a theme that isn't loaded, drawn in its fallback).
+pub const WARN: Color32 = Color32::from_rgb(0xe0, 0xa0, 0x40);
 
 /// The egui preference for a saved theme.
 pub fn preference(mode: ThemeMode) -> ThemePreference {

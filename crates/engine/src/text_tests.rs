@@ -204,3 +204,42 @@ fn style_reports_the_moves_in_effect_and_goes_back_to_the_theme() {
     let err = s.execute("storyboard.text.style", &json!({"clip": 1, "effect": "wobble"})).unwrap_err();
     assert!(err.to_string().contains("|theme"), "{err}");
 }
+
+/// TP2a-2: a text clip can pick a loaded user theme; one that isn't loaded is refused, and a
+/// board naming a theme that's gone draws its fallback and says so.
+#[test]
+fn style_takes_a_loaded_user_theme_by_id() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-text-user-theme-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Themes")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(TextTheme::Blueprint);
+    t.id = "acme-brand".into();
+    t.name = "Acme Brand".into();
+    t.motion.title_in = Some("typewriter".into());
+    std::fs::write(dir.join("Themes").join("acme-brand.theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(assetcraft_fs::RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    s.execute("storyboard.new", &json!({"sample": true})).unwrap();
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "acme-brand"}));
+    assert_eq!((r["theme"].as_str(), r["changed"].as_bool()), (Some("acme-brand"), Some(true)), "{r}");
+    assert_eq!(r["fallback"], first(&s).text_style.theme.id(), "the built-in stays as the fallback");
+    assert_eq!(r["animation"], "typewriter", "the user theme's moves");
+    assert!(r["missingTheme"].is_null());
+    assert_eq!(s.boards.undo_len(), undo + 1, "one undo step");
+    assert_eq!(first(&s).text_style.theme_id.map(|u| u.as_str().to_string()).as_deref(), Some("acme-brand"));
+    // Not loaded: refused with the list of what is.
+    let e = s.execute("storyboard.text.style", &json!({"clip": 1, "theme": "nope"})).unwrap_err().to_string();
+    assert!(e.contains("acme-brand") && e.contains("bold"), "{e}");
+    // The theme goes away: the clip keeps naming it, draws its fallback, and says so.
+    std::fs::remove_file(dir.join("Themes").join("acme-brand.theme.json")).unwrap();
+    run(&mut s, "storyboard.themes", json!({"reload": true}));
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "position": "top"}));
+    assert_eq!(r["missingTheme"], "acme-brand", "{r}");
+    // A built-in again drops it.
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "paper"}));
+    assert_eq!(r["theme"], "paper");
+    assert!(first(&s).text_style.theme_id.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}

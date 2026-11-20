@@ -1060,7 +1060,7 @@ fn show_clip(
             let target = cover(frame, size);
             ui.painter().image(texture, frame, uv_for_cover(frame, target), Color32::WHITE);
         }
-        crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
+        crate::text_view::paint_text(ui.painter(), frame, clip, elapsed, nav.session.user_looks());
         return;
     }
     match clip.asset_ids.first() {
@@ -1099,7 +1099,7 @@ fn show_clip(
             );
         }
     }
-    crate::text_view::paint_text(ui.painter(), frame, clip, elapsed);
+    crate::text_view::paint_text(ui.painter(), frame, clip, elapsed, nav.session.user_looks());
 }
 
 /// How far ahead of the playhead playback decodes video (P2).
@@ -2628,7 +2628,7 @@ fn paint_clip(nav: &mut Navigator, ui: &Ui, rect: Rect, number: usize, clip: &Cl
         t => t.fill_rgb().map(rgb).unwrap_or(TILE_BORDER),
     };
     let title = clip.shot_type == ShotType::Ttl;
-    let look = clip.text_style.theme.look();
+    let look = clip.text_style.look_with(nav.session.user_looks());
     painter.rect_filled(body, 0, if title { rgb(look.background) } else { Color32::from_gray(0x22) });
     painter.rect_filled(bar, 0, bar_color);
     let mut drew = false;

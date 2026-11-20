@@ -202,7 +202,7 @@ works with any Style › Preset, so the timing and the look are chosen apart.
 ### Using a theme
 
 - **In the app:** select a text clip (a card or an overlay) and pick it in the Inspector's TEXT
-  section under **Theme**. In, Duration, Effect and Out start as "Theme (…)": they follow the
+  section under **Theme**. Your own themes are listed under **Yours**, after the built-ins. In, Duration, Effect and Out start as "Theme (…)": they follow the
   theme until you choose your own, and choosing "Theme" again goes back.
 - **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,
   effect?, exit?, position?}`; `"theme"` for a move follows the theme again). To see every theme
@@ -259,8 +259,9 @@ on its background (under 4.5:1 contrast) and a font that isn't installed are war
 still loads, and the font falls back to `body`, then Inter. The full format and rules are in
 [docs/design/themes.md](docs/design/themes.md) §2.
 
-**Not yet:** a text clip can only pick one of the eight built-ins. Picking your own theme file on a
-clip is themes step 1b-ii.
+A clip that picks one of your themes keeps a built-in as its fallback. If that theme is later
+removed, the clip draws the fallback, the Inspector says the theme isn't loaded, and an export lists
+it in its problems.
 
 ### Theme packs: brand designs from EffectCraft (building)
 

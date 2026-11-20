@@ -7,8 +7,8 @@
 use crate::storyboard::{clip_id, no_board};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{
-    MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme, set_text_kind,
-    set_text_style, set_text_timing,
+    MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme, ThemeChoice,
+    ThemeId, set_text_kind, set_text_style, set_text_timing,
 };
 use serde_json::{Value, json};
 
@@ -62,8 +62,7 @@ pub(crate) fn sb_text_kind(s: &mut Session, p: &Value) -> CmdResult {
 /// `storyboard.text.style {clip, theme?, animation?, position?}`.
 pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
-    let theme_ids = TextTheme::ALL.map(TextTheme::id).join("|");
-    let theme = parse(p, "theme", TextTheme::from_id, &theme_ids)?;
+    let theme = theme_choice(s, p)?;
     let animation = parse_or_theme(p, "animation", TextAnimation::from_id, "none|fade|rise|zoom|typewriter")?;
     let position = parse(p, "position", TextPosition::from_id, "lowerThirdLeft|lowerThirdRight|center|top|bottom")?;
     let effect = parse_or_theme(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;
@@ -91,7 +90,7 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         s.boards.board = Some(board);
     }
     // What the text does (the clip's choices over its theme's), and which parts follow the theme.
-    let t = style.timing();
+    let t = style.timing_with(s.user_looks());
     let from_theme: Vec<&str> = [
         ("animation", style.animation.is_none()),
         ("duration", style.duration_ms.is_none()),
@@ -104,7 +103,9 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     Ok(json!({
         "clip": id.0,
         "changed": changed,
-        "theme": style.theme.id(),
+        "theme": style.theme_id.map_or_else(|| style.theme.id().to_string(), |u| u.as_str().to_string()),
+        "fallback": style.theme.id(),
+        "missingTheme": style.missing_theme(s.user_looks()).map(|u| u.as_str().to_string()),
         "animation": t.animation.id(),
         "position": style.position.id(),
         "duration": t.duration_ms.map(|ms| f64::from(ms) / 1000.0),
@@ -112,6 +113,21 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         "exit": t.exit.id(),
         "fromTheme": from_theme,
     }))
+}
+
+/// `theme`: a built-in's id, or a loaded user theme's (TP2a-2).
+fn theme_choice(s: &Session, p: &Value) -> Result<Option<ThemeChoice>, CmdError> {
+    let Some(v) = p.get("theme") else { return Ok(None) };
+    let id = v.as_str().ok_or_else(|| CmdError::BadParams("`theme` must be a theme id".into()))?;
+    if let Some(t) = TextTheme::from_id(id) {
+        return Ok(Some(ThemeChoice::Builtin(t)));
+    }
+    if let Some(u) = ThemeId::new(id).filter(|u| s.user_looks().contains(*u)) {
+        return Ok(Some(ThemeChoice::User(u)));
+    }
+    let mut known: Vec<String> = TextTheme::ALL.iter().map(|t| t.id().to_string()).collect();
+    known.extend(s.loaded_themes().iter().map(|u| u.theme.id.clone()));
+    Err(CmdError::BadParams(format!("`theme` {id:?} isn't a loaded theme ({})", known.join("|"))))
 }
 
 /// A move: one of `ids`, or `"theme"` to follow the theme again (`Some(None)`).

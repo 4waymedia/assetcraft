@@ -614,7 +614,10 @@ fn text_edits_refuse_clips_without_text() {
     assert_eq!(board.clips[1].text_kind(), None);
     assert_eq!(set_text_kind(&mut board, shot, TextKind::Card), Err(TextError::NoText(shot)));
     assert_eq!(set_text_kind(&mut board, ClipId(999), TextKind::Card), Err(TextError::NoClip(ClipId(999))));
-    assert_eq!(set_text_style(&mut board, shot, Some(TextTheme::Paper), None, None), Err(TextError::NoText(shot)));
+    assert_eq!(
+        set_text_style(&mut board, shot, Some(crate::ThemeChoice::Builtin(TextTheme::Paper)), None, None),
+        Err(TextError::NoText(shot))
+    );
     assert_eq!(board, sample());
 }
 
@@ -625,10 +628,19 @@ fn text_style_edits_and_round_trips() {
     let json = board.to_json().unwrap();
     assert!(!json.contains("textStyle"), "the default style is left out");
     assert!(
-        set_text_style(&mut board, id, Some(TextTheme::Cinematic), Some(Some(TextAnimation::Typewriter)), None)
-            .unwrap()
+        set_text_style(
+            &mut board,
+            id,
+            Some(crate::ThemeChoice::Builtin(TextTheme::Cinematic)),
+            Some(Some(TextAnimation::Typewriter)),
+            None
+        )
+        .unwrap()
     );
-    assert!(!set_text_style(&mut board, id, Some(TextTheme::Cinematic), None, None).unwrap(), "no change");
+    assert!(
+        !set_text_style(&mut board, id, Some(crate::ThemeChoice::Builtin(TextTheme::Cinematic)), None, None).unwrap(),
+        "no change"
+    );
     set_text_kind(&mut board, id, TextKind::Overlay).unwrap();
     assert!(set_text_style(&mut board, id, None, None, Some(TextPosition::Top)).unwrap());
     let style = board.clips[0].text_style;
@@ -1398,7 +1410,7 @@ fn the_four_new_themes_save_by_their_spec_ids_and_read_on_their_background() {
     ] {
         assert_eq!(t.id(), want);
         assert_eq!(TextTheme::from_id(want), Some(t));
-        set_text_style(&mut board, id, Some(t), None, None).unwrap();
+        set_text_style(&mut board, id, Some(crate::ThemeChoice::Builtin(t)), None, None).unwrap();
         let json = board.to_json().unwrap();
         assert!(json.contains(&format!("\"theme\": \"{want}\"")), "{json}");
         assert_eq!(Storyboard::from_json(json.as_bytes()).unwrap(), board);
@@ -1683,4 +1695,39 @@ fn theme_designs_must_name_a_role_and_stay_in_the_packs_designs_folder() {
     assert!(e.contains("designs.poster") && e.contains("lowerThird"), "{e}");
     // A theme without designs writes no designs field (files from before TP1 are unchanged).
     assert!(!Theme::builtin(crate::TextTheme::Bold).to_json().contains("designs"));
+}
+
+#[test]
+fn a_clip_can_name_a_user_theme_and_falls_back_to_its_built_in() {
+    use crate::{ThemeChoice, ThemeId, UserLooks};
+    assert!(ThemeId::new("acme-brand").is_some());
+    for bad in ["", "Acme", "acme brand", "../x", &"a".repeat(41)] {
+        assert!(ThemeId::new(bad).is_none(), "{bad:?}");
+    }
+    let mut board = crate::sample::sample();
+    let id = board.clips.iter().find(|c| c.text_kind().is_some()).map(|c| c.id).expect("a text clip");
+    let acme = ThemeId::new("acme-brand").unwrap();
+    assert!(set_text_style(&mut board, id, Some(ThemeChoice::Builtin(TextTheme::Paper)), None, None).unwrap());
+    assert!(set_text_style(&mut board, id, Some(ThemeChoice::User(acme)), None, None).unwrap());
+    let style = board.clip(id).unwrap().text_style;
+    assert_eq!((style.theme, style.theme_id), (TextTheme::Paper, Some(acme)), "the built-in kept as the fallback");
+    // Loaded: its look (and moves). Not loaded: the fallback, and it says so.
+    let mut theirs = TextTheme::NeonNight.look();
+    theirs.motion.animation = TextAnimation::Typewriter;
+    let loaded = UserLooks::new([("acme-brand", theirs)]);
+    assert_eq!(style.look_with(&loaded), theirs);
+    assert_eq!(style.timing_with(&loaded).animation, TextAnimation::Typewriter);
+    assert_eq!(style.missing_theme(&loaded), None);
+    let none = UserLooks::default();
+    assert_eq!(style.look_with(&none), TextTheme::Paper.look());
+    assert_eq!(style.missing_theme(&none), Some(acme));
+    // Round trip: written as themeId; a board without one is unchanged.
+    let json = serde_json::to_string(&style).unwrap();
+    assert!(json.contains(r#""themeId":"acme-brand""#), "{json}");
+    assert_eq!(serde_json::from_str::<TextStyle>(&json).unwrap(), style);
+    assert!(!serde_json::to_string(&TextStyle::default()).unwrap().contains("themeId"));
+    assert!(serde_json::from_str::<TextStyle>(r#"{"themeId":"Bad Id"}"#).is_err(), "a bad id is refused on load");
+    // Picking a built-in again drops the user theme.
+    assert!(set_text_style(&mut board, id, Some(ThemeChoice::Builtin(TextTheme::Bold)), None, None).unwrap());
+    assert_eq!(board.clip(id).unwrap().text_style.theme_id, None);
 }

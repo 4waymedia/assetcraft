@@ -94,6 +94,8 @@ pub struct Compositor {
     /// Videos being read (P3), most recently used last; at most [`OPEN_VIDEOS`].
     videos: Vec<(PathBuf, assetcraft_media::VideoReader)>,
     failed: HashMap<PathBuf, String>,
+    /// The user's loaded themes, for text naming one (TP2a-2); empty = built-ins only.
+    user_looks: assetcraft_storyboard::UserLooks,
 }
 
 /// How many videos a compositor keeps open at once.
@@ -138,6 +140,7 @@ impl Compositor {
             crop: None,
             videos: Vec::new(),
             failed: HashMap::new(),
+            user_looks: assetcraft_storyboard::UserLooks::default(),
         })
     }
 
@@ -362,8 +365,8 @@ impl Compositor {
     fn paint_text(&mut self, out: &mut Rgba, clip: &Clip, elapsed: f64) {
         let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
         let style = clip.text_style;
-        let look = style.theme.look();
-        let anim = style.frame_at(elapsed, clip.duration.as_secs_f64());
+        let look = style.look_with(&self.user_looks);
+        let anim = style.frame_at_with(&self.user_looks, elapsed, clip.duration.as_secs_f64());
         if kind == TextKind::Card {
             if clip.background().is_some() {
                 // Over a background asset the theme colour is a scrim, so the image shows.
@@ -443,6 +446,12 @@ impl Compositor {
             self.fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
         }
         self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
+    }
+
+    /// Draw text that names a user theme with that theme's look (TP2a-2).
+    pub fn with_user_looks(mut self, looks: assetcraft_storyboard::UserLooks) -> Self {
+        self.user_looks = looks;
+        self
     }
 
     /// This compositor cropping shots by `frame`'s fill and snap (F3: the board's frame, as the

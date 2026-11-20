@@ -8,8 +8,8 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Backdrop, Clip, DecorRect, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind,
-    TextPosition, TextTheme, Timing,
+    AnimFrame, Backdrop, Clip, DecorRect, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit,
+    TextKind, TextPosition, TextTheme, Timing, UserLooks,
 };
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -22,15 +22,17 @@ const CHIP_H: f32 = 14.0;
 /// Paint a clip's text into `frame` (16:9), `elapsed` seconds into the clip (`f64::INFINITY` =
 /// at rest). A Card fills the frame with its theme's background first; an Overlay paints only
 /// the text, over whatever is already there. Clips without text paint nothing.
-pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f64) {
-    paint_text_frame(painter, frame, clip, clip.text_style.frame_at(elapsed, clip.duration.as_secs_f64()));
+/// `looks` are the user's loaded themes, for a clip that names one (TP2a-2).
+pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f64, looks: &UserLooks) {
+    let anim = clip.text_style.frame_at_with(looks, elapsed, clip.duration.as_secs_f64());
+    paint_text_frame(painter, frame, clip, anim, looks);
 }
 
 /// [`paint_text`] at a given animation frame (the Inspector's preview runs its own clock).
-fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame) {
+fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame, looks: &UserLooks) {
     let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
     let style = clip.text_style;
-    let look = style.theme.look();
+    let look = style.look_with(looks);
     let painter = painter.with_clip_rect(frame.intersect(painter.clip_rect()));
     if kind == TextKind::Card {
         // Over a background asset the theme colour becomes a scrim, so the image shows through.
@@ -233,21 +235,65 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     });
     let id = clip.id.0;
     let mut style_edit: Option<serde_json::Value> = None;
+    // The user's loaded themes (TP2a-2): picked by id, listed after the built-ins.
+    let looks = nav.session.user_looks().clone();
+    let yours: Vec<(String, String, Look)> = nav
+        .session
+        .loaded_themes()
+        .iter()
+        .map(|u| (u.theme.id.clone(), u.theme.name.clone(), u.theme.look()))
+        .collect();
+    let picked_user = style.theme_id.map(|u| u.as_str().to_string());
+    let selected = match &picked_user {
+        Some(uid) => yours
+            .iter()
+            .find(|(i, ..)| i == uid)
+            .map_or_else(|| format!("{uid} (not loaded)"), |(_, name, _)| name.clone()),
+        None => style.theme.name().to_string(),
+    };
     egui::Grid::new(("sb-text-style", id)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Theme");
-        egui::ComboBox::from_id_salt(("sb-theme", id)).selected_text(style.theme.name()).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt(("sb-theme", id)).selected_text(selected).show_ui(ui, |ui| {
             for t in TextTheme::ALL {
+                let on = picked_user.is_none() && style.theme == t;
                 let row = ui.horizontal(|ui| {
-                    theme_swatch(ui, t);
-                    ui.selectable_label(style.theme == t, t.name())
+                    theme_swatch(ui, &t.look(), t.accent());
+                    ui.selectable_label(on, t.name())
                 });
-                if row.inner.clicked() && style.theme != t {
+                if row.inner.clicked() && !on {
                     style_edit = Some(json!({ "clip": id, "theme": t.id() }));
+                }
+            }
+            if !yours.is_empty() {
+                ui.separator();
+                ui.label(egui::RichText::new("Yours").small().weak());
+            }
+            for (uid, name, look) in &yours {
+                let on = picked_user.as_deref() == Some(uid.as_str());
+                let row = ui.horizontal(|ui| {
+                    theme_swatch(ui, look, look.background);
+                    ui.selectable_label(on, name)
+                });
+                if row.inner.clicked() && !on {
+                    style_edit = Some(json!({ "clip": id, "theme": uid }));
                 }
             }
         });
         ui.end_row();
-        let theme_moves = style.theme.look().motion;
+        if let Some(missing) = style.missing_theme(&looks) {
+            ui.label("");
+            ui.label(
+                egui::RichText::new(format!(
+                    "“{}” isn't loaded: drawing {}. Import it (File › Import Theme…) or pick another.",
+                    missing.as_str(),
+                    style.theme.name()
+                ))
+                .small()
+                .color(crate::theme::WARN),
+            );
+            ui.end_row();
+        }
+        let theme_moves = style.look_with(&looks).motion;
         ui.label("In").on_hover_text("How the text arrives");
         let pick = move_combo(
             ui,
@@ -263,7 +309,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         }
         ui.end_row();
         ui.label("Duration").on_hover_text("How long the text stays up from the clip's start, its in and out included");
-        if let Some(d) = duration_row(ui, clip) {
+        if let Some(d) = duration_row(ui, clip, &looks) {
             style_edit = Some(json!({ "clip": id, "duration": d }));
         }
         ui.end_row();
@@ -325,14 +371,15 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         );
     }
     let clip_secs = clip.duration.as_secs_f64();
-    let timing = style.timing();
+    let looks = nav.session.user_looks().clone();
+    let timing = style.timing_with(&looks);
     let timed = timing.duration_ms.is_some() || timing.exit != TextExit::None || timing.effect != TextEffect::None;
     if !timed {
         // Replays the in, then holds for a second.
         let intro = timing.animation.seconds();
         let cycle = intro + 1.0;
         let elapsed = if intro > 0.0 { ui.input(|i| i.time) % cycle } else { f64::INFINITY };
-        paint_text(painter, frame, clip, elapsed);
+        paint_text(painter, frame, clip, elapsed, &looks);
         // Repaint every frame only during the in; during the hold, wake once for the next replay.
         if elapsed < intro {
             ui.ctx().request_repaint();
@@ -347,7 +394,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     let p = shown.clamp(0.5, PREVIEW_MAX_SECS);
     let preview = Timing { duration_ms: Some((p * 1000.0) as u32), ..timing };
     let elapsed = ui.input(|i| i.time) % (p + PREVIEW_GAP_SECS);
-    paint_text_frame(painter, frame, clip, preview.frame_at(elapsed, p));
+    paint_text_frame(painter, frame, clip, preview.frame_at(elapsed, p), &looks);
     ui.ctx().request_repaint();
     let caption = if timing.duration_ms.is_some() && shown < clip_secs {
         format!("Up {shown:.1} s of the clip's {clip_secs:.1} s, then gone")
@@ -398,10 +445,10 @@ fn move_combo<T: Copy + PartialEq>(
 /// The Duration row: the theme's, the whole clip, or seconds. A drag commits once, when it
 /// ends (one undo step); a typed value commits when it lands. Returns the `duration` param:
 /// `"theme"`, `0` (whole clip) or seconds.
-fn duration_row(ui: &mut Ui, clip: &Clip) -> Option<serde_json::Value> {
+fn duration_row(ui: &mut Ui, clip: &Clip, looks: &UserLooks) -> Option<serde_json::Value> {
     let clip_secs = clip.duration.as_secs_f64();
     let own = clip.text_style.duration_ms;
-    let theme = clip.text_style.theme.look().motion.duration_ms;
+    let theme = clip.text_style.look_with(looks).motion.duration_ms;
     let max = clip_secs.clamp(MIN_SECS, f64::from(MAX_TEXT_MS) / 1000.0);
     let label =
         |ms: Option<u32>| ms.map_or_else(|| "Whole clip".to_owned(), |ms| format!("{:.1} s", f64::from(ms) / 1000.0));
@@ -453,15 +500,14 @@ const MIN_SECS: f64 = MIN_TEXT_MS as f64 / 1000.0;
 
 /// A theme's colours in a chip: its background, an "Aa" in its text colour, an accent bar —
 /// so eight theme names read at a glance in the picker.
-fn theme_swatch(ui: &mut Ui, t: TextTheme) {
-    let look = t.look();
+fn theme_swatch(ui: &mut Ui, look: &Look, accent: u32) {
     let (rect, _) = ui.allocate_exact_size(vec2(30.0, 16.0), Sense::hover());
     let p = ui.painter();
     paint_backdrop(p, rect, &look.backdrop);
     p.rect_stroke(rect, 2, Stroke::new(1.0, Color32::from_gray(0x55)), StrokeKind::Inside);
     let bar =
         Rect::from_min_max(pos2(rect.left() + 2.0, rect.bottom() - 4.0), pos2(rect.right() - 2.0, rect.bottom() - 2.0));
-    p.rect_filled(bar, 0, rgb(look.accent.unwrap_or(t.accent())));
+    p.rect_filled(bar, 0, rgb(look.accent.unwrap_or(accent)));
     let aa = if look.uppercase { "AA" } else { "Aa" };
     p.text(rect.center() - vec2(0.0, 1.5), Align2::CENTER_CENTER, aa, FontId::proportional(10.0), rgb(look.text));
 }

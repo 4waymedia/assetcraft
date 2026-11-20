@@ -53,6 +53,8 @@ pub struct PackDesign {
 pub(crate) struct ThemeLibrary {
     themes: Vec<UserTheme>,
     problems: Vec<(PathBuf, String)>,
+    /// Each loaded theme's look, for clips that name one (TP2a-2).
+    looks: assetcraft_storyboard::UserLooks,
 }
 
 impl Session {
@@ -60,7 +62,13 @@ impl Session {
     /// working folder).
     pub(crate) fn reload_themes(&mut self) {
         let (themes, problems) = self.user_themes();
-        self.themes = ThemeLibrary { themes, problems };
+        let looks = assetcraft_storyboard::UserLooks::new(themes.iter().map(|u| (u.theme.id.as_str(), u.theme.look())));
+        self.themes = ThemeLibrary { themes, problems, looks };
+    }
+
+    /// The loaded themes' looks by id: what a clip naming one draws (TP2a-2).
+    pub fn user_looks(&self) -> &assetcraft_storyboard::UserLooks {
+        &self.themes.looks
     }
 
     /// The user's themes and packs as loaded, in file-name order (built-ins not included).

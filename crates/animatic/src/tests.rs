@@ -545,3 +545,30 @@ fn a_framed_post_draws_bands_around_the_shot() {
     let card = c.frame(&b, Ticks::from_secs_f64(2.5).unwrap_or(Ticks::ZERO));
     assert_ne!(card.data, f.data);
 }
+
+#[test]
+fn a_card_naming_a_loaded_user_theme_draws_its_look_and_otherwise_its_fallback() {
+    use assetcraft_storyboard::{TextTheme, ThemeId, UserLooks};
+    let mut card = clip(4, ShotType::Ttl, 2);
+    card.description = "ACME".into();
+    card.text_style.theme = TextTheme::Paper;
+    card.text_style.theme_id = ThemeId::new("acme-brand");
+    // A user theme: Neon Night's look, so the two backgrounds differ clearly.
+    let theirs = TextTheme::NeonNight.look();
+    let mut loaded = compositor(320, 180).with_user_looks(UserLooks::new([("acme-brand", theirs)]));
+    let mut plain = compositor(320, 180);
+    let a = loaded.clip_frame(&card, f64::INFINITY);
+    let b = plain.clip_frame(&card, f64::INFINITY);
+    let neon = {
+        let mut c = card.clone();
+        c.text_style = assetcraft_storyboard::TextStyle { theme: TextTheme::NeonNight, ..Default::default() };
+        c
+    };
+    let paper = {
+        let mut c = card.clone();
+        c.text_style = assetcraft_storyboard::TextStyle { theme: TextTheme::Paper, ..Default::default() };
+        c
+    };
+    assert_eq!(a.data, plain.clip_frame(&neon, f64::INFINITY).data, "loaded: the user theme's look");
+    assert_eq!(b.data, plain.clip_frame(&paper, f64::INFINITY).data, "not loaded: the built-in fallback");
+}

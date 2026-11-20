@@ -325,6 +325,7 @@ pub(crate) fn sb_export_video(s: &mut Session, p: &Value) -> CmdResult {
         services: Arc::clone(&s.services),
         look: s.model.render_look(),
         decode: s.decode_options(),
+        user_looks: s.user_looks().clone(),
         progress: Arc::clone(&s.exporter.progress),
         cancel: Arc::clone(&s.exporter.cancel),
         rate: Arc::clone(&s.exporter.rate),
@@ -400,6 +401,8 @@ struct Job {
     services: Arc<dyn assetcraft_fs::Services>,
     look: assetcraft_mesh::RenderOptions,
     decode: assetcraft_thumbs::DecodeOptions,
+    /// The user's loaded themes, for text naming one (TP2a-2).
+    user_looks: assetcraft_storyboard::UserLooks,
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
     rate: Arc<Mutex<Option<f64>>>,
@@ -456,7 +459,8 @@ impl Job {
         let s = self.plan.settings;
         let mut compositor = Compositor::new(Arc::clone(&self.services), s.width, s.height, self.look, self.decode)
             .map_err(|e| Stop::Failed(e.to_string()))?
-            .with_crop(self.board.frame.as_ref());
+            .with_crop(self.board.frame.as_ref())
+            .with_user_looks(self.user_looks.clone());
         let mut encoder = VideoEncoder::new(s).map_err(|e| Stop::Failed(e.to_string()))?;
         // Exact for every rate in `FRAME_RATES` (the tick rate is divisible by 24, 25, 30, 50, 60).
         let tick = Ticks(TICKS_PER_SECOND / u64::from(s.fps.max(1)));
@@ -488,6 +492,19 @@ impl Job {
         let mut problems: Vec<String> =
             compositor.problems().into_iter().map(|p| format!("{}: {}", p.path.display(), p.reason)).collect();
         problems.extend(sound_problems);
+        // Text naming a theme that isn't loaded drew its built-in fallback (TP2a-2).
+        for c in &self.board.clips {
+            if c.text_kind().is_some()
+                && let Some(id) = c.text_style.missing_theme(&self.user_looks)
+            {
+                problems.push(format!(
+                    "clip {}: theme “{}” isn't loaded, so it drew {}",
+                    c.id.0,
+                    id.as_str(),
+                    c.text_style.theme.name()
+                ));
+            }
+        }
         Ok((bytes, problems))
     }
 

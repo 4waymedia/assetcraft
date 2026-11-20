@@ -2410,3 +2410,52 @@ fn file_menu_imports_and_reloads_themes() {
     nav.state.test_save_path = None;
     crate::menu::apply(&mut nav, &ctx, crate::menu::MenuAction::ImportTheme(true));
 }
+
+/// TP2a-2: the Inspector lists a loaded user theme, a card picks it, and the Viewer, Strip and
+/// preview draw with it; once it's gone the card keeps its fallback and the Inspector says so.
+#[test]
+fn a_title_card_picks_a_user_theme_and_falls_back_when_it_is_gone() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-user-theme-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Themes")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::NeonNight);
+    t.id = "acme-brand".into();
+    t.name = "Acme Brand".into();
+    std::fs::write(dir.join("Themes").join("acme-brand.theme.json"), t.to_json()).unwrap();
+    let prefs = assetcraft_engine::Prefs { working_folder: Some(dir.clone()), ..assetcraft_engine::Prefs::default() };
+    let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let mut nav = Navigator::with_one_worker(session);
+    let ctx = Context::default();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let card = nav
+        .session()
+        .storyboard()
+        .unwrap()
+        .clips
+        .iter()
+        .find(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl)
+        .unwrap()
+        .id
+        .0;
+    nav.run("storyboard.select", json!({ "clip": card }));
+    assert!(nav.run("storyboard.text.style", json!({ "clip": card, "theme": "acme-brand" })).is_some());
+    let mut t = 0.0;
+    for _ in 0..6 {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.25;
+    }
+    let style = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style;
+    assert_eq!(style.look_with(nav.session().user_looks()), assetcraft_storyboard::TextTheme::NeonNight.look());
+    // Gone: still named, drawn in its fallback, and the Inspector's note shows.
+    std::fs::remove_file(dir.join("Themes").join("acme-brand.theme.json")).unwrap();
+    nav.run("storyboard.themes", json!({ "reload": true }));
+    for _ in 0..3 {
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.25;
+    }
+    let style = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style;
+    assert!(style.missing_theme(nav.session().user_looks()).is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
