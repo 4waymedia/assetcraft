@@ -181,8 +181,10 @@ it is refused on every remote door (`serve`, MCP, `--control`), whatever the gra
 that write a user file are `storyboard.musicImport` (new files only) and, since SF1 (2026-11-06),
 `storyboard.save` / `storyboard.saveAs` (the storyboard's own document, written atomically; a
 different existing file only with `overwrite: true`) and `storyboard.exportVideo` (SF5-4, a new
-`.mp4` / `.mov` the user named, same rules): `write-user-file` + `write-app-state`, so remote
-callers confirm them (`Effects::COPY`, `Effects::SAVE`, `Effects::EXPORT`).
+`.mp4` / `.mov` the user named, same rules) and `storyboard.importTheme` (TP2a, 2026-11-19: a
+theme file or pack copied into `<working>/Themes`, written atomically; a loaded theme replaced
+only with `replace: true`): `write-user-file` + `write-app-state`, so remote callers confirm them
+(`Effects::COPY`, `Effects::SAVE`, `Effects::EXPORT`).
 
 **Features**
 - **Command effects:** each `CommandSpec` declares classes (`read`, `write-app-state`,

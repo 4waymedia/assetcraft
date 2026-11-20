@@ -242,6 +242,9 @@ pub struct Session {
     strip_zoom: f32,
     /// Video frames for the Viewer (P1), started on first use.
     video: std::sync::OnceLock<assetcraft_media::VideoFrames>,
+    /// The user's themes and theme packs from `<working>/Themes`, loaded at startup and again on
+    /// `storyboard.themes {reload: true}`, `storyboard.importTheme` and a new working folder (TP2a).
+    themes: theme_cmd::ThemeLibrary,
 }
 
 impl Session {
@@ -300,7 +303,9 @@ impl Session {
             default_frame: prefs.frame.clone(),
             strip_zoom: 1.0,
             video: std::sync::OnceLock::new(),
+            themes: theme_cmd::ThemeLibrary::default(),
         };
+        session.reload_themes();
         session.refresh_favorites();
         session.rescan_places();
         let start = prefs

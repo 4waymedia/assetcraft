@@ -167,6 +167,7 @@ mod tests {
                 "file.openIn",
                 "file.reveal",
                 "file.run",
+                "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",
                 "storyboard.saveAs",
@@ -197,11 +198,13 @@ mod tests {
                 "track.summary"
             ])
         );
-        // User-file writers: the Copy import into the working folder (W1) and the storyboard's
-        // own document (SF1). Nothing else writes a user file yet.
+        // User-file writers: the Copy import into the working folder (W1), the storyboard's own
+        // document (SF1), the export (SF5-4) and a theme import into Themes (TP2a). Nothing else
+        // writes a user file yet.
         assert_eq!(
             ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
             BTreeSet::from([
+                "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",
                 "storyboard.saveAs",

@@ -214,9 +214,13 @@ works with any Style › Preset, so the timing and the look are chosen apart.
 
 ### Your own theme files
 
-Put `.theme.json` files in the **Themes** folder of your working folder (by default
-`Documents\AssetCraft\Themes\`). `storyboard.themes` lists them after the built-ins, and lists any
-file that didn't load with the reason. A bad file is never fatal. This example loads with no
+Your themes live in the **Themes** folder of your working folder (by default
+`Documents\AssetCraft\Themes\`) and are loaded when AssetCraft starts. To add one, use **File ›
+Import Theme File…** for a `.theme.json`, or **File › Import Theme Pack…** for a pack folder: it is
+checked, copied into Themes and loaded straight away (`storyboard.importTheme {path, replace?,
+dryRun?}`). Files you put there yourself show after **File › Reload Themes**. `storyboard.themes`
+lists them after the built-ins, with any file that didn't load and the reason. A bad file is never
+fatal. This example loads with no
 warnings:
 
 ```json

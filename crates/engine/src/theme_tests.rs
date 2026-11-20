@@ -50,7 +50,10 @@ fn themes_lists_the_built_ins_then_the_users_files_with_their_problems() {
     std::fs::write(themes.join("my-bold.theme.json"), bold.to_json()).unwrap();
     std::fs::write(themes.join("z-neon-again.theme.json"), neon.to_json()).unwrap();
     std::fs::write(themes.join("notes.txt"), b"not a theme").unwrap();
-    let out = run(&mut s, "storyboard.themes", json!({}));
+    // Loaded at startup: files added since show after a reload.
+    let before = run(&mut s, "storyboard.themes", json!({}));
+    assert!(before["themes"].as_array().unwrap().iter().all(|t| t["source"] == "builtin"), "not re-read on every call");
+    let out = run(&mut s, "storyboard.themes", json!({ "reload": true }));
     let user: Vec<&Value> = out["themes"].as_array().unwrap().iter().filter(|t| t["source"] == "user").collect();
     let ids: Vec<&str> = user.iter().filter_map(|t| t["id"].as_str()).collect();
     assert_eq!(ids, ["gilded-age", "neon"], "sorted by file name");
@@ -115,7 +118,7 @@ fn a_pack_folder_loads_with_its_designs_and_problems_are_warnings() {
     std::fs::write(themes.join("loose.theme.json"), pack_theme("loose", &[("banner", "designs/banner.ectemplate")]))
         .unwrap();
 
-    let out = run(&mut s, "storyboard.themes", json!({}));
+    let out = run(&mut s, "storyboard.themes", json!({ "reload": true }));
     let rows: Vec<&Value> = out["themes"].as_array().unwrap().iter().filter(|t| t["source"] != "builtin").collect();
     let ids: Vec<&str> = rows.iter().filter_map(|t| t["id"].as_str()).collect();
     assert_eq!(ids, ["acme-brand", "broken-pack", "loose"], "{rows:?}");
@@ -151,4 +154,127 @@ fn a_pack_folder_loads_with_its_designs_and_problems_are_warnings() {
         out["builtinDesigns"].as_array().unwrap().iter().filter_map(|d| d["id"].as_str()).collect();
     assert_eq!(builtins, ["banner-laser-trace", "banner-stack"]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn themes_in_the_folder_are_loaded_at_startup() {
+    let (_, dir) = session("startup");
+    let themes = dir.join("Themes");
+    std::fs::write(themes.join("early.theme.json"), pack_theme("early", &[])).unwrap();
+    // A new session (the app starting) finds it without a reload.
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    assert_eq!(s.loaded_themes().len(), 1);
+    let out = run(&mut s, "storyboard.themes", json!({}));
+    assert!(out["themes"].as_array().unwrap().iter().any(|t| t["id"] == "early"));
+    assert!(s.execute("storyboard.themes", &json!({ "reload": 1 })).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A folder outside the working folder, as the user's Downloads might be.
+fn outside(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("assetcraft-theme-src-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.canonicalize().unwrap()
+}
+
+#[test]
+fn importing_a_theme_file_copies_it_in_and_loads_it() {
+    let (mut s, dir) = session("import-file");
+    let src = outside("file");
+    let file = src.join("sunset.theme.json");
+    std::fs::write(&file, pack_theme("sunset", &[])).unwrap();
+    let path = file.to_string_lossy().to_string();
+    // A dry run says what it would do and writes nothing.
+    let dry = run(&mut s, "storyboard.importTheme", json!({ "path": path, "dryRun": true }));
+    assert_eq!(dry["kind"], "file");
+    assert!(dry["to"].as_str().unwrap().ends_with("sunset.theme.json"));
+    assert!(!dir.join("Themes").join("sunset.theme.json").exists());
+    let out = run(&mut s, "storyboard.importTheme", json!({ "path": path }));
+    assert_eq!(out["message"], "Imported theme “Pack sunset”");
+    assert!(dir.join("Themes").join("sunset.theme.json").exists());
+    assert!(s.loaded_themes().iter().any(|u| u.theme.id == "sunset"), "loaded without a reload");
+    // Again: refused unless replacing.
+    let again = s.execute("storyboard.importTheme", &json!({ "path": path })).unwrap_err().to_string();
+    assert!(again.contains("already loaded") && again.contains("replace"), "{again}");
+    run(&mut s, "storyboard.importTheme", json!({ "path": path, "replace": true }));
+    // Refused: a built-in's id, not a theme file, a theme already in Themes, bad params.
+    let bold = src.join("bold.theme.json");
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.name = "Bolder".into();
+    std::fs::write(&bold, t.to_json()).unwrap();
+    let e = s.execute("storyboard.importTheme", &json!({ "path": bold.to_string_lossy() })).unwrap_err().to_string();
+    assert!(e.contains("built-in"), "{e}");
+    std::fs::write(src.join("notes.txt"), b"hi").unwrap();
+    let e = s
+        .execute("storyboard.importTheme", &json!({ "path": src.join("notes.txt").to_string_lossy() }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains(".theme.json"), "{e}");
+    std::fs::write(src.join("broken.theme.json"), b"{ nope").unwrap();
+    assert!(
+        s.execute("storyboard.importTheme", &json!({ "path": src.join("broken.theme.json").to_string_lossy() }))
+            .is_err()
+    );
+    let inside = dir.join("Themes").join("sunset.theme.json");
+    let e = s
+        .execute("storyboard.importTheme", &json!({ "path": inside.to_string_lossy(), "replace": true }))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("already in the Themes folder"), "{e}");
+    assert!(s.execute("storyboard.importTheme", &json!({})).is_err());
+    assert!(s.execute("storyboard.importTheme", &json!({ "path": path, "replace": "yes" })).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&src);
+}
+
+#[test]
+fn importing_a_pack_copies_its_theme_and_listed_designs_only() {
+    let (mut s, dir) = session("import-pack");
+    let src = outside("pack").join("Acme Brand");
+    std::fs::create_dir_all(src.join("designs")).unwrap();
+    std::fs::create_dir_all(src.join("images")).unwrap();
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::STACK).unwrap().unwrap();
+    std::fs::write(src.join("designs").join("banner.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(src.join("designs").join("unlisted.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(src.join("images").join("logo.png"), b"not listed in assets yet").unwrap();
+    std::fs::write(src.join("notes.txt"), b"junk").unwrap();
+    std::fs::write(
+        src.join("theme.json"),
+        pack_theme("acme-brand", &[("banner", "designs/banner.ectemplate"), ("card", "designs/card.ectemplate")]),
+    )
+    .unwrap();
+    let out = run(&mut s, "storyboard.importTheme", json!({ "path": src.to_string_lossy() }));
+    assert_eq!(out["kind"], "pack");
+    assert_eq!(out["message"], "Imported theme “Pack acme-brand” (a pack, 1 design)");
+    assert!(out["warnings"].to_string().contains("design card"), "{out}");
+    let dest = dir.join("Themes").join("acme-brand");
+    let mut copied: Vec<String> =
+        walk(&dest).iter().map(|p| p.strip_prefix(&dest).unwrap().to_string_lossy().replace('\\', "/")).collect();
+    copied.sort();
+    assert_eq!(copied, ["designs/banner.ectemplate", "theme.json"], "only the theme and its listed designs");
+    let loaded = s.loaded_themes().iter().find(|u| u.theme.id == "acme-brand").unwrap();
+    assert_eq!(loaded.designs.len(), 1);
+    assert_eq!(loaded.designs[0].design.name(), "Stack");
+    // A folder without a theme.json isn't a pack.
+    let empty = outside("empty");
+    let e = s.execute("storyboard.importTheme", &json!({ "path": empty.to_string_lossy() })).unwrap_err().to_string();
+    assert!(e.contains("theme.json"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    let _ = std::fs::remove_dir_all(&empty);
+}
+
+fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
 }

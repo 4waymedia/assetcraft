@@ -109,6 +109,33 @@ fn pick_open_path(nav: &mut Navigator) -> Option<std::path::PathBuf> {
     None
 }
 
+/// File › Import Theme File… / Import Theme Pack… (TP2a): pick, then `storyboard.importTheme`.
+/// The result (or why it was refused) shows in the status bar.
+pub(crate) fn import_theme(nav: &mut Navigator, pack: bool) {
+    let Some(path) = pick_theme(nav, pack) else { return };
+    let _ = nav.run("storyboard.importTheme", json!({ "path": path.to_string_lossy() }));
+}
+
+#[cfg(test)]
+fn pick_theme(nav: &mut Navigator, _pack: bool) -> Option<std::path::PathBuf> {
+    nav.state.test_save_path.clone()
+}
+
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
+fn pick_theme(_nav: &mut Navigator, pack: bool) -> Option<std::path::PathBuf> {
+    if pack {
+        rfd::FileDialog::new().set_title("Import theme pack (a folder with a theme.json)").pick_folder()
+    } else {
+        rfd::FileDialog::new().set_title("Import theme").add_filter("Theme", &["json"]).pick_file()
+    }
+}
+
+#[cfg(all(not(test), target_arch = "wasm32"))]
+fn pick_theme(nav: &mut Navigator, _pack: bool) -> Option<std::path::PathBuf> {
+    nav.notify("Importing a theme is not available on the web yet".to_owned());
+    None
+}
+
 /// Close the window, asking first when the storyboard has unsaved changes.
 pub(crate) fn request_exit(nav: &mut Navigator, ctx: &egui::Context) {
     if nav.session.storyboard_dirty() && !nav.state.exit_requested {

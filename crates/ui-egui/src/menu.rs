@@ -142,6 +142,9 @@ pub enum MenuAction {
     SaveTemplate,
     /// File → Storyboard Setup…: the frame window (`storyboard.frame`; F4).
     Setup,
+    /// File → Import Theme File… (`false`) or Import Theme Pack… (`true`): the native picker,
+    /// then `storyboard.importTheme` (TP2a).
+    ImportTheme(bool),
     /// File → Exit.
     Exit,
     /// Tools → Batch Rename… (opens the dialog; `file.renamePreview` fills it).
@@ -578,6 +581,33 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
         "storyboard.saveAs" => {
             vec![item(format!("{}…", spec.label), None, s.storyboard().is_some(), MenuAction::SaveAs)]
         }
+        "storyboard.importTheme" => vec![
+            MenuEntry::Separator,
+            MenuEntry::Item {
+                label: "Import Theme File…".into(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                tooltip: Some("A .theme.json file: copied into your Themes folder and loaded".into()),
+                action: MenuAction::ImportTheme(false),
+            },
+            MenuEntry::Item {
+                label: "Import Theme Pack…".into(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                tooltip: Some("A folder with a theme.json and its designs: copied into your Themes folder and loaded".into()),
+                action: MenuAction::ImportTheme(true),
+            },
+            MenuEntry::Item {
+                label: "Reload Themes".into(),
+                shortcut: None,
+                enabled: true,
+                checked: None,
+                tooltip: Some("Read the Themes folder again (themes are loaded when AssetCraft starts)".into()),
+                action: cmd("storyboard.themes", json!({ "reload": true })),
+            },
+        ],
         "storyboard.frame" => {
             let enabled = s.enabled(spec.id);
             vec![MenuEntry::Item {
@@ -706,6 +736,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         MenuAction::ExportVideo => crate::export_view::open(nav),
         MenuAction::SaveTemplate => crate::template_view::open(nav),
         MenuAction::Setup => crate::setup_view::open(nav),
+        MenuAction::ImportTheme(pack) => crate::document_view::import_theme(nav, pack),
         MenuAction::Exit => crate::document_view::request_exit(nav, ctx),
     }
 }

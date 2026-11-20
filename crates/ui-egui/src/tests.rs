@@ -504,6 +504,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::Setup => {
                 used.insert("storyboard.frame");
             }
+            MenuAction::ImportTheme(_) => {
+                used.insert("storyboard.importTheme");
+            }
             MenuAction::SaveAs => {
                 used.insert("storyboard.saveAs");
             }

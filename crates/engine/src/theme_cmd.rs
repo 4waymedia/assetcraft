@@ -10,7 +10,7 @@
 //! the theme still loads. The built-in banner designs (`assetcraft_titles::builtin`) are listed
 //! too.
 
-use crate::{CmdResult, Session};
+use crate::{CmdError, CmdResult, Session};
 use assetcraft_fs::{EntryKind, ListOptions};
 use assetcraft_storyboard::{DESIGNS_DIR, MAX_THEME_BYTES, PACK_THEME_FILE, THEME_SUFFIX, Theme, design_path};
 use assetcraft_titles::{Design, MAX_FILE as MAX_DESIGN_BYTES};
@@ -48,7 +48,26 @@ pub struct PackDesign {
     pub design: Design,
 }
 
+/// The user's themes as last loaded (at startup, on reload, after an import).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ThemeLibrary {
+    themes: Vec<UserTheme>,
+    problems: Vec<(PathBuf, String)>,
+}
+
 impl Session {
+    /// Re-read `<working>/Themes` (startup, `storyboard.themes {reload}`, an import, a new
+    /// working folder).
+    pub(crate) fn reload_themes(&mut self) {
+        let (themes, problems) = self.user_themes();
+        self.themes = ThemeLibrary { themes, problems };
+    }
+
+    /// The user's themes and packs as loaded, in file-name order (built-ins not included).
+    pub fn loaded_themes(&self) -> &[UserTheme] {
+        &self.themes.themes
+    }
+
     /// `<working>/Themes`, where the user's theme files live.
     pub fn themes_folder(&self) -> Option<PathBuf> {
         self.working_folder().map(|w| w.join(THEMES_DIR))
@@ -165,11 +184,20 @@ fn theme_json(t: &Theme, source: &str) -> Value {
     })
 }
 
-/// `storyboard.themes {}`.
-pub(crate) fn sb_themes(s: &mut Session, _p: &Value) -> CmdResult {
+/// `storyboard.themes {reload?: bool}`: the themes as loaded at startup; `reload` reads the
+/// Themes folder again first.
+pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
+    let reload = match p.get("reload") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(CmdError::BadParams("`reload` must be true or false".into())),
+    };
+    if reload {
+        s.reload_themes();
+    }
     let mut themes: Vec<Value> = Theme::builtins().iter().map(|t| theme_json(t, "builtin")).collect();
-    let (ok, bad) = s.user_themes();
-    for u in &ok {
+    let (ok, bad) = (&s.themes.themes, &s.themes.problems);
+    for u in ok {
         let mut v = theme_json(&u.theme, if u.pack.is_some() { "pack" } else { "user" });
         v["path"] = json!(u.path.to_string_lossy());
         v["warnings"] = json!(u.warnings);
@@ -202,10 +230,167 @@ pub(crate) fn sb_themes(s: &mut Session, _p: &Value) -> CmdResult {
         .collect();
     let problems: Vec<Value> =
         bad.iter().map(|(p, why)| json!({ "path": p.to_string_lossy(), "reason": why })).collect();
-    Ok(json!({
+    let mut out = json!({
         "themes": themes,
         "problems": problems,
         "builtinDesigns": builtin_designs,
         "folder": s.themes_folder().map(|f| f.to_string_lossy().into_owned()),
-    }))
+    });
+    if reload {
+        let n = s.themes.themes.len();
+        let bad = s.themes.problems.len();
+        out["message"] = json!(match bad {
+            0 => format!("Themes reloaded: {n} of yours"),
+            _ => format!("Themes reloaded: {n} of yours, {bad} with problems (see storyboard.themes)"),
+        });
+    }
+    Ok(out)
+}
+
+/// What an import copies: the theme file, and for a pack its listed designs that open.
+struct ImportPlan {
+    theme: Theme,
+    pack: bool,
+    dest: PathBuf,
+    files: Vec<(PathBuf, PathBuf)>,
+    warnings: Vec<String>,
+}
+
+/// `storyboard.importTheme {path, replace?, dryRun?}`: copy a `.theme.json` file or a theme pack
+/// folder into `<working>/Themes`, then load it. The source is read as hostile input (the same
+/// checks as loading); only the theme file and the designs it lists are copied, never anything
+/// else in the folder. A theme already loaded under that id is replaced only with `replace`.
+pub(crate) fn sb_import_theme(s: &mut Session, p: &Value) -> CmdResult {
+    let src = p
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|x| !x.is_empty() && x.len() <= 4096)
+        .map(PathBuf::from)
+        .ok_or_else(|| CmdError::BadParams("`path` must be a .theme.json file or a theme pack folder".into()))?;
+    let flag = |key: &str| match p.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(CmdError::BadParams(format!("`{key}` must be true or false"))),
+    };
+    let (replace, dry) = (flag("replace")?, flag("dryRun")?);
+    let plan = s.import_plan(&src, replace)?;
+    let kind = if plan.pack { "pack" } else { "file" };
+    let designs = plan.files.len().saturating_sub(1);
+    let files: Vec<Value> = plan.files.iter().map(|(_, to)| json!(to.to_string_lossy())).collect();
+    let mut out = json!({
+        "id": plan.theme.id, "name": plan.theme.name, "kind": kind, "to": plan.dest.to_string_lossy(),
+        "files": files, "warnings": plan.warnings, "dryRun": dry,
+    });
+    if dry {
+        out["message"] = json!(format!("Would import “{}”", plan.theme.name));
+        return Ok(out);
+    }
+    for (from, to) in &plan.files {
+        let bytes = s.services.read_head(from, MAX_DESIGN_BYTES.max(MAX_THEME_BYTES) + 1).map_err(CmdError::Fs)?;
+        crate::document_cmd::write_atomic(to, &bytes)
+            .map_err(|e| CmdError::Unavailable(format!("couldn't write {}: {e}", to.display())))?;
+    }
+    s.reload_themes();
+    let what = match (plan.pack, designs) {
+        (false, _) => String::new(),
+        (true, 1) => " (a pack, 1 design)".into(),
+        (true, n) => format!(" (a pack, {n} designs)"),
+    };
+    out["message"] = json!(format!("Imported theme “{}”{what}", plan.theme.name));
+    Ok(out)
+}
+
+impl Session {
+    fn import_plan(&self, src: &std::path::Path, replace: bool) -> Result<ImportPlan, CmdError> {
+        let themes = self.themes_folder().ok_or_else(|| CmdError::Unavailable("there's no working folder".into()))?;
+        let is_dir = self.services.entry(src).map_err(CmdError::Fs)?.kind == EntryKind::Dir;
+        let file = if is_dir { src.join(PACK_THEME_FILE) } else { src.to_path_buf() };
+        if !is_dir && !file.to_string_lossy().to_ascii_lowercase().ends_with(THEME_SUFFIX) {
+            return Err(CmdError::BadParams(format!("pick a {THEME_SUFFIX} file or a theme pack folder")));
+        }
+        let bytes = self.services.read_head(&file, MAX_THEME_BYTES + 1).map_err(|e| {
+            CmdError::BadParams(if is_dir {
+                format!("that folder has no {PACK_THEME_FILE}: {e}")
+            } else {
+                e.to_string()
+            })
+        })?;
+        let (theme, mut warnings) = Theme::parse(&bytes, false).map_err(|e| CmdError::BadParams(e.to_string()))?;
+        if Theme::builtins().iter().any(|t| t.id == theme.id) {
+            return Err(CmdError::BadParams(format!(
+                "{:?} is a built-in theme's id; give the theme its own id",
+                theme.id
+            )));
+        }
+        let dest = if is_dir { themes.join(&theme.id) } else { themes.join(format!("{}{THEME_SUFFIX}", theme.id)) };
+        if let Some(have) = self.themes.themes.iter().find(|u| u.theme.id == theme.id) {
+            if have.pack.is_some() != is_dir {
+                return Err(CmdError::BadParams(format!(
+                    "“{}” is already loaded as a {}; remove it from Themes first",
+                    have.theme.name,
+                    if have.pack.is_some() { "pack" } else { "theme file" }
+                )));
+            }
+            if !replace {
+                return Err(CmdError::BadParams(format!(
+                    "“{}” is already loaded; pass replace: true to replace it",
+                    have.theme.name
+                )));
+            }
+        } else if self.services.entry(&dest).is_ok() && !replace {
+            return Err(CmdError::BadParams(format!(
+                "{} already exists; pass replace: true to replace it",
+                dest.display()
+            )));
+        }
+        let theme_dest = if is_dir { dest.join(PACK_THEME_FILE) } else { dest.clone() };
+        let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        if real(src).starts_with(real(&themes)) {
+            return Err(CmdError::BadParams("that theme is already in the Themes folder; use Reload Themes".into()));
+        }
+        let mut files = vec![(file, theme_dest)];
+        if is_dir {
+            files.extend(self.import_designs(src, &dest, &theme, &mut warnings));
+        } else if !theme.designs.is_empty() {
+            warnings.push("designs are read only from a theme pack (a folder with a theme.json)".into());
+        }
+        Ok(ImportPlan { theme, pack: is_dir, dest, files, warnings })
+    }
+
+    /// The pack's designs that are regular files and open, as `(from, to)`.
+    fn import_designs(
+        &self,
+        src: &std::path::Path,
+        dest: &std::path::Path,
+        theme: &Theme,
+        warnings: &mut Vec<String>,
+    ) -> Vec<(PathBuf, PathBuf)> {
+        let dir = src.join(DESIGNS_DIR);
+        let opts = ListOptions { include_hidden: false, max_entries: MAX_USER_THEMES };
+        let present: Vec<String> = match self.services.list_entries(&dir, &opts) {
+            Ok(l) => l.entries.into_iter().filter(|e| e.kind == EntryKind::File).map(|e| e.name).collect(),
+            Err(_) => Vec::new(),
+        };
+        let mut out = Vec::new();
+        for (role, rel) in &theme.designs {
+            let Ok(parts) = design_path(rel) else { continue };
+            let name = parts[1];
+            if !present.iter().any(|f| f == name) {
+                warnings.push(format!("design {role}: {rel} isn't in the pack (or is a link); not copied"));
+                continue;
+            }
+            let from = dir.join(name);
+            match self
+                .services
+                .read_head(&from, MAX_DESIGN_BYTES + 1)
+                .map_err(|e| e.to_string())
+                .and_then(|b| Design::read(&b).map_err(|e| e.to_string()))
+            {
+                Ok(_) => out.push((from, dest.join(DESIGNS_DIR).join(name))),
+                Err(e) => warnings.push(format!("design {role}: {e}; not copied")),
+            }
+        }
+        out
+    }
 }

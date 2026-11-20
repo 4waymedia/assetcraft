@@ -91,6 +91,10 @@ pub(crate) fn working_folder(s: &mut Session, p: &Value) -> CmdResult {
         }
     }
     s.recheck_working_folder();
+    if p.get("path").is_some() {
+        // Themes live in the working folder: a new one has its own.
+        s.reload_themes();
+    }
     let shown = |p: Option<PathBuf>| p.map(|p| p.to_string_lossy().into_owned());
     Ok(json!({
         "workingFolder": shown(s.working_folder()),

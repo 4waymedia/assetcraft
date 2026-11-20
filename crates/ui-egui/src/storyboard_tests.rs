@@ -2377,3 +2377,36 @@ fn view_safe_zones_toggles_the_viewers_guides() {
     assert_eq!(checked(&nav), Some(false));
     assert_eq!(nav.session().storyboard().unwrap().clips, before.clips, "guides change nothing");
 }
+
+/// TP2a: File › Import Theme File…, Import Theme Pack… and Reload Themes sit together above
+/// Storyboard Setup; Reload runs `storyboard.themes {reload: true}` and reports in the status bar.
+#[test]
+fn file_menu_imports_and_reloads_themes() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    let menus = crate::menu::menus(&nav);
+    let file = menus.iter().find(|m| m.title == "File").expect("File");
+    let labels: Vec<&str> = file
+        .entries
+        .iter()
+        .filter_map(|e| match e {
+            MenuEntry::Item { label, .. } => Some(label.as_str()),
+            _ => None,
+        })
+        .collect();
+    let at = |l: &str| labels.iter().position(|x| *x == l).unwrap_or_else(|| panic!("{l} in {labels:?}"));
+    assert_eq!(at("Import Theme Pack…"), at("Import Theme File…") + 1);
+    assert_eq!(at("Reload Themes"), at("Import Theme Pack…") + 1);
+    assert!(at("Reload Themes") < at("Storyboard Setup…"));
+    let reload = file
+        .entries
+        .iter()
+        .find(|e| matches!(e, MenuEntry::Item { label, .. } if label == "Reload Themes"))
+        .cloned()
+        .expect("Reload Themes");
+    let MenuEntry::Item { action, .. } = reload else { unreachable!() };
+    crate::menu::apply(&mut nav, &ctx, action);
+    // Picking nothing in the import picker does nothing.
+    nav.state.test_save_path = None;
+    crate::menu::apply(&mut nav, &ctx, crate::menu::MenuAction::ImportTheme(true));
+}

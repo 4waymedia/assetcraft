@@ -276,7 +276,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Themes",
         "Storyboard",
         None,
-        "{} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate)",
+        "{reload?: bool} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate; loaded at startup, `reload: true` reads the folder again)",
         crate::theme_cmd::sb_themes
     ),
     cmd!(
@@ -577,6 +577,15 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{volume: 0..1} → {volume} (how loud the Cut plays while editing; saved; the exported video doesn't use it — the song's level in the mix is storyboard.trackLevel)",
         crate::track_cmd::sb_listen_volume
+    ),
+    cmd!(
+        SAVE,
+        "storyboard.importTheme",
+        "Import Theme",
+        "File",
+        None,
+        "{path: .theme.json file | theme pack folder, replace?: bool, dryRun?: bool} → {id, name, kind: file|pack, to, files, warnings, dryRun, message} (copies the theme file, and a pack's theme.json and the designs it lists, into <working>/Themes — nothing else from the folder; read with the same checks as loading; a theme already loaded under that id only with `replace`; then loads it)",
+        crate::theme_cmd::sb_import_theme
     ),
     cmd!(
         EDIT,
