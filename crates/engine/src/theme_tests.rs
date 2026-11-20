@@ -655,10 +655,14 @@ fn a_packs_font_draws_its_designs_headline() {
     assert_eq!(font.bytes.len(), renamed_mono("Acme Pack Mono").len());
     assert!(designs.font("bold").is_none(), "a built-in theme brings none");
     // Reloading registers nothing new.
-    let faces = effectcraft_text::fonts::all_faces().len();
+    // Counted by this pack's family only: other tests register fonts in the same process at the
+    // same time (the font database is app-wide), so the whole count can move (seen on Windows).
+    let ours = || effectcraft_text::fonts::all_faces().iter().filter(|f| f.info.family == "Acme Pack Mono").count();
+    let faces = ours();
+    assert_eq!(faces, 1);
     let mut s = s;
     s.execute("storyboard.themes", &json!({ "reload": true })).unwrap();
-    assert_eq!(effectcraft_text::fonts::all_faces().len(), faces);
+    assert_eq!(ours(), faces);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -955,5 +959,65 @@ fn an_intro_and_outro_open_and_end_a_new_storyboard() {
         assert!(e.contains(why), "{p}: {e}");
     }
     assert_eq!(s.storyboard().unwrap(), &before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// TP5e: the credits card carries a CC-BY line for each theme pack file the new storyboard
+/// uses: the title theme's sting and an intro on the board, each by its credit (the pack rules
+/// make a CC-BY file name one);
+/// not a file the board doesn't use (the transition sound), nor one whose licence needs no line.
+#[test]
+fn the_credits_carry_the_cc_by_lines_of_the_pack_files_used() {
+    let (_, dir) = session("pack-credits");
+    let pack = dir.join("Themes").join("acme-credits");
+    for f in ["sounds", "video", "images", "fonts"] {
+        std::fs::create_dir_all(pack.join(f)).unwrap();
+    }
+    std::fs::write(pack.join("sounds/sting.wav"), crate::audio_tests::wav(1)).unwrap();
+    std::fs::write(pack.join("sounds/whoosh.wav"), crate::audio_tests::wav(1)).unwrap();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    std::fs::copy(lib.join("environments/snow_clearing_flythrough.mp4"), pack.join("video/intro.mp4")).unwrap();
+    std::fs::copy(lib.join("props/scythe_transparent.png"), pack.join("images/logo.png")).unwrap();
+    let mono = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    std::fs::copy(mono, pack.join("fonts/Mono.ttf")).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-credits".into();
+    t.name = "Acme Credits".into();
+    let a = |role: &str, path: &str, license: &str, credit: Option<&str>| assetcraft_storyboard::ThemeAsset {
+        role: role.into(),
+        path: path.into(),
+        license: license.into(),
+        credit: credit.map(str::to_owned),
+    };
+    t.assets = vec![
+        a("titleSound", "sounds/sting.wav", "CC-BY-4.0", Some("Sting by Jo Smith")),
+        a("transitionSound", "sounds/whoosh.wav", "CC-BY-4.0", Some("Whoosh by Al")),
+        a("intro", "video/intro.mp4", "CC-BY-4.0", Some("Opening by Studio North")),
+        a("logo", "images/logo.png", "CC0-1.0", None),
+        a("font", "fonts/Mono.ttf", "OFL-1.1", None),
+    ];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let credits = |s: &Session| s.storyboard().unwrap().clips.last().unwrap().description.clone();
+    let intro = pack.join("video/intro.mp4").to_string_lossy().into_owned();
+    run(
+        &mut s,
+        "storyboard.new",
+        json!({ "sample": true, "titleTheme": "acme-credits", "intro": intro, "credits": true }),
+    );
+    let text = credits(&s);
+    assert!(text.contains("Sting by Jo Smith · CC BY 4.0"), "{text}");
+    assert!(text.contains("Opening by Studio North · CC BY 4.0"), "{text}");
+    assert!(!text.contains("Whoosh"), "not used: {text}");
+    assert!(!text.contains("logo") && !text.contains("Mono"), "no line needed: {text}");
+    assert!(text.ends_with("Made with AssetCraft"), "{text}");
+    // The pack's theme only: its sting, not the intro it isn't holding.
+    run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": "acme-credits", "credits": true }));
+    let text = credits(&s);
+    assert!(text.contains("Sting by Jo Smith") && !text.contains("Studio North"), "{text}");
+    // Neither: no pack lines.
+    run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": "paper", "credits": true }));
+    assert!(!credits(&s).contains("CC BY"), "{}", credits(&s));
     let _ = std::fs::remove_dir_all(&dir);
 }

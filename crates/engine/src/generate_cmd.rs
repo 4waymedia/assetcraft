@@ -196,7 +196,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     let (mut board, report) = generate(&cue, &opts).map_err(|e| CmdError::Unavailable(e.to_string()))?;
     // The intro and outro (TP5d) first, so the credits follow the outro.
     let bookends = board.add_bookends(intro, outro);
-    let credits = crate::template_cmd::append_credits_if(s, p, &mut board);
+    let credits = crate::template_cmd::append_credits_if(s, p, &mut board, title_theme);
     if (credits > 0 || !bookends.is_empty())
         && let Some(track) = board.track.clone()
     {

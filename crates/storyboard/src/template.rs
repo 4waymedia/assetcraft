@@ -367,13 +367,25 @@ impl Storyboard {
     /// words filled (`{title}`, `{music}`; a line left empty is dropped), the last clip fading
     /// out. Returns how many clips were added.
     pub fn append_credits(&mut self, credits: &Storyboard) -> usize {
+        self.append_credits_with(credits, &[])
+    }
+
+    /// [`append_credits`](Self::append_credits) with more attribution lines (TP5e: the CC-BY
+    /// lines of the theme pack files the board uses) under the song's, in `{music}`: a template
+    /// the user edited keeps working, its attributions in one place.
+    pub fn append_credits_with(&mut self, credits: &Storyboard, more: &[String]) -> usize {
         let next_scene = self.scenes.iter().map(|s| s.id.0).max().unwrap_or(0) + 1;
         let next_clip = self.clips.iter().map(|c| c.id.0).max().unwrap_or(0) + 1;
-        let music = self
+        let song = self
             .track
             .as_ref()
             .map(|t| t.credit.clone().unwrap_or_else(|| format!("Music: {}", t.name)))
             .unwrap_or_default();
+        let music = std::iter::once(song)
+            .chain(more.iter().cloned())
+            .filter(|l| !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
         let title = self.name.clone();
         let fill = |text: &str| -> String {
             text.replace("{title}", &title)

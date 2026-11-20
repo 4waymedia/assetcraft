@@ -34,9 +34,12 @@ fn a_registered_font_is_the_family_a_design_draws_with() {
     assert_eq!(faces, [FontFace { family: "Acme Sans Mono".into(), style: "Regular".into() }]);
     assert!(has_family("acme sans mono") && has_family("Inter"));
     // The same bytes again: the same faces, and the database doesn't grow.
-    let before = effectcraft_text::fonts::all_faces().len();
+    // Counted by this family only (the database is app-wide; parallel tests may add others).
+    let ours = || effectcraft_text::fonts::all_faces().iter().filter(|f| f.info.family == "Acme Sans Mono").count();
+    let before = ours();
+    assert_eq!(before, 1);
     assert_eq!(register_font(renamed_mono("Acme Sans Mono")).expect("again"), faces);
-    assert_eq!(effectcraft_text::fonts::all_faces().len(), before);
+    assert_eq!(ours(), before);
     // A design naming it draws its glyphs (JetBrains Mono's), not Inter's.
     let d = builtin::builtin(LASER_TRACE).expect("listed").expect("builds");
     let words = |family: &str| {

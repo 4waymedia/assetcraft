@@ -197,12 +197,62 @@ pub(crate) fn bookends_param(
     Ok((one("intro")?, one("outro")?))
 }
 
-pub(crate) fn append_credits_if(s: &Session, p: &Value, board: &mut Storyboard) -> usize {
+pub(crate) fn append_credits_if(
+    s: &Session,
+    p: &Value,
+    board: &mut Storyboard,
+    title_theme: Option<assetcraft_storyboard::ThemeChoice>,
+) -> usize {
     if p.get("credits").and_then(Value::as_bool).unwrap_or(false) {
-        board.append_credits(&s.credits_template())
+        let more = pack_credits(s, board, title_theme);
+        board.append_credits_with(&s.credits_template(), &more)
     } else {
         0
     }
+}
+
+/// The pack asset roles a title in that pack's theme uses (TP5e): its sting, its designs'
+/// pictures and video, its fonts. (Intro and outro count when they're on the board; the
+/// transition sound and the music bed aren't used, TP5b–c.)
+const USED_WITH_THEME: [&str; 6] = ["titleSound", "logo", "texture", "backgroundImage", "backgroundVideo", "font"];
+
+/// The CC-BY attribution lines for the theme pack files `board` uses (TP5e), in pack order,
+/// each once: the files of the packs whose theme its titles take (`title_theme`, or one a title
+/// already names) by [`USED_WITH_THEME`], and any pack file the board holds as a clip's asset
+/// (an intro, an outro). A line is the file's credit and the licence (the pack rules refuse a
+/// CC-BY file without a credit; its name stands in should one get through). Other licences need
+/// no line in the credits.
+pub(crate) fn pack_credits(
+    s: &Session,
+    board: &Storyboard,
+    title_theme: Option<assetcraft_storyboard::ThemeChoice>,
+) -> Vec<String> {
+    let mut themes: Vec<String> =
+        board.clips.iter().filter_map(|c| c.text_style.theme_id).map(|t| t.as_str().to_owned()).collect();
+    if let Some(assetcraft_storyboard::ThemeChoice::User(u)) = title_theme {
+        themes.push(u.as_str().to_owned());
+    }
+    let held: Vec<&str> = board.clips.iter().flat_map(|c| c.asset_ids.iter()).map(|a| a.0.as_str()).collect();
+    let mut lines: Vec<String> = Vec::new();
+    for u in s.loaded_themes() {
+        let theme_used = themes.contains(&u.theme.id);
+        for a in &u.assets {
+            let used = (theme_used && USED_WITH_THEME.contains(&a.role.as_str()))
+                || held.contains(&&*a.path.to_string_lossy());
+            if !used || a.license != "CC-BY-4.0" {
+                continue;
+            }
+            let who =
+                a.credit.clone().filter(|c| !c.trim().is_empty()).unwrap_or_else(|| {
+                    a.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                });
+            let line = format!("{} · CC BY 4.0", who.trim());
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines
 }
 
 /// What a template's song was made into: the re-cut and the music under it.

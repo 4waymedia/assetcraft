@@ -1868,3 +1868,23 @@ fn bookends_open_and_end_the_board() {
     assert_eq!(board, before);
     assert_eq!(board.validate(&crate::Limits::default()), Ok(()), "still a valid board");
 }
+
+/// TP5e: more attribution lines go under the song's in `{music}`, empty ones dropped; a plain
+/// append is the same as one with none.
+#[test]
+fn credits_take_more_attribution_lines_under_the_songs() {
+    let mut board = crate::sample::sample();
+    board.name = "Film".into();
+    let plain = {
+        let mut b = board.clone();
+        b.append_credits(&crate::credits_template());
+        b.clips.last().unwrap().description.clone()
+    };
+    assert_eq!(plain, "Film\nMusic: Sample track\nMade with AssetCraft");
+    let more = ["Sting by Jo · CC BY 4.0".to_string(), "  ".to_string(), "intro.mp4 · CC BY 4.0".to_string()];
+    board.append_credits_with(&crate::credits_template(), &more);
+    assert_eq!(
+        board.clips.last().unwrap().description,
+        "Film\nMusic: Sample track\nSting by Jo · CC BY 4.0\nintro.mp4 · CC BY 4.0\nMade with AssetCraft"
+    );
+}

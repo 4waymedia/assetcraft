@@ -229,7 +229,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     // before the snap so it is on the beat too. The intro and outro (TP5d) go on first, so the
     // credits follow the outro; the snap keeps their lengths.
     let bookends = board.add_bookends(intro, outro);
-    crate::template_cmd::append_credits_if(s, p, &mut board);
+    crate::template_cmd::append_credits_if(s, p, &mut board, title_theme);
     crate::inset_cmd::apply_defaults(&mut board, p)?;
     // The Start screen's AUDIO TRACK "Voiceover" / "Song + voiceover" (SR4c).
     match p.get("voiceover") {
