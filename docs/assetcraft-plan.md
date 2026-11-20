@@ -185,7 +185,9 @@ different existing file only with `overwrite: true`) and `storyboard.exportVideo
 theme file or pack copied into `<working>/Themes`, written atomically; a loaded theme replaced
 only with `replace: true`) and `storyboard.editDesign` (TP4c-1, 2026-11-20: a pack design's edit
 copy `designs/<name>.ecproj`, written atomically only when none is there, then opened in
-EffectCraft; `Effects::EDIT_IN_APP`, which always confirms): `write-user-file` + `write-app-state`, so remote callers confirm them
+EffectCraft; `Effects::EDIT_IN_APP`, which always confirms) and `storyboard.saveDesign` (TP4c-2,
+2026-11-20: the edit copy written into the pack's `.ectemplate`, atomically, its other entries
+kept; refused unless the edit copy is the one drawing and reads as a design): `write-user-file` + `write-app-state`, so remote callers confirm them
 (`Effects::COPY`, `Effects::SAVE`, `Effects::EXPORT`).
 
 **Features**

@@ -252,6 +252,8 @@ pub(crate) struct SbUi {
     pub(crate) play_started: Option<f64>,
     /// Re-cut toast and when it was first drawn.
     pub(crate) toast: Option<(String, Option<f64>)>,
+    /// egui time the theme packs were last checked for changes (TP4c-2).
+    pub(crate) themes_checked: Option<f64>,
     /// The Start storyboard screen (design 3b / 3c).
     pub(crate) start: crate::start_view::StartUi,
     /// The open folder's modification times, built once per session generation (finding B1:

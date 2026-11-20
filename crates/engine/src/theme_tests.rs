@@ -759,3 +759,85 @@ fn a_pack_design_opens_in_effectcraft_and_its_saved_edit_copy_is_used() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP4c-2: `ifChanged` reloads only when the Themes folder moved (a save in EffectCraft, a new
+/// pack), and Save into Template writes the drawing edit into the pack's template so an import
+/// elsewhere carries it.
+#[test]
+fn a_saved_edit_shows_without_a_reload_and_saves_into_the_template() {
+    use assetcraft_titles::builtin::{LASER_TRACE, STACK, builtin};
+    use assetcraft_titles::{Fill, Slot};
+    let (_, dir) = session("save-design");
+    let pack = dir.join("Themes").join("acme-save");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let laser = builtin(LASER_TRACE).unwrap().unwrap();
+    let stack = builtin(STACK).unwrap().unwrap();
+    let template_path = pack.join("designs/card.ectemplate");
+    std::fs::write(&template_path, laser.to_template()).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-save".into();
+    t.name = "Acme Save".into();
+    t.designs = [("card".to_string(), "designs/card.ectemplate".to_string())].into_iter().collect();
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let poll = json!({ "reload": true, "ifChanged": true });
+    let card = |s: &Session| s.theme_designs().packs.iter().find(|d| d.role == "card").cloned().unwrap();
+    let fill = Fill::default().text(Slot::Headline, "SAVE");
+    let at = |d: &assetcraft_titles::Design| d.render(&fill, 0.9, 0.25).unwrap();
+    // Nothing moved: no reload (and no listing built).
+    assert_eq!(run(&mut s, "storyboard.themes", poll.clone()), json!({ "reloaded": false }));
+    // Nothing to save yet.
+    let params = json!({ "theme": "acme-save", "role": "card" });
+    let e = s.execute("storyboard.saveDesign", &params).unwrap_err().to_string();
+    assert!(e.contains("no edit copy newer than its template"), "{e}");
+    // "Saved in EffectCraft": the edit copy appears. The next check reloads and draws it.
+    let edit = pack.join("designs/card.ecproj");
+    let (stack_text, _, _) = assetcraft_titles::template_project(&stack.to_template()).unwrap();
+    std::fs::write(&edit, &stack_text).unwrap();
+    let r = run(&mut s, "storyboard.themes", poll.clone());
+    assert_eq!(r["reloaded"], true);
+    assert!(r["message"].as_str().unwrap().starts_with("Themes reloaded"));
+    assert_eq!(at(&card(&s).design), at(&stack));
+    assert_eq!(s.design_edit_copy("acme-save", "card"), Some(edit.as_path()));
+    assert_eq!(run(&mut s, "storyboard.themes", poll.clone())["reloaded"], false, "and only once");
+    // A dry run checks and writes nothing.
+    let before = std::fs::read(&template_path).unwrap();
+    let dry = run(&mut s, "storyboard.saveDesign", json!({ "theme": "acme-save", "role": "card", "dryRun": true }));
+    assert_eq!(dry["dryRun"], true);
+    assert_eq!(std::fs::read(&template_path).unwrap(), before);
+    // A broken edit is refused, the template untouched.
+    std::fs::write(&edit, "{ not a project").unwrap();
+    run(&mut s, "storyboard.themes", poll.clone());
+    // (A broken copy isn't drawing, so there's nothing to save.)
+    assert!(s.execute("storyboard.saveDesign", &params).is_err());
+    assert_eq!(std::fs::read(&template_path).unwrap(), before);
+    // For real: the template now holds the edit (its name kept), and the edit copy stays.
+    std::fs::write(&edit, &stack_text).unwrap();
+    run(&mut s, "storyboard.themes", poll.clone());
+    let r = run(&mut s, "storyboard.saveDesign", params.clone());
+    assert!(r["message"].as_str().unwrap().contains("into card.ectemplate"), "{r}");
+    let saved = assetcraft_titles::Design::read(&std::fs::read(&template_path).unwrap()).unwrap();
+    assert_eq!(at(&saved), at(&stack));
+    assert_eq!(saved.name(), laser.name());
+    assert!(edit.exists(), "the edit copy stays for more editing");
+    assert_eq!(at(&card(&s).design), at(&stack), "still drawing the edit");
+    // Imported elsewhere (only what theme.json lists travels), the pack draws the edit.
+    let (_, other) = session("save-design-import");
+    let prefs = Prefs { working_folder: Some(other.clone()), ..Prefs::default() };
+    let mut there = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    run(&mut there, "storyboard.importTheme", json!({ "path": pack.to_string_lossy() }));
+    assert!(!other.join("Themes/acme-save/designs/card.ecproj").exists());
+    assert_eq!(at(&card(&there).design), at(&stack));
+    // A new pack dropped into Themes is picked up too.
+    let more = dir.join("Themes").join("acme-more");
+    std::fs::create_dir_all(&more).unwrap();
+    let mut t2 = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Paper);
+    t2.id = "acme-more".into();
+    t2.name = "Acme More".into();
+    std::fs::write(more.join("theme.json"), t2.to_json()).unwrap();
+    assert_eq!(run(&mut s, "storyboard.themes", poll)["reloaded"], true);
+    assert!(s.loaded_themes().iter().any(|u| u.theme.id == "acme-more"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}

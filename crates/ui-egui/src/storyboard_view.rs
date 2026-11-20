@@ -132,7 +132,25 @@ pub(crate) fn mode_bar(nav: &mut Navigator, ui: &mut Ui) {
 }
 
 /// Storyboard mode's main area: Inspector on the right, Shot map in the middle.
+/// How often an open storyboard checks its theme packs for changes, in seconds (TP4c-2).
+pub(crate) const THEMES_POLL: f64 = 1.5;
+
+/// Pick up a theme pack changed on disk (a design saved in EffectCraft, a pack dropped in): a
+/// reload only when the Themes folder's signature moved. Waits [`THEMES_POLL`] between checks
+/// and keeps the window waking that often, so a save shows without touching AssetCraft.
+fn check_themes(nav: &mut Navigator, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    if nav.state.storyboard.themes_checked.is_none_or(|t| now - t >= THEMES_POLL || now < t) {
+        nav.state.storyboard.themes_checked = Some(now);
+        nav.run("storyboard.themes", json!({ "reload": true, "ifChanged": true }));
+    }
+    ctx.request_repaint_after(std::time::Duration::from_secs_f64(THEMES_POLL));
+}
+
 pub(crate) fn show(nav: &mut Navigator, ui: &mut Ui) {
+    if nav.session.storyboard().is_some() {
+        check_themes(nav, ui.ctx());
+    }
     if nav.session.storyboard().is_none() || nav.state.storyboard.start.open {
         crate::start_view::show(nav, ui);
         return;

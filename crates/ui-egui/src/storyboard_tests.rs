@@ -2591,3 +2591,35 @@ fn the_viewer_sets_a_pack_themes_words_in_its_font() {
     assert!(width(&inter, "MMMM") > width(&inter, "iiii") * 1.5);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP4c-2: with a storyboard open, a theme pack changed on disk is picked up on the next check
+/// (every 1.5 s of egui time), with no Reload Themes.
+#[test]
+fn an_open_storyboard_picks_up_a_new_theme_pack_by_itself() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-poll-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Themes")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let prefs = assetcraft_engine::Prefs { working_folder: Some(dir.clone()), ..assetcraft_engine::Prefs::default() };
+    let mut nav =
+        Navigator::with_one_worker(Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs));
+    let ctx = Context::default();
+    frame(&ctx, &mut nav, Vec::new(), 0.0);
+    let menus = nav.menus();
+    let entry = find_entry(&menus, "File", "New Storyboard from Sample").cloned().expect("menu entry");
+    assert!(nav.activate(&ctx, &entry));
+    frame(&ctx, &mut nav, Vec::new(), 0.1);
+    assert!(nav.session().loaded_themes().is_empty());
+    // A pack lands in Themes (saved by EffectCraft, unzipped by hand…).
+    let pack = dir.join("Themes").join("acme-poll");
+    std::fs::create_dir_all(&pack).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Paper);
+    t.id = "acme-poll".into();
+    t.name = "Acme Poll".into();
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    frame(&ctx, &mut nav, Vec::new(), 0.5);
+    assert!(nav.session().loaded_themes().is_empty(), "not before the next check");
+    frame(&ctx, &mut nav, Vec::new(), 1.7);
+    assert_eq!(nav.session().loaded_themes().len(), 1, "picked up");
+    let _ = std::fs::remove_dir_all(&dir);
+}

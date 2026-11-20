@@ -180,6 +180,7 @@ mod tests {
                 "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",
+                "storyboard.saveDesign",
                 "storyboard.saveAs",
                 "storyboard.saveTemplate",
                 "storyboard.exportVideo"
@@ -209,8 +210,8 @@ mod tests {
             ])
         );
         // User-file writers: the Copy import into the working folder (W1), the storyboard's own
-        // document (SF1), the export (SF5-4), a theme import into Themes (TP2a) and a pack
-        // design's edit copy (TP4c). Nothing else writes a user file yet.
+        // document (SF1), the export (SF5-4), a theme import into Themes (TP2a), a pack design's
+        // edit copy (TP4c-1) and its template (TP4c-2). Nothing else writes a user file yet.
         assert_eq!(
             ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
             BTreeSet::from([
@@ -218,6 +219,7 @@ mod tests {
                 "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",
+                "storyboard.saveDesign",
                 "storyboard.saveAs",
                 "storyboard.saveTemplate",
                 "storyboard.exportVideo"

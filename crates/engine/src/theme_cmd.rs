@@ -131,6 +131,9 @@ pub(crate) struct ThemeLibrary {
     looks: assetcraft_storyboard::UserLooks,
     /// Each pack's card and banner designs, filled with its theme (TP2a-3).
     designs: std::sync::Arc<assetcraft_animatic::DesignSet>,
+    /// The Themes folder's signature when these were loaded (TP4c-2): a reload `ifChanged`
+    /// skips when it's the same.
+    signature: u64,
 }
 
 /// The style name a `type` weight asks for (`700` → `Bold`): what a design's font control and a
@@ -182,6 +185,8 @@ impl Session {
     /// Re-read `<working>/Themes` (startup, `storyboard.themes {reload}`, an import, a new
     /// working folder).
     pub(crate) fn reload_themes(&mut self) {
+        // Taken first: a file saved while loading changes it again, so the next check reloads.
+        let signature = self.themes_signature();
         let (mut themes, problems) = self.user_themes();
         // Each pack's fonts registered for its designs, and its display face for its built-in
         // looks (TP4a, TP4b).
@@ -222,7 +227,7 @@ impl Session {
             .collect();
         let fonts = themes.iter().zip(display_fonts).filter_map(|(u, f)| Some((u.theme.id.clone(), f?))).collect();
         let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills, fonts };
-        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set) };
+        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set), signature };
     }
 
     /// Every design a clip can draw through: the packs' card and banner designs (TP2a-3), the
@@ -241,9 +246,57 @@ impl Session {
         &self.themes.themes
     }
 
+    /// The edit copy pack theme `theme`'s `role` design is drawing from (TP4c), if it is.
+    pub fn design_edit_copy(&self, theme: &str, role: &str) -> Option<&std::path::Path> {
+        let u = self.themes.themes.iter().find(|u| u.theme.id == theme)?;
+        u.designs.iter().find(|d| d.role == role)?.edit.as_deref()
+    }
+
     /// `<working>/Themes`, where the user's theme files live.
     pub fn themes_folder(&self) -> Option<PathBuf> {
         self.working_folder().map(|w| w.join(THEMES_DIR))
+    }
+
+    /// A hash of what loading the themes reads (TP4c-2): the Themes folder's entries, and each
+    /// pack's own entries and those of its `designs/` and asset folders (a file by name, size
+    /// and time; a folder by name). Only listings, no file is read, so it's cheap to take every
+    /// second or two.
+    pub(crate) fn themes_signature(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let Some(dir) = self.themes_folder() else { return 0 };
+        let opts = ListOptions { include_hidden: false, max_entries: MAX_USER_THEMES };
+        let list = |path: &std::path::Path, h: &mut std::collections::hash_map::DefaultHasher| -> Vec<PathBuf> {
+            let Ok(listing) = self.services.list_entries(path, &opts) else {
+                0u8.hash(h);
+                return Vec::new();
+            };
+            let mut entries = listing.entries;
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            let mut dirs = Vec::new();
+            for e in entries {
+                if e.kind == EntryKind::Dir {
+                    // A folder by its name only: Windows (NTFS) updates the times and size a
+                    // listing shows for a folder lazily, so two listings of an unchanged folder
+                    // can differ. What changes inside it shows in its own listing.
+                    (&e.name, true).hash(h);
+                    dirs.push(e.path);
+                } else {
+                    (&e.name, false, e.size, e.modified).hash(h);
+                }
+            }
+            dirs
+        };
+        for pack in list(&dir, &mut h) {
+            for sub in list(&pack, &mut h) {
+                let name = sub.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                if name == "designs" || assetcraft_storyboard::ASSET_ROLES.iter().any(|(_, folder, _)| *folder == name)
+                {
+                    list(&sub, &mut h);
+                }
+            }
+        }
+        h.finish()
     }
 
     /// The user's theme files: those that loaded, and `(path, reason)` for those that didn't.
@@ -661,6 +714,62 @@ pub(crate) fn sb_edit_design(s: &mut Session, p: &Value) -> CmdResult {
     Ok(out(false, message))
 }
 
+/// `storyboard.saveDesign {theme, role, dryRun?}` (TP4c-2): Save into Template. The design's
+/// edit copy (the one drawing: newer than the template) is written into its `.ectemplate`,
+/// atomically, keeping the template's other entries, so the pack carries the edit when it's
+/// shared or imported. The edit copy stays for more editing.
+pub(crate) fn sb_save_design(s: &mut Session, p: &Value) -> CmdResult {
+    let id = p.get("theme").and_then(Value::as_str).ok_or_else(|| CmdError::BadParams("`theme` is required".into()))?;
+    let role = p.get("role").and_then(Value::as_str).ok_or_else(|| CmdError::BadParams("`role` is required".into()))?;
+    let dry = match p.get("dryRun") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(CmdError::BadParams("`dryRun` must be true or false".into())),
+    };
+    let u = s
+        .themes
+        .themes
+        .iter()
+        .find(|u| u.theme.id == id)
+        .ok_or_else(|| CmdError::BadParams(format!("no loaded theme `{id}`")))?;
+    let d = u
+        .designs
+        .iter()
+        .find(|d| d.role == role)
+        .ok_or_else(|| CmdError::BadParams(format!("“{}” has no {role} design", u.theme.name)))?;
+    let edit = d.edit.clone().ok_or_else(|| {
+        CmdError::Unavailable(format!(
+            "the {role} design of “{}” has no edit copy newer than its template: nothing to save",
+            u.theme.name
+        ))
+    })?;
+    let (template, theme_name) = (d.path.clone(), u.theme.name.clone());
+    let name = |p: &std::path::Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let message = format!(
+        "Saved the {role} design of “{theme_name}” into {} (from {}): the pack carries it now.",
+        name(&template),
+        name(&edit)
+    );
+    let out = |dry: bool, message: String| json!({ "theme": id, "role": role, "path": template.to_string_lossy(), "from": edit.to_string_lossy(), "dryRun": dry, "message": message });
+    // Read and rebuilt before anything is written, dry run or not: a broken edit is refused.
+    let old = s.services.read_head(&template, MAX_DESIGN_BYTES + 1)?;
+    let text = s.services.read_head(&edit, MAX_DESIGN_BYTES + 1)?;
+    if old.len() > MAX_DESIGN_BYTES || text.len() > MAX_DESIGN_BYTES {
+        return Err(CmdError::Unavailable("the design is too big".into()));
+    }
+    let text = std::str::from_utf8(&text)
+        .map_err(|_| CmdError::Unavailable(format!("{} isn't a project file", name(&edit))))?;
+    let rebuilt = assetcraft_titles::template_with_project(&old, text)
+        .map_err(|e| CmdError::Unavailable(format!("{}: {e}", name(&edit))))?;
+    if dry {
+        return Ok(out(true, message));
+    }
+    crate::document_cmd::write_atomic(&template, &rebuilt)
+        .map_err(|e| CmdError::Unavailable(format!("couldn't write {}: {e}", name(&template))))?;
+    s.reload_themes();
+    Ok(out(false, message))
+}
+
 /// A design as the listing shows it.
 fn design_json(role: &str, d: &Design) -> Value {
     let (width, height) = d.size();
@@ -685,13 +794,20 @@ fn theme_json(t: &Theme, source: &str) -> Value {
 /// `storyboard.themes {reload?: bool}`: the themes as loaded at startup; `reload` reads the
 /// Themes folder again first.
 pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
-    let reload = match p.get("reload") {
-        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
-        Some(Value::Bool(true)) => true,
-        Some(_) => return Err(CmdError::BadParams("`reload` must be true or false".into())),
+    let flag = |key: &str| match p.get(key) {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(false),
+        Some(Value::Bool(true)) => Ok(true),
+        Some(_) => Err(CmdError::BadParams(format!("`{key}` must be true or false"))),
     };
-    if reload {
+    let (reload, if_changed) = (flag("reload")?, flag("ifChanged")?);
+    // TP4c-2: `ifChanged` reloads only when the Themes folder's signature moved (a save in
+    // EffectCraft, a pack dropped in), so the Storyboard can ask every second or two.
+    let reloaded = reload && (!if_changed || s.themes_signature() != s.themes.signature);
+    if reloaded {
         s.reload_themes();
+    }
+    if reload && if_changed && !reloaded {
+        return Ok(json!({ "reloaded": false }));
     }
     let mut themes: Vec<Value> = Theme::builtins().iter().map(|t| theme_json(t, "builtin")).collect();
     let (ok, bad) = (&s.themes.themes, &s.themes.problems);
@@ -740,8 +856,9 @@ pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
         "problems": problems,
         "builtinDesigns": builtin_designs,
         "folder": s.themes_folder().map(|f| f.to_string_lossy().into_owned()),
+        "reloaded": reloaded,
     });
-    if reload {
+    if reloaded {
         let n = s.themes.themes.len();
         let bad = s.themes.problems.len();
         out["message"] = json!(match bad {

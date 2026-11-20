@@ -75,3 +75,27 @@ fn an_edit_copy_reads_like_its_template() {
     assert!(Design::read_project(&effectcraft_project::Project::default().to_json(), comp).is_err(), "no controls");
     assert!(super::template_project(b"not a zip").is_err());
 }
+
+/// TP4c-2: Save into Template keeps the template's other entries and its name, takes the
+/// edit's project (and composition), and reads back as the edit.
+#[test]
+fn an_edit_saves_into_its_template() {
+    let laser = builtin::builtin(builtin::LASER_TRACE).expect("listed").expect("builds");
+    let stack = builtin::builtin(builtin::STACK).expect("listed").expect("builds");
+    // A template with one more entry (a poster), which must survive.
+    let mut entries = effectcraft_lottie::zip::read_stored(&laser.to_template());
+    entries.push(("poster.png".into(), vec![1, 2, 3]));
+    let template = effectcraft_lottie::zip::store(&entries);
+    let (edit, _, _) = super::template_project(&stack.to_template()).expect("a template");
+    let saved = super::template_with_project(&template, &edit).expect("saved");
+    let back = Design::read(&saved).expect("reads back");
+    assert_eq!(back.name(), laser.name(), "the template's name");
+    let fill = Fill::default().text(Slot::Headline, "SAVED");
+    assert_eq!(back.render(&fill, 0.9, 0.25).expect("renders"), stack.render(&fill, 0.9, 0.25).expect("renders"));
+    let kept = effectcraft_lottie::zip::read_stored(&saved);
+    assert!(kept.iter().any(|(n, b)| n == "poster.png" && b == &[1, 2, 3]));
+    assert_eq!(kept.len(), entries.len());
+    // A broken edit, or a template that isn't one, changes nothing.
+    assert!(super::template_with_project(&template, "{ nope").is_err());
+    assert!(super::template_with_project(b"not a zip", &edit).is_err());
+}

@@ -276,7 +276,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Themes",
         "Storyboard",
         None,
-        "{reload?: bool} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}], assets?: [{role, path, license, credit}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate; loaded at startup, `reload: true` reads the folder again)",
+        "{reload?: bool, ifChanged?: bool} → {reloaded, themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path, editCopy}], assets?: [{role, path, license, credit}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate; loaded at startup, `reload: true` reads the folder again)",
         crate::theme_cmd::sb_themes
     ),
     cmd!(
@@ -579,12 +579,21 @@ static COMMANDS: &[CommandSpec] = &[
         crate::track_cmd::sb_listen_volume
     ),
     cmd!(
+        SAVE,
+        "storyboard.saveDesign",
+        "Save Design Edit into Template",
+        "Storyboard",
+        None,
+        "{theme: pack theme id, role, dryRun?: bool} → {theme, role, path, from, dryRun, message} (writes the design's edit copy into its .ectemplate, atomically, keeping the template's other entries, so a shared or imported pack carries the edit; only while the edit copy is the one drawing)",
+        crate::theme_cmd::sb_save_design
+    ),
+    cmd!(
         EDIT_IN_APP,
         "storyboard.editDesign",
         "Edit Design in EffectCraft",
         "Storyboard",
         None,
-        "{theme: pack theme id, role: card|banner|…, dryRun?: bool} → {theme, role, path, created, program, dryRun, message} (opens the pack design's edit copy, designs/<name>.ecproj, in EffectCraft; writes it from the template first if it isn't there, atomically, never over an existing one; while it's newer than the template, loading uses it — save in EffectCraft, then storyboard.themes {reload: true})",
+        "{theme: pack theme id, role: card|banner|…, dryRun?: bool} → {theme, role, path, created, program, dryRun, message} (opens the pack design's edit copy, designs/<name>.ecproj, in EffectCraft; writes it from the template first if it isn't there, atomically, never over an existing one; while it's newer than the template, loading uses it — a save shows on the next storyboard.themes {reload: true, ifChanged: true}; storyboard.saveDesign keeps it in the template)",
         crate::theme_cmd::sb_edit_design
     ),
     cmd!(

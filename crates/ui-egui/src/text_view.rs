@@ -249,7 +249,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     });
     let id = clip.id.0;
     let mut style_edit: Option<serde_json::Value> = None;
-    let mut edit_design: Option<serde_json::Value> = None;
+    let mut edit_design: Option<(&str, serde_json::Value)> = None;
     // The user's loaded themes (TP2a-2): picked by id, listed after the built-ins.
     let looks = nav.session.user_looks().clone();
     let yours: Vec<(String, String, Look)> = nav
@@ -366,10 +366,25 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             } else {
                 "EffectCraft isn't installed here (or set ASSETCRAFT_EFFECTCRAFT_EXE to its program, then press F5)"
             };
-            let button = ui.add_enabled(installed, egui::Button::new("Edit in EffectCraft…").small());
-            if button.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
-                edit_design = Some(json!({ "theme": uid, "role": assetcraft_animatic::design_role(kind) }));
-            }
+            let role = assetcraft_animatic::design_role(kind);
+            ui.horizontal(|ui| {
+                let button = ui.add_enabled(installed, egui::Button::new("Edit in EffectCraft…").small());
+                if button.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
+                    edit_design = Some(("storyboard.editDesign", json!({ "theme": uid, "role": role })));
+                }
+                // TP4c-2: the edit is drawing (its copy is newer); keep it in the pack's template.
+                if nav.session.design_edit_copy(uid, role).is_some()
+                    && ui
+                        .small_button("Save into Template")
+                        .on_hover_text(
+                            "Writes your edit into the pack's design template, so the pack carries it \
+                             when it's shared or imported. The edit copy stays for more editing.",
+                        )
+                        .clicked()
+                {
+                    edit_design = Some(("storyboard.saveDesign", json!({ "theme": uid, "role": role })));
+                }
+            });
             ui.end_row();
         }
         let theme_moves = style.look_with(&looks).motion;
@@ -432,8 +447,8 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     if let Some(p) = style_edit {
         nav.run("storyboard.text.style", p);
     }
-    if let Some(p) = edit_design {
-        nav.run("storyboard.editDesign", p);
+    if let Some((command, p)) = edit_design {
+        nav.run(command, p);
     }
     // Preview: replays the intro, then holds for a second.
     // In the board's frame (F2): a vertical post previews tall, held to a sensible height.

@@ -315,6 +315,37 @@ impl Design {
     }
 }
 
+/// `template` with its project replaced by `text` (an edit copy saved in EffectCraft: "Save
+/// into Template", TP4c-2). Every other entry is kept as it was; the manifest's composition is
+/// set to the one the edit draws. Refused unless the template and the edit both read as designs,
+/// and the result reads back.
+pub fn template_with_project(template: &[u8], text: &str) -> Result<Vec<u8>, DesignError> {
+    let (_, comp, _) = template_project(template)?;
+    let design = Design::read_project(text, comp)?;
+    let entries = catch_unwind(|| effectcraft_lottie::zip::read_stored(template))
+        .map_err(|_| DesignError::NotTemplate("the archive can't be read".into()))?;
+    let mut out = Vec::with_capacity(entries.len());
+    for (name, bytes) in entries {
+        let bytes = match name.as_str() {
+            "project.ecproj" => text.as_bytes().to_vec(),
+            "manifest.json" => {
+                let mut m: serde_json::Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| DesignError::NotTemplate(format!("manifest.json: {e}")))?;
+                let o = m
+                    .as_object_mut()
+                    .ok_or_else(|| DesignError::NotTemplate("manifest.json isn't an object".into()))?;
+                o.insert("comp".into(), serde_json::json!(design.comp.0));
+                m.to_string().into_bytes()
+            }
+            _ => bytes,
+        };
+        out.push((name, bytes));
+    }
+    let rebuilt = effectcraft_lottie::zip::store(&out);
+    Design::read(&rebuilt)?;
+    Ok(rebuilt)
+}
+
 /// A template's project (`project.ecproj` text), the composition its manifest names, and its
 /// name if it has one (TP4c: the edit copy is written from this).
 pub fn template_project(bytes: &[u8]) -> Result<(String, u64, Option<String>), DesignError> {
