@@ -124,6 +124,30 @@ pub fn design_role(kind: TextKind) -> &'static str {
     }
 }
 
+/// The pack design `clip` draws through, if its theme is a pack with one for its role.
+pub fn find_design<'a>(designs: &'a [ThemeDesign], clip: &Clip) -> Option<&'a ThemeDesign> {
+    let theme = clip.text_style.theme_id?;
+    let role = design_role(clip.text_kind()?);
+    designs.iter().find(|d| d.theme == theme && d.role == role)
+}
+
+/// `d`'s fill with the clip's words: the first line is the Headline, the rest the Caption.
+pub fn design_fill(d: &ThemeDesign, words: &str) -> assetcraft_titles::Fill {
+    let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
+    let headline = lines.next().unwrap_or_default().to_string();
+    let caption = lines.collect::<Vec<_>>().join(" ");
+    let mut fill = d.fill.clone().text(assetcraft_titles::Slot::Headline, &headline);
+    if !caption.is_empty() {
+        fill = fill.text(assetcraft_titles::Slot::Caption, &caption);
+    }
+    fill
+}
+
+/// The time a design shows at `elapsed` into its clip: at rest (not finite), half way (the hold).
+pub fn design_secs(d: &ThemeDesign, elapsed: f64) -> f64 {
+    if elapsed.is_finite() { elapsed } else { d.design.seconds() / 2.0 }
+}
+
 /// How many videos a compositor keeps open at once.
 const OPEN_VIDEOS: usize = 4;
 
@@ -407,7 +431,7 @@ impl Compositor {
         }
         // A pack design for this role draws instead of the theme's words (TP2a-3); if it can't,
         // the words draw as before and the export lists why.
-        if let Some(d) = self.design_for(style.theme_id, kind) {
+        if let Some(d) = find_design(&self.designs, clip).cloned() {
             match self.draw_design(out, &d, words, elapsed) {
                 Ok(()) => return,
                 Err(e) => {
@@ -505,23 +529,10 @@ impl Compositor {
         self
     }
 
-    /// The pack design a text with theme `theme` and kind `kind` draws through, if any.
-    fn design_for(&self, theme: Option<assetcraft_storyboard::ThemeId>, kind: TextKind) -> Option<ThemeDesign> {
-        let theme = theme?;
-        let role = design_role(kind);
-        self.designs.iter().find(|d| d.theme == theme && d.role == role).cloned()
-    }
-
     /// Fill `d` with the clip's words (first line → Headline, the rest → Caption) and draw its
     /// frame `elapsed` seconds in (at rest: half way, the hold), placed by the board's crop.
     fn draw_design(&self, out: &mut Rgba, d: &ThemeDesign, words: &str, elapsed: f64) -> Result<(), String> {
-        let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
-        let headline = lines.next().unwrap_or_default().to_string();
-        let caption = lines.collect::<Vec<_>>().join(" ");
-        let mut fill = d.fill.clone().text(assetcraft_titles::Slot::Headline, &headline);
-        if !caption.is_empty() {
-            fill = fill.text(assetcraft_titles::Slot::Caption, &caption);
-        }
+        let fill = design_fill(d, words);
         let (dw, dh) = d.design.size();
         let (fw, fh) = (self.width as f32, self.height as f32);
         let [x, y, w, _] = match &self.crop {
@@ -532,8 +543,7 @@ impl Compositor {
             None => draw::contain_rect(self.width, self.height, (dw, dh)),
         };
         let scale = f64::from(w) / f64::from(dw.max(1));
-        let secs = if elapsed.is_finite() { elapsed } else { d.design.seconds() / 2.0 };
-        let frame = d.design.render(&fill, secs, scale).map_err(|e| e.to_string())?;
+        let frame = d.design.render(&fill, design_secs(d, elapsed), scale).map_err(|e| e.to_string())?;
         let image = Rgba { width: frame.width, height: frame.height, data: frame.rgba };
         draw::over(out, &image, x.round() as i64, y.round() as i64);
         Ok(())

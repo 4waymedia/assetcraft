@@ -452,8 +452,11 @@ impl Design {
 }
 
 pub mod builtin;
+pub mod frames;
 
 #[cfg(test)]
 mod builtin_tests;
+#[cfg(test)]
+mod frames_tests;
 #[cfg(test)]
 mod tests;

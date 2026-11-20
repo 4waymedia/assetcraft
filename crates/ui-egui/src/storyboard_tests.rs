@@ -2459,3 +2459,47 @@ fn a_title_card_picks_a_user_theme_and_falls_back_when_it_is_gone() {
     assert!(style.missing_theme(nav.session().user_looks()).is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP2b: a title card whose pack has a card design shows the design's frame in the Viewer (and
+/// the Inspector says so); without the pack it falls back to the theme's words.
+#[test]
+fn the_viewer_shows_a_pack_design_for_a_card() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-design-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let pack = dir.join("Themes").join("acme-brand");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let pack = dir.join("Themes").join("acme-brand");
+    let design = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    std::fs::write(pack.join("designs").join("card.ectemplate"), design.to_template()).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-brand".into();
+    t.name = "Acme Brand".into();
+    t.designs.insert("card".into(), "designs/card.ectemplate".into());
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = assetcraft_engine::Prefs { working_folder: Some(dir.clone()), ..assetcraft_engine::Prefs::default() };
+    let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let mut nav = Navigator::with_one_worker(session);
+    let ctx = Context::default();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let (card, start) = {
+        let b = nav.session().storyboard().unwrap();
+        let i = b.clips.iter().position(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl).unwrap();
+        (b.clips[i].id.0, b.starts()[i].as_secs_f64())
+    };
+    nav.run("storyboard.select", json!({ "clip": card }));
+    nav.run("storyboard.seek", json!({ "seconds": start + 0.5 }));
+    nav.run("storyboard.text.style", json!({ "clip": card, "theme": "acme-brand" }));
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().clone();
+    assert!(nav.session().clip_design(&clip).is_some());
+    let mut t = 0.0;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !nav.state.storyboard.design_tex.0.contains_key(&card) {
+        assert!(std::time::Instant::now() < until, "the Viewer never showed the design");
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.02;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

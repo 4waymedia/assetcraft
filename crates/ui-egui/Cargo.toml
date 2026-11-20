@@ -27,6 +27,8 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # PNG output for the opt-in CPU screenshot test (already a workspace dependency via thumbs).
 image = { workspace = true }
+# Built-in designs to make a test theme pack from (TP2b).
+assetcraft-titles = { workspace = true }
 
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.

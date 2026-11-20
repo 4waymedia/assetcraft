@@ -244,6 +244,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         .map(|u| (u.theme.id.clone(), u.theme.name.clone(), u.theme.look()))
         .collect();
     let picked_user = style.theme_id.map(|u| u.as_str().to_string());
+    let drawn_by = nav.session.clip_design(clip);
     let selected = match &picked_user {
         Some(uid) => yours
             .iter()
@@ -290,6 +291,19 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
                 ))
                 .small()
                 .color(crate::theme::WARN),
+            );
+            ui.end_row();
+        }
+        // R-T7: a pack design brings its own moves and case.
+        if let Some((name, role)) = &drawn_by {
+            ui.label("");
+            ui.label(
+                egui::RichText::new(format!(
+                    "Drawn through the pack's {role} design “{name}”: its own moves and capitals apply. \
+                     In, Duration, Effect and Out below are used only if the design can't draw."
+                ))
+                .small()
+                .weak(),
             );
             ui.end_row();
         }

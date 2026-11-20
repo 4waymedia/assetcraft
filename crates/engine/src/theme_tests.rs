@@ -322,3 +322,45 @@ fn a_packs_designs_are_ready_to_draw_with_its_theme() {
     assert_eq!(designs[0].fill, crate::theme_cmd::theme_fill(&s.loaded_themes()[0].theme));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP2b: the Viewer's lookup for a clip drawn through a pack design renders in the background
+/// and matches a direct render; a clip without one gives `None`.
+#[test]
+fn the_viewer_gets_design_frames_for_clips_drawn_through_a_pack() {
+    let (_, dir) = session("design-frames");
+    let pack = dir.join("Themes").join("acme-brand");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    std::fs::write(pack.join("designs").join("banner.ectemplate"), banner.to_template()).unwrap();
+    std::fs::write(pack.join("theme.json"), pack_theme("acme-brand", &[("banner", "designs/banner.ectemplate")]))
+        .unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let mut shot = assetcraft_storyboard::Clip::new(
+        assetcraft_storyboard::ClipId(1),
+        assetcraft_storyboard::SceneId(1),
+        assetcraft_storyboard::ShotType::Ws,
+        assetcraft_storyboard::Ticks::from_secs(6).unwrap(),
+    );
+    shot.overlay = Some("ISTANBUL".into());
+    assert!(s.design_frame(&shot, 3.0, 320).is_none(), "a built-in theme: no design");
+    shot.text_style.theme_id = assetcraft_storyboard::ThemeId::new("acme-brand");
+    assert_eq!(s.clip_design(&shot), Some(("Laser Trace".to_string(), "banner".to_string())));
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let f = loop {
+        match s.design_frame(&shot, 3.0, 320).unwrap() {
+            crate::DesignLookup::Ready(f) => break f,
+            crate::DesignLookup::Failed(e) => panic!("{e}"),
+            crate::DesignLookup::Pending(_) => {
+                assert!(std::time::Instant::now() < until);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    };
+    let designs = s.theme_designs();
+    let d = &designs[0];
+    let fill = assetcraft_animatic::design_fill(d, "ISTANBUL");
+    let direct = d.design.render(&fill, 3.0, 320.0 / 1920.0).unwrap();
+    assert_eq!((f.width, f.height, &f.rgba), (direct.width, direct.height, &direct.rgba), "as the export draws it");
+    let _ = std::fs::remove_dir_all(&dir);
+}

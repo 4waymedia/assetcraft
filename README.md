@@ -308,7 +308,8 @@ it fills, and lists the built-in banners under `builtinDesigns`; a missing or br
 warning on its theme. **In the export**, a title card whose theme is a pack with a `card` design,
 or an overlay whose pack has a `banner` design, is drawn through that design: the clip's first line
 is the Headline, the rest the Caption, and the theme's colours and fonts fill the rest. The Viewer
-still shows the theme's own words for now (TP2b). The built-in themes above stay on AssetCraft's
+shows the same frames (rendered in the background and read ahead while playing), and the
+Inspector says when a clip is drawn through a design. The built-in themes above stay on AssetCraft's
 own renderer. Plan: [docs/design/theme-packs.md](docs/design/theme-packs.md).
 
 ## Docs

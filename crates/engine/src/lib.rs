@@ -43,6 +43,8 @@ pub use analyse_job::{AnalyseProgress, AnalyseState};
 pub use assetcraft_audio::{Player, RecordingPlayer, SilentPlayer};
 pub use assetcraft_media::{Frame as VideoFrame, Lookup as VideoLookup, is_video, seconds as video_seconds};
 pub use assetcraft_thumbs::DiskCache;
+/// A pack design's Viewer frame (TP2b), as [`Session::design_frame`] gives it.
+pub use assetcraft_titles::frames::DesignLookup;
 pub use audio_out::PreviewMode;
 pub use commands::{CommandSpec, NO_HEIC_BUILD, commands, find};
 pub use cut_cmd::STRIP_ZOOM_RANGE;
@@ -245,6 +247,8 @@ pub struct Session {
     /// The user's themes and theme packs from `<working>/Themes`, loaded at startup and again on
     /// `storyboard.themes {reload: true}`, `storyboard.importTheme` and a new working folder (TP2a).
     themes: theme_cmd::ThemeLibrary,
+    /// Pack design frames for the Viewer (TP2b), started on first use.
+    design_frames: std::sync::OnceLock<assetcraft_titles::frames::DesignFrames>,
 }
 
 impl Session {
@@ -304,6 +308,7 @@ impl Session {
             strip_zoom: 1.0,
             video: std::sync::OnceLock::new(),
             themes: theme_cmd::ThemeLibrary::default(),
+            design_frames: std::sync::OnceLock::new(),
         };
         session.reload_themes();
         session.refresh_favorites();
@@ -600,6 +605,31 @@ impl Session {
     /// (`assetcraft_media::VideoFrames`).
     pub fn video_frame(&self, path: &std::path::Path, secs: f64, max_side: u32) -> assetcraft_media::Lookup {
         self.video.get_or_init(assetcraft_media::VideoFrames::new).frame(path, secs, max_side)
+    }
+
+    /// The pack design `clip` draws through, if any (TP2a-3): its name and role.
+    pub fn clip_design(&self, clip: &assetcraft_storyboard::Clip) -> Option<(String, String)> {
+        let designs = self.theme_designs();
+        assetcraft_animatic::find_design(&designs, clip).map(|d| (d.design.name().to_string(), d.role.clone()))
+    }
+
+    /// `clip`'s pack design frame `elapsed` seconds in (at rest: the hold), `width` pixels wide,
+    /// for the Viewer (TP2b); `None` when the clip doesn't draw through a design. Never waits:
+    /// rendered on background threads, read ahead (see `assetcraft_titles::frames`).
+    pub fn design_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
+        use std::hash::{Hash, Hasher};
+        let designs = self.theme_designs();
+        let d = assetcraft_animatic::find_design(&designs, clip)?;
+        let fill = assetcraft_animatic::design_fill(d, clip.text().unwrap_or_default());
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (&d.path, &d.role, format!("{fill:?}")).hash(&mut h);
+        let job = std::sync::Arc::new(assetcraft_titles::frames::DesignJob {
+            key: h.finish(),
+            design: std::sync::Arc::clone(&d.design),
+            fill,
+        });
+        let frames = self.design_frames.get_or_init(assetcraft_titles::frames::DesignFrames::new);
+        Some(frames.frame(&job, assetcraft_animatic::design_secs(d, elapsed), width))
     }
 
     /// While playing (P2): decode `seconds` of `path` from `from` ahead of the playhead, on the

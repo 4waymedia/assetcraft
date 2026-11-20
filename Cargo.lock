@@ -475,6 +475,7 @@ dependencies = [
  "assetcraft-probe",
  "assetcraft-storyboard",
  "assetcraft-thumbs",
+ "assetcraft-titles",
  "assetcraft-watch",
  "craft-ui",
  "egui",
