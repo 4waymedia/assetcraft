@@ -847,6 +847,9 @@ pub struct TextStyle {
     /// A user theme by id (TP2a-2); `None` = the built-in `theme`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme_id: Option<ThemeId>,
+    /// The design it draws through (TP2b-2); `None` = its theme pack's own, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design: Option<DesignPick>,
     /// The in; `None` = the theme's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animation: Option<TextAnimation>,
@@ -1055,6 +1058,61 @@ pub fn set_text_style(
     }
     s.position = position.unwrap_or(s.position);
     Ok(clip.text_style != before)
+}
+
+/// Which design a text draws through (theme-packs TP2b-2); a clip without one uses its theme
+/// pack's own design for its role, if the pack has one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DesignPick {
+    /// No design: the theme's words.
+    #[serde(rename = "none")]
+    None,
+    /// The built-in Laser Trace banner.
+    #[serde(rename = "banner-laser-trace")]
+    LaserTrace,
+    /// The built-in Stack banner.
+    #[serde(rename = "banner-stack")]
+    Stack,
+}
+
+impl DesignPick {
+    /// Every choice, in menu order.
+    pub const ALL: [DesignPick; 3] = [DesignPick::None, DesignPick::LaserTrace, DesignPick::Stack];
+
+    /// The id in files and commands (a built-in design's id, or `none`).
+    pub fn id(self) -> &'static str {
+        match self {
+            DesignPick::None => "none",
+            DesignPick::LaserTrace => "banner-laser-trace",
+            DesignPick::Stack => "banner-stack",
+        }
+    }
+
+    /// The name the Inspector shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            DesignPick::None => "None: the theme's words",
+            DesignPick::LaserTrace => "Laser Trace",
+            DesignPick::Stack => "Stack",
+        }
+    }
+
+    /// The choice with this id.
+    pub fn from_id(id: &str) -> Option<DesignPick> {
+        DesignPick::ALL.into_iter().find(|d| d.id() == id)
+    }
+}
+
+/// Clip `id`'s design: `None` = its theme pack's own; `Some(pick)` = that one. Returns whether
+/// anything changed.
+pub fn set_text_design(board: &mut Storyboard, id: ClipId, design: Option<DesignPick>) -> Result<bool, TextError> {
+    let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
+    if clip.text_kind().is_none() {
+        return Err(TextError::NoText(id));
+    }
+    let changed = clip.text_style.design != design;
+    clip.text_style.design = design;
+    Ok(changed)
 }
 
 /// A theme a clip can pick: a built-in, or a user's (loaded) theme by id.

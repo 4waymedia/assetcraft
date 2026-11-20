@@ -531,7 +531,7 @@ fn an_overlay_with_a_pack_banner_exports_through_the_design() {
     std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
     let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
     let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
-    assert_eq!(s.theme_designs().len(), 1);
+    assert_eq!(s.theme_designs().packs.len(), 1);
     run(&mut s, "storyboard.new", json!({ "name": "Banner" }));
     let board = s.boards.board.as_mut().unwrap();
     board.scenes.push(assetcraft_storyboard::Scene::new(SceneId(1), None));

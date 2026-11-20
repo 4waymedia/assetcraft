@@ -613,14 +613,15 @@ impl Session {
         assetcraft_animatic::find_design(&designs, clip).map(|d| (d.design.name().to_string(), d.role.clone()))
     }
 
-    /// `clip`'s pack design frame `elapsed` seconds in (at rest: the hold), `width` pixels wide,
-    /// for the Viewer (TP2b); `None` when the clip doesn't draw through a design. Never waits:
-    /// rendered on background threads, read ahead (see `assetcraft_titles::frames`).
-    pub fn design_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
+    /// The Viewer's render job for `clip`'s design (its key names the design and the fill).
+    fn design_job(
+        &self,
+        clip: &assetcraft_storyboard::Clip,
+    ) -> Option<(assetcraft_animatic::ThemeDesign, std::sync::Arc<assetcraft_titles::frames::DesignJob>)> {
         use std::hash::{Hash, Hasher};
         let designs = self.theme_designs();
         let d = assetcraft_animatic::find_design(&designs, clip)?;
-        let fill = assetcraft_animatic::design_fill(d, clip.text().unwrap_or_default());
+        let fill = assetcraft_animatic::design_fill(&d, clip.text().unwrap_or_default());
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (&d.path, &d.role, format!("{fill:?}")).hash(&mut h);
         let job = std::sync::Arc::new(assetcraft_titles::frames::DesignJob {
@@ -628,8 +629,23 @@ impl Session {
             design: std::sync::Arc::clone(&d.design),
             fill,
         });
+        Some((d, job))
+    }
+
+    /// Why `clip`'s design couldn't draw in the Viewer, if it failed (it shows the theme's
+    /// words instead).
+    pub fn design_problem(&self, clip: &assetcraft_storyboard::Clip) -> Option<String> {
+        let (_, job) = self.design_job(clip)?;
+        self.design_frames.get()?.failure(job.key)
+    }
+
+    /// `clip`'s pack design frame `elapsed` seconds in (at rest: the hold), `width` pixels wide,
+    /// for the Viewer (TP2b); `None` when the clip doesn't draw through a design. Never waits:
+    /// rendered on background threads, read ahead (see `assetcraft_titles::frames`).
+    pub fn design_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
+        let (d, job) = self.design_job(clip)?;
         let frames = self.design_frames.get_or_init(assetcraft_titles::frames::DesignFrames::new);
-        Some(frames.frame(&job, assetcraft_animatic::design_secs(d, elapsed), width))
+        Some(frames.frame(&job, assetcraft_animatic::design_secs(&d, elapsed), width))
     }
 
     /// While playing (P2): decode `seconds` of `path` from `from` ahead of the playhead, on the

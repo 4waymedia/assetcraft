@@ -168,6 +168,11 @@ impl DesignFrames {
         DesignLookup::Pending(near)
     }
 
+    /// Why the design under `key` couldn't render, if it failed.
+    pub fn failure(&self, key: u64) -> Option<String> {
+        self.shared.lock().failed.get(&key).cloned()
+    }
+
     /// How many render threads are running.
     pub fn workers(&self) -> usize {
         self.workers.len()

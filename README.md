@@ -202,7 +202,10 @@ works with any Style › Preset, so the timing and the look are chosen apart.
 ### Using a theme
 
 - **In the app:** select a text clip (a card or an overlay) and pick it in the Inspector's TEXT
-  section under **Theme**. Your own themes are listed under **Yours**, after the built-ins. In, Duration, Effect and Out start as "Theme (…)": they follow the
+  section under **Theme**. Your own themes are listed under **Yours**, after the built-ins.
+  **Design** picks a motion design for the text: the theme pack's own, a built-in banner
+  (**Laser Trace** or **Stack**, filled with the clip's theme, so they work with any theme), or
+  none (the theme's words). In, Duration, Effect and Out start as "Theme (…)": they follow the
   theme until you choose your own, and choosing "Theme" again goes back.
 - **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,
   effect?, exit?, position?}`; `"theme"` for a move follows the theme again). To see every theme

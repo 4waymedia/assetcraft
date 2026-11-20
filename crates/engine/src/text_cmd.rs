@@ -7,8 +7,8 @@
 use crate::storyboard::{clip_id, no_board};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{
-    MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme, ThemeChoice,
-    ThemeId, set_text_kind, set_text_style, set_text_timing,
+    DesignPick, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme,
+    ThemeChoice, ThemeId, set_text_design, set_text_kind, set_text_style, set_text_timing,
 };
 use serde_json::{Value, json};
 
@@ -68,7 +68,21 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
     let effect = parse_or_theme(p, "effect", TextEffect::from_id, "none|push|drift|pulse")?;
     let exit = parse_or_theme(p, "exit", TextExit::from_id, "none|fade|sink|zoom|erase")?;
     let duration = text_duration(p)?;
+    // `design`: a built-in's id or `none`; `"theme"` goes back to the theme pack's own.
+    let design = match p.get("design") {
+        None => None,
+        Some(v) => match v.as_str() {
+            Some("theme") => Some(None),
+            Some(id) => Some(Some(DesignPick::from_id(id).ok_or_else(|| {
+                CmdError::BadParams(format!("`design` {id:?} isn't one of theme|none|banner-laser-trace|banner-stack"))
+            })?)),
+            None => {
+                return Err(CmdError::BadParams("`design` must be theme|none|banner-laser-trace|banner-stack".into()));
+            }
+        },
+    };
     if theme.is_none()
+        && design.is_none()
         && animation.is_none()
         && position.is_none()
         && effect.is_none()
@@ -76,15 +90,20 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         && duration.is_none()
     {
         return Err(CmdError::BadParams(
-            "give at least one of `theme`, `animation`, `duration`, `effect`, `exit`, `position`".into(),
+            "give at least one of `theme`, `design`, `animation`, `duration`, `effect`, `exit`, `position`".into(),
         ));
     }
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
     let bad = |e: assetcraft_storyboard::TextError| CmdError::BadParams(e.to_string());
     let styled = set_text_style(&mut board, id, theme, animation, position).map_err(bad)?;
     let timed = set_text_timing(&mut board, id, duration, effect, exit).map_err(bad)?;
-    let changed = styled || timed;
-    let style = board.clip(id).map(|c| c.text_style).unwrap_or_default();
+    let designed = match design {
+        Some(d) => set_text_design(&mut board, id, d).map_err(bad)?,
+        None => false,
+    };
+    let changed = styled || timed || designed;
+    let board_clip = board.clip(id).cloned();
+    let style = board_clip.as_ref().map(|c| c.text_style).unwrap_or_default();
     if changed {
         s.boards.checkpoint();
         s.boards.board = Some(board);
@@ -106,6 +125,8 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         "theme": style.theme_id.map_or_else(|| style.theme.id().to_string(), |u| u.as_str().to_string()),
         "fallback": style.theme.id(),
         "missingTheme": style.missing_theme(s.user_looks()).map(|u| u.as_str().to_string()),
+        "design": style.design.map_or("theme", DesignPick::id),
+        "drawnBy": board_clip.as_ref().and_then(|c| s.clip_design(c)).map(|(name, role)| json!({ "name": name, "role": role })),
         "animation": t.animation.id(),
         "position": style.position.id(),
         "duration": t.duration_ms.map(|ms| f64::from(ms) / 1000.0),

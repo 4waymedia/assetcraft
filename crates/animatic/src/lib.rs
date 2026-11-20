@@ -98,7 +98,7 @@ pub struct Compositor {
     user_looks: assetcraft_storyboard::UserLooks,
     /// Theme packs' designs (TP2a-3): a card or overlay naming a pack theme with a design for
     /// its role draws through it.
-    designs: std::sync::Arc<Vec<ThemeDesign>>,
+    designs: std::sync::Arc<DesignSet>,
 }
 
 /// A theme pack's design for one role, ready to fill (theme-packs.md TP2a-3).
@@ -124,11 +124,52 @@ pub fn design_role(kind: TextKind) -> &'static str {
     }
 }
 
-/// The pack design `clip` draws through, if its theme is a pack with one for its role.
-pub fn find_design<'a>(designs: &'a [ThemeDesign], clip: &Clip) -> Option<&'a ThemeDesign> {
-    let theme = clip.text_style.theme_id?;
-    let role = design_role(clip.text_kind()?);
-    designs.iter().find(|d| d.theme == theme && d.role == role)
+/// Every design a clip can draw through (TP2b-2): the loaded packs' own, the built-in banners,
+/// and each theme's fill (its colours and fonts) by theme id.
+#[derive(Debug, Clone, Default)]
+pub struct DesignSet {
+    /// The packs' card and banner designs, each filled with its pack's theme.
+    pub packs: Vec<ThemeDesign>,
+    /// The built-in designs by id (`banner-laser-trace`, `banner-stack`).
+    pub builtins: Vec<(String, std::sync::Arc<assetcraft_titles::Design>)>,
+    /// Each theme's fill by id: the loaded user themes and the built-ins.
+    pub fills: Vec<(String, assetcraft_titles::Fill)>,
+}
+
+impl DesignSet {
+    /// The fill for theme `id`, if known.
+    pub fn fill(&self, id: &str) -> Option<&assetcraft_titles::Fill> {
+        self.fills.iter().find(|(i, _)| i == id).map(|(_, f)| f)
+    }
+}
+
+/// The design `clip` draws through, if any: its choice (`TextStyle::design`) — none, or a
+/// built-in filled with the clip's theme — or else its theme pack's own design for its role.
+pub fn find_design(set: &DesignSet, clip: &Clip) -> Option<ThemeDesign> {
+    use assetcraft_storyboard::DesignPick;
+    let kind = clip.text_kind()?;
+    let style = clip.text_style;
+    match style.design {
+        Some(DesignPick::None) => None,
+        Some(pick) => {
+            let (id, design) = set.builtins.iter().find(|(i, _)| i == pick.id())?;
+            // The clip's theme: its user theme if loaded, else its built-in.
+            let user = style.theme_id.filter(|t| set.fill(t.as_str()).is_some());
+            let key = user.map_or_else(|| style.theme.id().to_string(), |t| t.as_str().to_string());
+            Some(ThemeDesign {
+                theme: assetcraft_storyboard::ThemeId::new(&key)?,
+                role: design_role(kind).to_string(),
+                path: PathBuf::from(format!("built-in design {id}")),
+                design: std::sync::Arc::clone(design),
+                fill: set.fill(&key).cloned().unwrap_or_default(),
+            })
+        }
+        None => {
+            let theme = style.theme_id?;
+            let role = design_role(kind);
+            set.packs.iter().find(|d| d.theme == theme && d.role == role).cloned()
+        }
+    }
 }
 
 /// `d`'s fill with the clip's words: the first line is the Headline, the rest the Caption.
@@ -191,7 +232,7 @@ impl Compositor {
             videos: Vec::new(),
             failed: HashMap::new(),
             user_looks: assetcraft_storyboard::UserLooks::default(),
-            designs: std::sync::Arc::new(Vec::new()),
+            designs: std::sync::Arc::new(DesignSet::default()),
         })
     }
 
@@ -431,7 +472,7 @@ impl Compositor {
         }
         // A pack design for this role draws instead of the theme's words (TP2a-3); if it can't,
         // the words draw as before and the export lists why.
-        if let Some(d) = find_design(&self.designs, clip).cloned() {
+        if let Some(d) = find_design(&self.designs, clip) {
             match self.draw_design(out, &d, words, elapsed) {
                 Ok(()) => return,
                 Err(e) => {
@@ -516,7 +557,7 @@ impl Compositor {
     }
 
     /// Draw cards and overlays whose pack theme has a design through it (TP2a-3).
-    pub fn with_designs(mut self, designs: std::sync::Arc<Vec<ThemeDesign>>) -> Self {
+    pub fn with_designs(mut self, designs: std::sync::Arc<DesignSet>) -> Self {
         self.designs = designs;
         self
     }

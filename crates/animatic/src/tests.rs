@@ -579,14 +579,17 @@ fn an_overlay_naming_a_pack_theme_draws_through_its_banner_design() {
     use assetcraft_titles::{Fill, Slot};
     let acme = ThemeId::new("acme-brand").unwrap();
     let banner = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
-    let designs = Arc::new(vec![crate::ThemeDesign {
-        theme: acme,
-        role: "banner".into(),
-        path: "Themes/acme-brand/designs/banner.ectemplate".into(),
-        design: Arc::new(banner),
-        // A magenta accent: the bar shows it.
-        fill: Fill::default().color(Slot::Accent, [1.0, 0.0, 1.0, 1.0]),
-    }]);
+    let designs = Arc::new(crate::DesignSet {
+        packs: vec![crate::ThemeDesign {
+            theme: acme,
+            role: "banner".into(),
+            path: "Themes/acme-brand/designs/banner.ectemplate".into(),
+            design: Arc::new(banner),
+            // A magenta accent: the bar shows it.
+            fill: Fill::default().color(Slot::Accent, [1.0, 0.0, 1.0, 1.0]),
+        }],
+        ..crate::DesignSet::default()
+    });
     let mut shot = clip(5, ShotType::Ws, 6);
     shot.overlay = Some("ISTANBUL\nTURKEY · 03:47 HRS".into());
     shot.text_style.theme_id = Some(acme);
@@ -612,4 +615,38 @@ fn an_overlay_naming_a_pack_theme_draws_through_its_banner_design() {
     assert_eq!(with.clip_frame(&card, 1.0).data, without.clip_frame(&card, 1.0).data);
     // At rest (the Viewer's still): the hold, half way through the design.
     assert_ne!(with.clip_frame(&shot, f64::INFINITY).data, without.clip_frame(&shot, f64::INFINITY).data);
+}
+
+#[test]
+fn a_built_in_banner_picked_on_any_theme_draws_with_that_themes_fill() {
+    use assetcraft_storyboard::{DesignPick, TextTheme};
+    use assetcraft_titles::{Fill, Slot};
+    let set = Arc::new(crate::DesignSet {
+        packs: Vec::new(),
+        builtins: vec![(
+            "banner-laser-trace".into(),
+            Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap()),
+        )],
+        // Bold's fill with a cyan accent, so the bar is easy to find.
+        fills: vec![("bold".into(), Fill::default().color(Slot::Accent, [0.0, 1.0, 1.0, 1.0]))],
+    });
+    let mut shot = clip(5, ShotType::Ws, 6);
+    shot.overlay = Some("ISTANBUL".into());
+    shot.text_style.theme = TextTheme::Bold;
+    let (w, h) = (480, 270);
+    let mut c = compositor(w, h).with_designs(Arc::clone(&set));
+    let mut plain = compositor(w, h);
+    assert_eq!(c.clip_frame(&shot, 3.0).data, plain.clip_frame(&shot, 3.0).data, "no pick, no pack: the theme's words");
+    shot.text_style.design = Some(DesignPick::LaserTrace);
+    let a = c.clip_frame(&shot, 3.0);
+    let (bx, by) = ((134.0 / 1920.0 * w as f32) as u32, (834.0 / 1080.0 * h as f32) as u32);
+    let p = a.get(bx, by);
+    assert!(p[0] < 80 && p[1] > 200 && p[2] > 200, "the cyan accent from the theme's fill: {p:?}");
+    // A pick the set doesn't have (Stack isn't loaded here) and `none` draw the theme's words.
+    shot.text_style.design = Some(DesignPick::Stack);
+    let mut words = shot.clone();
+    words.text_style.design = None;
+    assert_eq!(c.clip_frame(&shot, 3.0).data, plain.clip_frame(&words, 3.0).data);
+    shot.text_style.design = Some(DesignPick::None);
+    assert_eq!(c.clip_frame(&shot, 3.0).data, plain.clip_frame(&words, 3.0).data);
 }

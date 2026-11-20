@@ -8,8 +8,8 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Backdrop, Clip, DecorRect, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit,
-    TextKind, TextPosition, TextTheme, Timing, UserLooks,
+    AnimFrame, Backdrop, Clip, DecorRect, DesignPick, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect,
+    TextExit, TextKind, TextPosition, TextTheme, Timing, UserLooks,
 };
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -245,6 +245,13 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         .collect();
     let picked_user = style.theme_id.map(|u| u.as_str().to_string());
     let drawn_by = nav.session.clip_design(clip);
+    let design_problem = nav.session.design_problem(clip);
+    // The theme pack's own design for this clip's role, whatever the clip picked.
+    let pack_design = {
+        let mut own = clip.clone();
+        own.text_style.design = None;
+        nav.session.clip_design(&own).map(|(name, _)| name)
+    };
     let selected = match &picked_user {
         Some(uid) => yours
             .iter()
@@ -294,8 +301,35 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             );
             ui.end_row();
         }
-        // R-T7: a pack design brings its own moves and case.
-        if let Some((name, role)) = &drawn_by {
+        // TP2b-2: which design it draws through.
+        ui.label("Design")
+            .on_hover_text("A motion design the text draws through: its theme pack's own, a built-in banner, or none");
+        let pack_own = pack_design
+            .as_deref()
+            .map_or_else(|| "Theme's own (none in this theme)".to_owned(), |n| format!("Theme's own: {n}"));
+        let shown = style.design.map_or(pack_own.clone(), |d| d.name().to_owned());
+        egui::ComboBox::from_id_salt(("sb-design", id)).selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(style.design.is_none(), pack_own.as_str()).clicked() && style.design.is_some() {
+                style_edit = Some(json!({ "clip": id, "design": "theme" }));
+            }
+            for d in DesignPick::ALL {
+                if ui.selectable_label(style.design == Some(d), d.name()).clicked() && style.design != Some(d) {
+                    style_edit = Some(json!({ "clip": id, "design": d.id() }));
+                }
+            }
+        });
+        ui.end_row();
+        if let Some(why) = &design_problem {
+            ui.label("");
+            ui.label(
+                egui::RichText::new(format!("The design couldn't draw ({why}); the theme's words show instead."))
+                    .small()
+                    .color(crate::theme::WARN),
+            );
+            ui.end_row();
+        }
+        // R-T7: a design brings its own moves and case.
+        if let Some((name, role)) = drawn_by.as_ref().filter(|_| design_problem.is_none()) {
             ui.label("");
             ui.label(
                 egui::RichText::new(format!(

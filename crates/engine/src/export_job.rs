@@ -405,7 +405,7 @@ struct Job {
     /// The user's loaded themes, for text naming one (TP2a-2).
     user_looks: assetcraft_storyboard::UserLooks,
     /// The loaded packs' card and banner designs (TP2a-3).
-    designs: Arc<Vec<assetcraft_animatic::ThemeDesign>>,
+    designs: Arc<assetcraft_animatic::DesignSet>,
     progress: Arc<Mutex<ExportProgress>>,
     cancel: Arc<AtomicBool>,
     rate: Arc<Mutex<Option<f64>>>,

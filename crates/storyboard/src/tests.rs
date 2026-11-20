@@ -1731,3 +1731,24 @@ fn a_clip_can_name_a_user_theme_and_falls_back_to_its_built_in() {
     assert!(set_text_style(&mut board, id, Some(ThemeChoice::Builtin(TextTheme::Bold)), None, None).unwrap());
     assert_eq!(board.clip(id).unwrap().text_style.theme_id, None);
 }
+
+#[test]
+fn a_clip_picks_its_design_and_the_default_is_not_written() {
+    use crate::{DesignPick, set_text_design};
+    for d in DesignPick::ALL {
+        assert_eq!(DesignPick::from_id(d.id()), Some(d));
+    }
+    assert_eq!(DesignPick::from_id("theme"), None, "`theme` is the unset value, not a pick");
+    let mut board = crate::sample::sample();
+    let id = board.clips.iter().find(|c| c.text_kind().is_some()).map(|c| c.id).expect("a text clip");
+    assert!(set_text_design(&mut board, id, Some(DesignPick::Stack)).unwrap());
+    assert!(!set_text_design(&mut board, id, Some(DesignPick::Stack)).unwrap(), "no change");
+    let style = board.clip(id).unwrap().text_style;
+    let json = serde_json::to_string(&style).unwrap();
+    assert!(json.contains(r#""design":"banner-stack""#), "{json}");
+    assert_eq!(serde_json::from_str::<TextStyle>(&json).unwrap(), style);
+    assert!(set_text_design(&mut board, id, None).unwrap());
+    assert!(!serde_json::to_string(&board.clip(id).unwrap().text_style).unwrap().contains("design"));
+    let shot = board.clips.iter().find(|c| c.text_kind().is_none()).map(|c| c.id).expect("a shot");
+    assert!(set_text_design(&mut board, shot, Some(DesignPick::None)).is_err(), "only text clips");
+}

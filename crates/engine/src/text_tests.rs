@@ -243,3 +243,25 @@ fn style_takes_a_loaded_user_theme_by_id() {
     assert!(first(&s).text_style.theme_id.is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP2b-2: `design` picks a built-in banner (filled with the clip's theme), none, or the theme
+/// pack's own again; the reply names what draws.
+#[test]
+fn style_picks_a_design_for_the_text() {
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "design": "banner-stack"}));
+    assert_eq!((r["design"].as_str(), r["changed"].as_bool()), (Some("banner-stack"), Some(true)), "{r}");
+    assert_eq!(r["drawnBy"]["name"], "Stack");
+    assert_eq!(s.boards.undo_len(), undo + 1, "one undo step");
+    assert_eq!(first(&s).text_style.design, Some(assetcraft_storyboard::DesignPick::Stack));
+    let clip = first(&s);
+    assert!(s.design_frame(&clip, 3.0, 160).is_some(), "the Viewer draws it too");
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "design": "none"}));
+    assert!(r["drawnBy"].is_null(), "{r}");
+    let r = run(&mut s, "storyboard.text.style", json!({"clip": 1, "design": "theme"}));
+    assert_eq!(r["design"], "theme");
+    assert!(first(&s).text_style.design.is_none());
+    assert!(s.execute("storyboard.text.style", &json!({"clip": 1, "design": "poster"})).is_err());
+    assert!(s.execute("storyboard.text.style", &json!({"clip": 1, "design": 3})).is_err());
+}

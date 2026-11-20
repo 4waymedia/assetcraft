@@ -2503,3 +2503,34 @@ fn the_viewer_shows_a_pack_design_for_a_card() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP2b-2: a plain title card (a built-in theme) picks the built-in Stack banner and the Viewer
+/// shows it; picking "none" goes back to the theme's words.
+#[test]
+fn a_card_picks_a_built_in_banner_design() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let (card, start) = {
+        let b = nav.session().storyboard().unwrap();
+        let i = b.clips.iter().position(|c| c.shot_type == assetcraft_storyboard::ShotType::Ttl).unwrap();
+        (b.clips[i].id.0, b.starts()[i].as_secs_f64())
+    };
+    nav.run("storyboard.select", json!({ "clip": card }));
+    nav.run("storyboard.seek", json!({ "seconds": start + 0.5 }));
+    let r = nav.run("storyboard.text.style", json!({ "clip": card, "design": "banner-stack" })).unwrap();
+    assert_eq!(r["drawnBy"]["name"], "Stack");
+    let mut t = 0.0;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !nav.state.storyboard.design_tex.0.contains_key(&card) {
+        assert!(std::time::Instant::now() < until, "the Viewer never showed the design");
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.02;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    nav.run("storyboard.text.style", json!({ "clip": card, "design": "none" }));
+    frame(&ctx, &mut nav, Vec::new(), t + 0.1);
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().clone();
+    assert!(nav.session().clip_design(&clip).is_none());
+}

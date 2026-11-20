@@ -56,7 +56,7 @@ pub(crate) struct ThemeLibrary {
     /// Each loaded theme's look, for clips that name one (TP2a-2).
     looks: assetcraft_storyboard::UserLooks,
     /// Each pack's card and banner designs, filled with its theme (TP2a-3).
-    designs: std::sync::Arc<Vec<assetcraft_animatic::ThemeDesign>>,
+    designs: std::sync::Arc<assetcraft_animatic::DesignSet>,
 }
 
 /// What a theme fills a design with (theme-packs.md §3): its colours and fonts; the clip's words
@@ -120,11 +120,26 @@ impl Session {
                 })
             })
             .collect();
-        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(designs) };
+        // The built-in banners (M1c), and a fill for every theme a clip can name.
+        let builtins = assetcraft_titles::builtin::BUILTINS
+            .iter()
+            .filter_map(|id| match assetcraft_titles::builtin::builtin(id) {
+                Some(Ok(d)) => Some(((*id).to_string(), std::sync::Arc::new(d))),
+                _ => None,
+            })
+            .collect();
+        let fills = Theme::builtins()
+            .iter()
+            .chain(themes.iter().map(|u| &u.theme))
+            .map(|t| (t.id.clone(), theme_fill(t)))
+            .collect();
+        let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills };
+        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set) };
     }
 
-    /// The loaded packs' card and banner designs (TP2a-3).
-    pub fn theme_designs(&self) -> std::sync::Arc<Vec<assetcraft_animatic::ThemeDesign>> {
+    /// Every design a clip can draw through: the packs' card and banner designs (TP2a-3), the
+    /// built-in banners and each theme's fill (TP2b-2).
+    pub fn theme_designs(&self) -> std::sync::Arc<assetcraft_animatic::DesignSet> {
         std::sync::Arc::clone(&self.themes.designs)
     }
 

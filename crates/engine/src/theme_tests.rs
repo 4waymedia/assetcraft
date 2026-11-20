@@ -294,7 +294,7 @@ fn a_packs_designs_are_ready_to_draw_with_its_theme() {
     .unwrap();
     let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
     let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
-    let designs = s.theme_designs();
+    let designs = &s.theme_designs().packs;
     assert_eq!(designs.len(), 1, "card and banner only for now (endCard waits for its step)");
     assert_eq!((designs[0].theme.as_str(), designs[0].role.as_str()), ("acme-brand", "banner"));
     // The fill is the theme's: Bold's colours and its display face.
@@ -358,7 +358,7 @@ fn the_viewer_gets_design_frames_for_clips_drawn_through_a_pack() {
         }
     };
     let designs = s.theme_designs();
-    let d = &designs[0];
+    let d = &designs.packs[0];
     let fill = assetcraft_animatic::design_fill(d, "ISTANBUL");
     let direct = d.design.render(&fill, 3.0, 320.0 / 1920.0).unwrap();
     assert_eq!((f.width, f.height, &f.rgba), (direct.width, direct.height, &direct.rgba), "as the export draws it");
