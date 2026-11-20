@@ -12,10 +12,14 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use effectcraft_color::Label;
 use effectcraft_keyframe::Value;
-use effectcraft_project::essential::{ControlType, EgKind, Override, with_overrides};
-use effectcraft_project::{ItemId, Project};
+use effectcraft_project::essential::{ControlType, EgKind, Override, source_media, with_overrides};
+use effectcraft_project::{FootageKind, ItemId, ItemKind, Project};
+use effectcraft_render::{RenderOpts, Renderer};
 use effectcraft_time::Tick;
+
+pub use picture::{Fit, Picture};
 
 /// Largest template file read (templates can embed footage; packs keep theirs small).
 pub const MAX_FILE: usize = 64 << 20;
@@ -168,6 +172,11 @@ impl Slot {
             _ => ControlKind::Color,
         }
     }
+
+    /// How a picture meets this slot's placeholder (TP3b): a logo shows whole, the rest cover.
+    pub fn fit(self) -> Fit {
+        if self == Slot::Logo { Fit::Contain } else { Fit::Cover }
+    }
 }
 
 /// A value for a slot.
@@ -184,6 +193,8 @@ pub enum FillValue {
         /// The style within it.
         style: String,
     },
+    /// A picture for a Media control (TP3b), shown in place of the designer's footage.
+    Picture(Picture),
 }
 
 /// The values AssetCraft fills a design with: the clip's words and the theme's colours and fonts.
@@ -210,6 +221,10 @@ impl Fill {
     /// `slot` takes a font family and style.
     pub fn font(self, slot: Slot, family: &str, style: &str) -> Self {
         self.set(slot, FillValue::Font { family: family.to_string(), style: style.to_string() })
+    }
+    /// `slot` takes a picture (a Media control).
+    pub fn picture(self, slot: Slot, picture: Picture) -> Self {
+        self.set(slot, FillValue::Picture(picture))
     }
     /// The value `slot` takes, if any.
     pub fn get(&self, slot: Slot) -> Option<&FillValue> {
@@ -406,6 +421,25 @@ impl Design {
         out
     }
 
+    /// The pictures `fill` gives this design's Media controls: each control, the footage it
+    /// replaces (its placeholder, whose size the picture takes), the picture and its fit.
+    fn media(&self, fill: &Fill) -> Vec<(u64, effectcraft_project::Footage, Picture, Fit)> {
+        let Some(eg) = self.project.comp(self.comp).and_then(|c| c.essential.as_ref()) else { return Vec::new() };
+        let mut out = Vec::new();
+        for control in self.controls() {
+            let Some(slot) = control.slot.filter(|s| s.kind() == ControlKind::Media) else { continue };
+            let Some(FillValue::Picture(picture)) = fill.get(slot) else { continue };
+            let Some(ctl) = eg.resolve(control.id) else { continue };
+            let placeholder = source_media(&self.project, self.comp, ctl).and_then(|i| self.project.item(i));
+            let Some(ItemKind::Footage(f)) = placeholder.map(|i| &i.kind) else { continue };
+            if f.width == 0 || f.height == 0 {
+                continue;
+            }
+            out.push((control.id, f.clone(), picture.clone(), slot.fit()));
+        }
+        out
+    }
+
     /// The design as an `.ectemplate` file (a stored ZIP: `manifest.json` and `project.ecproj`),
     /// as EffectCraft's File › Save as Template writes one, so it opens there and here.
     pub fn to_template(&self) -> Vec<u8> {
@@ -433,11 +467,40 @@ impl Design {
     pub fn render(&self, fill: &Fill, secs: f64, scale: f64) -> Result<Frame, DesignError> {
         let secs = if secs.is_finite() { secs.clamp(0.0, (self.seconds - self.frame_seconds).max(0.0)) } else { 0.0 };
         let scale = if scale.is_finite() && scale > 0.0 { scale.min(4.0) } else { 1.0 };
-        let overrides = self.overrides(fill);
+        let mut overrides = self.overrides(fill);
+        let media = self.media(fill);
         let image = catch_unwind(AssertUnwindSafe(|| {
-            let filled = if overrides.is_empty() { None } else { with_overrides(&self.project, self.comp, &overrides) };
-            let project = filled.as_ref().unwrap_or(&self.project);
-            effectcraft_render::render_frame(project, self.comp, Tick::from_seconds_f64(secs), scale)
+            // Each picture becomes a footage item the size of the placeholder it replaces, and
+            // its Media control's override names that item (EffectCraft's Media Replacement).
+            let mut items = Vec::new();
+            let with_media = (!media.is_empty()).then(|| {
+                let mut p = self.project.clone();
+                for (control, placeholder, picture, fit) in &media {
+                    let footage = effectcraft_project::Footage {
+                        path: format!("assetcraft-picture-{:016x}", picture.id()),
+                        kind: FootageKind::Still,
+                        has_video: true,
+                        has_audio: false,
+                        missing: false,
+                        width: placeholder.width,
+                        height: placeholder.height,
+                        pixel_aspect: placeholder.pixel_aspect,
+                        frame_rate: placeholder.frame_rate,
+                        duration: placeholder.duration,
+                        ..Default::default()
+                    };
+                    let item = p.add_item("Picture", Label::None, None, ItemKind::Footage(footage));
+                    items.push((item, picture.fitted(placeholder.width, placeholder.height, *fit)));
+                    overrides.push(Override { control: *control, value: Value::Scalar(item.0 as f64) });
+                }
+                p
+            });
+            let base = with_media.as_ref().unwrap_or(&self.project);
+            let filled = if overrides.is_empty() { None } else { with_overrides(base, self.comp, &overrides) };
+            let project = filled.as_ref().unwrap_or(base);
+            let source = picture::Pictures { items };
+            Renderer::new(project, &source, RenderOpts { scale, ..Default::default() })
+                .comp_frame(self.comp, Tick::from_seconds_f64(secs))
         }))
         .map_err(|_| DesignError::Render("EffectCraft's renderer stopped".into()))?;
         if image.width == 0 || image.height == 0 {
@@ -453,10 +516,13 @@ impl Design {
 
 pub mod builtin;
 pub mod frames;
+pub mod picture;
 
 #[cfg(test)]
 mod builtin_tests;
 #[cfg(test)]
 mod frames_tests;
+#[cfg(test)]
+mod picture_tests;
 #[cfg(test)]
 mod tests;

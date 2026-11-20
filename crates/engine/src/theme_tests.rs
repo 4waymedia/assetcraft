@@ -424,3 +424,87 @@ fn a_packs_assets_are_checked_listed_and_imported() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(src.parent().unwrap());
 }
+
+/// A 320 × 180 card with a dark backdrop and a 100 × 100 `Logo` placeholder in the middle,
+/// exposed as a Media control (as a designer would make one in EffectCraft).
+fn logo_card() -> assetcraft_titles::Design {
+    use effectcraft_color::Label;
+    use effectcraft_project::essential::{EgControl, EgKind, EssentialGraphics};
+    use effectcraft_project::{Comp, Footage, FootageKind, ItemKind, LayerSource, Project, Solid, build};
+    let mut p = Project::default();
+    let comp = Comp::new(320, 180, effectcraft_time::FrameRate::FPS_30, effectcraft_time::Tick::from_seconds_f64(2.0));
+    let cid = p.add_item("Logo Card", Label::None, None, ItemKind::Comp(comp.clone().into()));
+    let sid = p.add_item(
+        "Dark",
+        Label::None,
+        None,
+        ItemKind::Solid(Solid { color: [0.05, 0.05, 0.08], width: 320, height: 180, pixel_aspect: 1.0 }),
+    );
+    let placeholder = Footage {
+        path: "logo.png".into(),
+        kind: FootageKind::Still,
+        width: 100,
+        height: 100,
+        has_video: true,
+        ..Default::default()
+    };
+    let fid = p.add_item("logo.png", Label::None, None, ItemKind::Footage(placeholder));
+    let dark = build::layer(&mut p, &comp, "Dark", LayerSource::Solid { item: sid }, (320, 180), None);
+    let logo = build::layer(&mut p, &comp, "Logo", LayerSource::Footage { item: fid }, (100, 100), None);
+    let controls =
+        vec![EgControl { id: p.alloc(), name: "Logo".into(), kind: EgKind::Media { layer: logo.id }, as_type: None }];
+    if let Some(c) = p.comp_mut(cid) {
+        c.layers.push(logo);
+        c.layers.push(dark);
+        c.essential = Some(EssentialGraphics { name: "Logo Card".into(), controls });
+    }
+    assetcraft_titles::Design::from_project(p, cid).unwrap()
+}
+
+/// TP3b: a pack's logo is decoded when themes load and shows in its card's Logo placeholder;
+/// one that won't decode is a warning and the next one listed for the role is used.
+#[test]
+fn a_packs_logo_fills_its_designs_media_control() {
+    use assetcraft_titles::{FillValue, Slot};
+    let (_, dir) = session("pictures");
+    let pack = dir.join("Themes").join("acme-logo");
+    for f in ["designs", "images"] {
+        std::fs::create_dir_all(pack.join(f)).unwrap();
+    }
+    std::fs::write(pack.join("designs/card.ectemplate"), logo_card().to_template()).unwrap();
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    std::fs::copy(lib.join("props/scythe_transparent.png"), pack.join("images/logo.png")).unwrap();
+    // A PNG signature and nothing after it: passes the load check, fails to decode.
+    std::fs::write(pack.join("images/broken.png"), b"\x89PNG\r\n\x1a\n not really").unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-logo".into();
+    t.name = "Acme Logo".into();
+    t.designs = [("card".to_string(), "designs/card.ectemplate".to_string())].into_iter().collect();
+    let a = |path: &str| assetcraft_storyboard::ThemeAsset {
+        role: "logo".into(),
+        path: path.into(),
+        license: "own".into(),
+        credit: None,
+    };
+    t.assets = vec![a("images/broken.png"), a("images/logo.png")];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let loaded = &s.loaded_themes()[0];
+    assert!(
+        loaded.warnings.iter().any(|w| w.contains("images/broken.png") && w.contains("decoded")),
+        "{:?}",
+        loaded.warnings
+    );
+    let designs = s.theme_designs();
+    let card = designs.packs.iter().find(|d| d.role == "card").expect("the card");
+    let Some(FillValue::Picture(logo)) = card.fill.get(Slot::Logo) else { panic!("{:?}", card.fill) };
+    assert_eq!(logo.size(), (512, 512), "the second logo, decoded whole");
+    // Drawn: the placeholder shows the logo, so the card differs from one without it.
+    let with = card.design.render(&card.fill, 1.0, 1.0).unwrap();
+    let bare = card.design.render(&crate::theme_cmd::theme_fill(&loaded.theme), 1.0, 1.0).unwrap();
+    assert_ne!(with, bare);
+    let changed = with.rgba.as_chunks::<4>().0.iter().zip(bare.rgba.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
+    assert!(changed > 200 && changed <= 100 * 100, "the scythe, only inside the 100 × 100 placeholder: {changed}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -21,6 +21,8 @@ use std::path::PathBuf;
 pub const THEMES_DIR: &str = "Themes";
 /// Most theme files read from it.
 const MAX_USER_THEMES: usize = 200;
+/// The longest side a pack picture is decoded at (TP3b): a 1080p design's background, sharp.
+const PICTURE_SIDE: u32 = 2048;
 
 /// A theme file that loaded.
 #[derive(Debug, Clone)]
@@ -135,13 +137,15 @@ impl Session {
     /// Re-read `<working>/Themes` (startup, `storyboard.themes {reload}`, an import, a new
     /// working folder).
     pub(crate) fn reload_themes(&mut self) {
-        let (themes, problems) = self.user_themes();
+        let (mut themes, problems) = self.user_themes();
+        // Each theme's fill: its colours and fonts, and a pack's pictures (TP3b).
+        let pack_fills: Vec<assetcraft_titles::Fill> = themes.iter_mut().map(|u| self.pack_fill(u)).collect();
         let looks = assetcraft_storyboard::UserLooks::new(themes.iter().map(|u| (u.theme.id.as_str(), u.theme.look())));
         let designs = themes
             .iter()
-            .filter_map(|u| assetcraft_storyboard::ThemeId::new(&u.theme.id).map(|id| (u, id)))
-            .flat_map(|(u, id)| {
-                let fill = theme_fill(&u.theme);
+            .zip(&pack_fills)
+            .filter_map(|(u, fill)| assetcraft_storyboard::ThemeId::new(&u.theme.id).map(|id| (u, fill, id)))
+            .flat_map(|(u, fill, id)| {
                 u.designs.iter().filter(|d| d.role == "card" || d.role == "banner").map(move |d| {
                     assetcraft_animatic::ThemeDesign {
                         theme: id,
@@ -163,8 +167,8 @@ impl Session {
             .collect();
         let fills = Theme::builtins()
             .iter()
-            .chain(themes.iter().map(|u| &u.theme))
             .map(|t| (t.id.clone(), theme_fill(t)))
+            .chain(themes.iter().zip(pack_fills).map(|(u, f)| (u.theme.id.clone(), f)))
             .collect();
         let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills };
         self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set) };
@@ -289,6 +293,43 @@ impl Session {
     /// A pack's assets that can be used (TP3a): each passes `asset_rule`, is a regular file in
     /// its role's folder (a link isn't followed), within its size cap, and starts like its kind.
     /// One that doesn't is a warning.
+    /// `u`'s fill (TP3b): [`theme_fill`] and the pack's pictures, each decoded once here (the
+    /// thumbnail decoders: size caps, contained panics) for its design's Media controls. The
+    /// first asset listed for a role that decodes is used; one that won't is a warning.
+    fn pack_fill(&self, u: &mut UserTheme) -> assetcraft_titles::Fill {
+        use assetcraft_titles::Slot;
+        use std::hash::{Hash, Hasher};
+        let mut fill = theme_fill(&u.theme);
+        for a in &u.assets {
+            let slot = match a.role.as_str() {
+                "logo" => Slot::Logo,
+                "texture" => Slot::Texture,
+                "backgroundImage" => Slot::BackgroundImage,
+                _ => continue,
+            };
+            if fill.get(slot).is_some() {
+                continue;
+            }
+            // As theme.json names it (`images/logo.png`).
+            let name = u.pack.as_deref().and_then(|p| a.path.strip_prefix(p).ok()).unwrap_or(&a.path);
+            let name = name.to_string_lossy().replace('\\', "/");
+            let key = assetcraft_thumbs::ThumbKey { path: a.path.clone(), max_side: PICTURE_SIDE, modified: None };
+            match assetcraft_thumbs::render(self.services.as_ref(), &key) {
+                Ok(t) => {
+                    // Named by its pixels, so an edited file is a new picture in the Viewer's cache.
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    (t.width, t.height, &t.rgba).hash(&mut h);
+                    match assetcraft_titles::Picture::new(h.finish(), t.width, t.height, t.rgba) {
+                        Some(p) => fill = fill.picture(slot, p),
+                        None => u.warnings.push(format!("asset {name}: an unusable picture size; not used")),
+                    }
+                }
+                Err(e) => u.warnings.push(format!("asset {name}: can't be decoded ({e}); not used")),
+            }
+        }
+        fill
+    }
+
     fn pack_assets(&self, pack: &std::path::Path, theme: &Theme, warnings: &mut Vec<String>) -> Vec<PackAsset> {
         let mut out = Vec::new();
         let mut listed: std::collections::HashMap<&str, Vec<(String, u64)>> = std::collections::HashMap::new();

@@ -32,6 +32,12 @@ filmcraft-time = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+# TP3b's test builds a design with Media controls (docs/design/theme-packs.md).
+effectcraft-project = { workspace = true }
+effectcraft-color = { workspace = true }
+effectcraft-time = { workspace = true }
+
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.
 # The user must still turn on View > Formats > HEIC (`formats.heic`). See assetcraft-thumbs.
