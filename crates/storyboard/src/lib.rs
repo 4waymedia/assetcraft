@@ -61,7 +61,7 @@ pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_
 pub use layout::{BAND_MAX, Layout, POST_TEXT_MAX, Region, RegionShot, SPLIT_GUTTER, SPLIT_SHARES};
 pub use model::{
     AssetId, Clip, ClipId, MAX_VOLUME_POINTS, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard,
-    TITLE_DB_DEFAULT, TITLE_DB_RANGE, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition,
+    TITLE_DB_DEFAULT, TITLE_DB_RANGE, TITLE_MIN_SECS, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition,
     VOLUME_DB_RANGE, Voiceover, VolumePoint,
 };
 pub use motion::{

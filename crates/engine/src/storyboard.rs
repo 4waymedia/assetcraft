@@ -203,6 +203,7 @@ pub(crate) fn frame_param(s: &Session, p: &Value) -> Result<Option<assetcraft_st
 
 pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     let from_sample = p.get("sample").and_then(Value::as_bool).unwrap_or(false);
+    let title_theme = crate::text_cmd::title_theme_param(s, p)?;
     let mut board = match p.get("template") {
         Some(Value::String(which)) => crate::template_cmd::board_from_template(
             s,
@@ -244,6 +245,8 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     } else {
         None
     };
+    // The Start screen's title theme: every title (the credits card too) takes it.
+    let titles_themed = title_theme.map_or(0, |t| crate::text_cmd::apply_title_theme(&mut board, t));
     // The workspace's frame (F4), unless the call names one.
     board.frame = frame_param(s, p)?;
     s.boards.checkpoint();
@@ -257,6 +260,9 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
     crate::document_cmd::mark_saved(s, None);
     s.audio_stop();
     let mut out = state(s);
+    if let Value::Object(map) = &mut out {
+        map.insert("titlesThemed".into(), json!(titles_themed));
+    }
     if let (Some(f), Value::Object(map)) = (fitted, &mut out) {
         map.insert(
             "fitted".into(),
@@ -270,7 +276,7 @@ pub(crate) fn sb_new(s: &mut Session, p: &Value) -> CmdResult {
 fn manual_start() -> Storyboard {
     let mut board = Storyboard::new("Untitled storyboard");
     board.scenes.push(Scene::new(SceneId(1), None));
-    let len = Ticks::from_secs(2).unwrap_or(Ticks::ZERO);
+    let len = Ticks::from_secs_f64(assetcraft_storyboard::TITLE_MIN_SECS).unwrap_or(Ticks::ZERO);
     let mut card = Clip::new(ClipId(1), SceneId(1), ShotType::Ttl, len);
     card.description = "Untitled scene".into();
     board.clips.push(card);

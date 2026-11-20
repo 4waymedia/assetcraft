@@ -84,7 +84,11 @@ pub fn sample() -> Storyboard {
             inset: None,
             part: ScenePart::Section,
         });
-        let mut card = Clip::new(ClipId(next), scene_id, ShotType::Ttl, bpm.beats_to_ticks(4));
+        // Four beats, or the whole beats that make TITLE_MIN_SECS if that's longer: the cuts
+        // after it stay on the beat.
+        let min = crate::time::Ticks::from_secs_f64(crate::model::TITLE_MIN_SECS).unwrap_or(crate::time::Ticks::ZERO);
+        let title_beats = (4..=64).find(|b| bpm.beats_to_ticks(*b) >= min).unwrap_or(4);
+        let mut card = Clip::new(ClipId(next), scene_id, ShotType::Ttl, bpm.beats_to_ticks(title_beats));
         card.description = (*title).into();
         card.transition_in = if s == 0 { Transition::FadeIn } else { Transition::Cut };
         card.sync_to_downbeat = true;

@@ -276,12 +276,13 @@ mod tests {
     fn the_nearest_candidate_in_reach_wins() {
         let b = board();
         let cut = first_cut(&b);
-        // 44 pt/s: reach is 9/44 s ≈ 0.2 s. Just past the cut snaps back onto it.
-        let s = snap(&b, Ticks(cut.0 + secs(0.1).0), &opts(44.0)).expect("in reach");
+        // 44 pt/s: reach is 9/44 s ≈ 0.2 s. Just before the cut snaps onto it (just after, bar 3
+        // at 4 s is nearer: the sample's title card is 3.9 s since TITLE_MIN_SECS).
+        let s = snap(&b, Ticks(cut.0 - secs(0.1).0), &opts(44.0)).expect("in reach");
         assert_eq!((s.at, s.kind, s.label.as_str()), (cut, SnapKind::Cut, "cut"));
         // Out of reach of everything: no snap.
         let far = SnapOptions { music: false, ..opts(44.0) };
-        assert_eq!(snap(&b, Ticks(cut.0 + secs(0.5).0), &far), None);
+        assert_eq!(snap(&b, Ticks(cut.0 - secs(0.5).0), &far), None);
     }
 
     #[test]

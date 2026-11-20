@@ -138,17 +138,40 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
 
 /// `theme`: a built-in's id, or a loaded user theme's (TP2a-2).
 fn theme_choice(s: &Session, p: &Value) -> Result<Option<ThemeChoice>, CmdError> {
-    let Some(v) = p.get("theme") else { return Ok(None) };
-    let id = v.as_str().ok_or_else(|| CmdError::BadParams("`theme` must be a theme id".into()))?;
+    match p.get("theme") {
+        None => Ok(None),
+        Some(v) => theme_named(s, "theme", v).map(Some),
+    }
+}
+
+/// `titleTheme` on `storyboard.generate` / `storyboard.new` (Start screen, Paul 2026-11-20): the
+/// theme every title card and text overlay of the new board takes; absent or null keeps the
+/// preset's own.
+pub(crate) fn title_theme_param(s: &Session, p: &Value) -> Result<Option<ThemeChoice>, CmdError> {
+    match p.get("titleTheme") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => theme_named(s, "titleTheme", v).map(Some),
+    }
+}
+
+/// Give every text clip of `board` the theme `choice` (its animations and place kept); how many.
+pub(crate) fn apply_title_theme(board: &mut assetcraft_storyboard::Storyboard, choice: ThemeChoice) -> usize {
+    let ids: Vec<_> = board.clips.iter().filter(|c| c.text_kind().is_some()).map(|c| c.id).collect();
+    ids.into_iter().filter(|id| set_text_style(board, *id, Some(choice), None, None).is_ok()).count()
+}
+
+/// Theme id `v` (param `key`): a built-in's, or a loaded user theme's.
+fn theme_named(s: &Session, key: &str, v: &Value) -> Result<ThemeChoice, CmdError> {
+    let id = v.as_str().ok_or_else(|| CmdError::BadParams(format!("`{key}` must be a theme id")))?;
     if let Some(t) = TextTheme::from_id(id) {
-        return Ok(Some(ThemeChoice::Builtin(t)));
+        return Ok(ThemeChoice::Builtin(t));
     }
     if let Some(u) = ThemeId::new(id).filter(|u| s.user_looks().contains(*u)) {
-        return Ok(Some(ThemeChoice::User(u)));
+        return Ok(ThemeChoice::User(u));
     }
     let mut known: Vec<String> = TextTheme::ALL.iter().map(|t| t.id().to_string()).collect();
     known.extend(s.loaded_themes().iter().map(|u| u.theme.id.clone()));
-    Err(CmdError::BadParams(format!("`theme` {id:?} isn't a loaded theme ({})", known.join("|"))))
+    Err(CmdError::BadParams(format!("`{key}` {id:?} isn't a loaded theme ({})", known.join("|"))))
 }
 
 /// A move: one of `ids`, or `"theme"` to follow the theme again (`Some(None)`).

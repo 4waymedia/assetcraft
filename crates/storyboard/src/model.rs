@@ -365,6 +365,12 @@ pub struct Track {
     pub title_db: i8,
 }
 
+/// The shortest a title card is made, in seconds (Paul, 2026-11-20): a design needs about 2 s to
+/// draw in and as long to leave (Laser Trace's trace ran unfinished under 2 s). The generator,
+/// the sample, templates and a new board start titles at least this long; a user can still
+/// shorten one (down to the clip minimum).
+pub const TITLE_MIN_SECS: f64 = 3.5;
+
 /// The title level's range in dB.
 pub const TITLE_DB_RANGE: (i8, i8) = (-30, 0);
 /// The title level until the user sets one.

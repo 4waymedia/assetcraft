@@ -76,7 +76,7 @@ pub const STEP_SECS: f64 = 30.0;
 /// Shortest and longest a repeating section can be made, in seconds.
 pub const STEP_SECS_RANGE: (u32, u32) = (10, 300);
 /// A step section's title card.
-pub const TITLE_SECS: f64 = 3.0;
+pub const TITLE_SECS: f64 = crate::model::TITLE_MIN_SECS;
 /// The "Varied" shot pattern: odd step sections take the first row, even ones the second.
 pub const STEP_PATTERN: [[ShotType; 3]; 2] =
     [[ShotType::Est, ShotType::Ms, ShotType::Cu], [ShotType::Ws, ShotType::Cu, ShotType::Ins]];
@@ -190,7 +190,7 @@ pub fn review(points: usize, step_secs: f64) -> Storyboard {
         (
             "Hook".into(),
             vec![
-                beat(ShotType::Ttl, 3.0, "Review: <product>"),
+                beat(ShotType::Ttl, TITLE_SECS, "Review: <product>"),
                 moving(ShotType::Cu, 4.0, "The one detail that sold you (or didn't)", MotionPreset::PushIn),
             ],
         ),
@@ -221,7 +221,7 @@ pub fn tutorial(steps: usize, step_secs: f64) -> Storyboard {
         (
             "Goal".into(),
             vec![
-                beat(ShotType::Ttl, 3.0, "How to <do the thing>"),
+                beat(ShotType::Ttl, TITLE_SECS, "How to <do the thing>"),
                 titled(ShotType::Ws, 5.0, "What you'll have at the end", "The goal"),
             ],
         ),

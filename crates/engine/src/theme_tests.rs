@@ -841,3 +841,21 @@ fn a_saved_edit_shows_without_a_reload_and_saves_into_the_template() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&other);
 }
+
+/// The Start screen's title theme can be one of the user's: every title takes it (its built-in
+/// stays as the fallback).
+#[test]
+fn a_new_storyboards_titles_can_take_a_user_theme() {
+    let (mut s, dir) = session("title-theme");
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-titles".into();
+    t.name = "Acme Titles".into();
+    std::fs::write(dir.join("Themes").join("acme-titles.theme.json"), t.to_json()).unwrap();
+    run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    let r = run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": "acme-titles" }));
+    let b = s.storyboard().unwrap();
+    let texts: Vec<_> = b.clips.iter().filter(|c| c.text_kind().is_some()).collect();
+    assert_eq!(r["titlesThemed"].as_u64(), Some(texts.len() as u64));
+    assert!(texts.iter().all(|c| c.text_style.theme_id.map(|u| u.as_str().to_owned()) == Some("acme-titles".into())));
+    let _ = std::fs::remove_dir_all(&dir);
+}

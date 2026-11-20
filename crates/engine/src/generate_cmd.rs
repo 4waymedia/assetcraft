@@ -175,6 +175,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
     let density = density_param(p, s.boards.generated.as_ref().map_or(1.0, |g| g.density))?;
     let shape = shape_param(p, s.boards.generated.as_ref().map(|g| g.shape).unwrap_or_default())?;
     let fit_mode = fit_mode_param(p)?;
+    let title_theme = crate::text_cmd::title_theme_param(s, p)?;
     let cue = read_cue(s, &path)?;
     let track_path = track_path(s, &path, &cue);
     let name = match p.get("name").and_then(Value::as_str).map(str::trim) {
@@ -202,6 +203,8 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
             clip.duration = *d;
         }
     }
+    // The Start screen's title theme: every title (the credits card too) takes it.
+    let titles_themed = title_theme.map_or(0, |t| crate::text_cmd::apply_title_theme(&mut board, t));
     let lengths = fit_lengths(&cue);
     // The workspace's frame (F4), unless the call names one.
     board.frame = crate::storyboard::frame_param(s, p)?;
@@ -231,6 +234,7 @@ pub(crate) fn sb_generate(s: &mut Session, p: &Value) -> CmdResult {
         "clips": report.clips,
         "scenes": report.scenes,
         "titleCards": report.title_cards,
+        "titlesThemed": titles_themed,
         "cutsOnDownbeats": report.cuts_on_downbeats,
         "cutsOnHits": report.cuts_on_hits,
         "length": report.length.timecode(),

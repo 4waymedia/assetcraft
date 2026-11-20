@@ -211,3 +211,66 @@ fn a_template_with_a_cue_map_takes_the_song_as_its_track_and_snaps_to_its_beat()
     assert!(s.execute("storyboard.new", &json!({ "template": "review", "cueMap": "/music/bad.cuemap.json" })).is_err());
     assert_eq!(s.storyboard().unwrap().name, "Song · Trailer");
 }
+
+/// The Start screen's title theme (Paul, 2026-11-20): every title card and text overlay of the
+/// new storyboard takes it, generated or new; the presets' animations stay; a theme that isn't
+/// loaded is refused before anything is made.
+#[test]
+fn a_title_theme_sets_every_title_of_a_new_storyboard() {
+    use assetcraft_storyboard::TextTheme;
+    let mut s = session();
+    let themed = |s: &Session, t: TextTheme| {
+        let b = s.storyboard().unwrap();
+        let texts: Vec<_> = b.clips.iter().filter(|c| c.text_kind().is_some()).collect();
+        assert!(!texts.is_empty());
+        texts.iter().all(|c| c.text_style.theme == t && c.text_style.theme_id.is_none())
+    };
+    // Generated: each title keeps the preset's animation, in the chosen theme.
+    let plain = run(
+        &mut s,
+        "storyboard.generate",
+        json!({ "cueMap": "/music/song.cuemap.json", "pacing": "trailer", "credits": true }),
+    );
+    assert_eq!(plain["titlesThemed"], 0);
+    let animations = |s: &Session| {
+        s.storyboard()
+            .unwrap()
+            .clips
+            .iter()
+            .filter(|c| c.text_kind().is_some())
+            .map(|c| c.text_style.animation)
+            .collect::<Vec<_>>()
+    };
+    let before = animations(&s);
+    let r = run(
+        &mut s,
+        "storyboard.generate",
+        json!({ "cueMap": "/music/song.cuemap.json", "pacing": "trailer", "titleTheme": "neon-night", "credits": true }),
+    );
+    assert!(themed(&s, TextTheme::NeonNight));
+    assert_eq!(r["titlesThemed"].as_u64(), Some(r["titleCards"].as_u64().unwrap() + 1), "the credits card too");
+    assert_eq!(animations(&s), before, "each title's animation kept");
+    // New: the sample, a template, a blank board.
+    for p in [
+        json!({ "sample": true, "titleTheme": "paper" }),
+        json!({ "template": "review", "titleTheme": "paper" }),
+        json!({ "titleTheme": "paper" }),
+    ] {
+        let r = run(&mut s, "storyboard.new", p.clone());
+        assert!(themed(&s, TextTheme::Paper), "{p}");
+        assert!(r["titlesThemed"].as_u64().unwrap() >= 1, "{p}");
+    }
+    // Not a loaded theme: refused, the open board untouched.
+    let before = s.storyboard().unwrap().clone();
+    for (cmd, p) in [
+        ("storyboard.new", json!({ "sample": true, "titleTheme": "acme-gone" })),
+        ("storyboard.generate", json!({ "cueMap": "/music/song.cuemap.json", "titleTheme": 7 })),
+    ] {
+        let e = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(e.contains("titleTheme"), "{e}");
+    }
+    assert_eq!(s.storyboard().unwrap(), &before);
+    // null: the preset's own.
+    let r = run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": null }));
+    assert_eq!(r["titlesThemed"], 0);
+}

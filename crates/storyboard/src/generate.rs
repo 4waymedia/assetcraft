@@ -805,7 +805,9 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
     let scenes = scene_spans(&tl, &bars, bar_frames, p.max_scene_bars);
 
     // 3–6. Clips.
-    let end_card_len = if shape.end_card && tl.length > 20 * sr { 2 * bar_frames } else { 0 };
+    // A title card is at least TITLE_MIN_SECS (its design needs the time to draw in and out).
+    let title_min = (crate::model::TITLE_MIN_SECS * sr as f64).ceil() as u64;
+    let end_card_len = if shape.end_card && tl.length > 20 * sr { (2 * bar_frames).max(title_min) } else { 0 };
     let end_card_start = snap_down(&bars, tl.length.saturating_sub(end_card_len));
     let min_len = (u64::from(p.min_beats) * beat_frames).max((f64::from(p.min_secs) * sr as f64) as u64);
     let mut spans: Vec<(usize, Span)> = Vec::new();
@@ -823,8 +825,11 @@ pub fn generate(cue: &CueMap, opts: &GenerateOptions) -> Result<(Storyboard, Gen
             Titles::None => false,
         };
         if title && scene_end > cursor {
-            let want = cursor + u64::from(p.title_bars) * bar_frames;
-            let mut t_end = snap_near(&bars, want, cursor + min_len.min(bar_frames), scene_end);
+            // The profile's bars, but never under TITLE_MIN_SECS: the next bar at or after it
+            // (a scene shorter than that is all title).
+            let lo = (cursor + title_min).min(scene_end);
+            let want = (cursor + u64::from(p.title_bars) * bar_frames).max(lo);
+            let mut t_end = snap_near(&bars, want, lo, scene_end);
             if scene_end.saturating_sub(t_end) < min_len {
                 t_end = scene_end;
             }

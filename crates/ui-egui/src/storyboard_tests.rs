@@ -12,6 +12,12 @@ fn nav() -> Navigator {
     Navigator::with_one_worker(session)
 }
 
+/// The open board's first clip (the sample's title card) in seconds: TITLE_MIN_SECS rounded up
+/// to whole beats, so tests find the clips after it wherever it ends.
+fn title_secs(nav: &Navigator) -> f32 {
+    nav.session().storyboard().and_then(|b| b.clips.first()).map_or(0.0, |c| c.duration.as_secs_f64() as f32)
+}
+
 fn frame(ctx: &Context, nav: &mut Navigator, events: Vec<Event>, t: f64) {
     let input = RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1360.0, 860.0))),
@@ -118,9 +124,9 @@ fn dragging_an_organizer_file_onto_a_strip_clip_places_it() {
     frame(&ctx, &mut nav, Vec::new(), t);
     // First Content-panel cell: just inside the left panel, below the tabs and folder line.
     let from = Pos2::new(40.0, 150.0);
-    // Clip #02 in the timeline: the strip starts 8 px in, clip #01 (title card) is 2.6 s at 44 px/s.
+    // Clip #02 in the timeline: the strip starts 8 px in, then clip #01 (the title card) at 44 px/s.
     let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
-    let to = Pos2::new(8.0 + 2.6 * 44.0 + 40.0, strip_y);
+    let to = Pos2::new(8.0 + title_secs(&nav) * 44.0 + 40.0, strip_y);
     let press = |pos, pressed| Event::PointerButton {
         pos,
         button: PointerButton::Primary,
@@ -376,9 +382,15 @@ fn the_start_screen_creates_from_a_song_and_opens_the_strip_view() {
             ..Default::default()
         },
     );
+    // The TITLE THEME picker's choice (Paul, 2026-11-20) reaches every title.
+    nav.state.storyboard.start.title_theme = Some("noir-gold".into());
     crate::start_view::create_board(&mut nav);
     let board = nav.session().storyboard().cloned();
     assert!(board.is_some(), "created");
+    let titles: Vec<_> = board.iter().flat_map(|b| &b.clips).filter(|c| c.text_kind().is_some()).collect();
+    assert!(
+        !titles.is_empty() && titles.iter().all(|c| c.text_style.theme == assetcraft_storyboard::TextTheme::NoirGold)
+    );
     assert_eq!(nav.session().board_view(), BoardView::Strip, "opens in the Strip view");
     let st = nav.run("storyboard.state", json!({})).unwrap_or_default();
     let density = st["generatedFrom"]["density"].as_f64().unwrap_or(0.0);
@@ -390,6 +402,12 @@ fn the_start_screen_creates_from_a_song_and_opens_the_strip_view() {
     nav.state.storyboard.start.open = true;
     frame(&ctx, &mut nav, Vec::new(), 0.3);
     assert!(nav.session().storyboard().is_some());
+    // The choice is kept for the next storyboard; one that's no longer loaded falls back to the
+    // preset's own when the picker draws.
+    assert_eq!(nav.state.storyboard.start.title_theme.as_deref(), Some("noir-gold"));
+    nav.state.storyboard.start.title_theme = Some("acme-gone".into());
+    frame(&ctx, &mut nav, Vec::new(), 0.4);
+    assert_eq!(nav.state.storyboard.start.title_theme, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1296,7 +1314,7 @@ fn dropping_an_organizer_file_on_a_strip_inset_slot_sets_the_sections_inset() {
     // The INSET row sits 4 px under the strip; section 1's slot spans its shots after the card.
     let strip_y = 860.0 - 24.0 - crate::strip_view::ROWS_H - 150.0 / 2.0 - 12.0;
     let inset_y = strip_y + 150.0 / 2.0 + 4.0 + 10.0;
-    let to = Pos2::new(8.0 + 2.6 * 44.0 + 40.0, inset_y);
+    let to = Pos2::new(8.0 + title_secs(&nav) * 44.0 + 40.0, inset_y);
     let press = |pos, pressed| Event::PointerButton {
         pos,
         button: PointerButton::Primary,

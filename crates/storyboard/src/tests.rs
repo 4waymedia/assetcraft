@@ -1789,3 +1789,35 @@ fn theme_assets_follow_the_pack_rules_and_a_bad_one_is_only_a_warning() {
     assert!(Theme::parse(t.to_json().as_bytes(), false).is_err(), "at most 64");
     assert!(!Theme::builtin(crate::TextTheme::Bold).to_json().contains("assets"), "none written when empty");
 }
+
+/// Paul, 2026-11-20: a title card is made at least TITLE_MIN_SECS long, so a design (Laser
+/// Trace) has time to draw in and out, even on a 1-bar title profile at a quick tempo (a bar is
+/// 2 s at 120 BPM here). The sample, the templates and the end card follow it too.
+#[test]
+fn title_cards_start_at_least_the_title_minimum() {
+    use cue::*;
+    let m = map();
+    let short = |board: &Storyboard| {
+        board
+            .clips
+            .iter()
+            .filter(|c| c.shot_type == ShotType::Ttl && c.duration.as_secs_f64() < TITLE_MIN_SECS - 1e-6)
+            .map(|c| (c.description.clone(), c.duration.as_secs_f64()))
+            .collect::<Vec<_>>()
+    };
+    for pacing in [Pacing::Calm, Pacing::Cinematic, Pacing::Energetic, Pacing::Trailer, Pacing::Family, Pacing::Hero] {
+        let shape = Shape { titles: Some(Titles::EveryScene), end_card: Some(true), ..Shape::default() };
+        let (board, report) = generate(&m, &GenerateOptions { shape, ..opts(pacing, None) }).unwrap();
+        assert!(report.title_cards > 0, "{pacing:?}");
+        assert_eq!(short(&board), Vec::<(String, f64)>::new(), "{pacing:?}");
+        // On the grid: the next bar after 3.5 s (4 s at 120 BPM) for a 1-bar profile.
+        assert!(
+            board.clips.iter().filter(|c| c.shot_type == ShotType::Ttl).all(|c| c.duration.as_secs_f64() >= 4.0 - 1e-6)
+        );
+    }
+    assert_eq!(short(&crate::sample::sample()), Vec::<(String, f64)>::new(), "the sample");
+    for t in crate::template::BUNDLED {
+        let board = crate::template::bundled(t.id).expect("a bundled template");
+        assert_eq!(short(&board), Vec::<(String, f64)>::new(), "template {}", t.id);
+    }
+}

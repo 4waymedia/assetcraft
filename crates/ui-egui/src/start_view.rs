@@ -78,6 +78,9 @@ pub(crate) struct StartUi {
     pub(crate) filter: crate::start_tracks::TrackFilter,
     /// Ask "Analyse all N audio files in this folder?" (set when a music folder is picked).
     pub(crate) ask_analyse: bool,
+    /// The title theme every title takes (Paul, 2026-11-20): a built-in's or a loaded user
+    /// theme's id; `None` keeps the preset's own. Kept for the next storyboard this session.
+    pub(crate) title_theme: Option<String>,
     /// The analyser's `(done + failed, batches)` last drawn, to refresh the list and notify once.
     pub(crate) seen_analyse: (usize, u64),
     /// How many of the chosen template's repeating section (points, steps); `None` = its default.
@@ -179,6 +182,7 @@ impl Default for StartUi {
             cursor: 0.0,
             filter: crate::start_tracks::TrackFilter::default(),
             ask_analyse: false,
+            title_theme: None,
             seen_analyse: (0, 0),
             steps: None,
         }
@@ -1125,6 +1129,8 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
             }
         });
         ui.add_space(12.0);
+        title_theme_picker(nav, ui);
+        ui.add_space(12.0);
         let ready = match style {
             Style::Pacing(_) => selected_track(nav).is_some(),
             _ => true,
@@ -1151,6 +1157,51 @@ fn summary(nav: &mut Navigator, ui: &mut Ui) {
     });
 }
 
+/// The Start screen's TITLE THEME (Paul, 2026-11-20): the theme every title card and text overlay
+/// of the new storyboard takes — the preset's own, a built-in, or one of the user's themes.
+fn title_theme_picker(nav: &mut Navigator, ui: &mut Ui) {
+    // A user theme that's gone (Themes reloaded without it) falls back to the preset's.
+    let yours: Vec<(String, String)> =
+        nav.session.loaded_themes().iter().map(|u| (u.theme.id.clone(), u.theme.name.clone())).collect();
+    let builtins = assetcraft_storyboard::TextTheme::ALL;
+    let known = |id: &str| builtins.iter().any(|t| t.id() == id) || yours.iter().any(|(y, _)| y == id);
+    if nav.state.storyboard.start.title_theme.as_deref().is_some_and(|id| !known(id)) {
+        nav.state.storyboard.start.title_theme = None;
+    }
+    let label = |id: Option<&str>| match id {
+        None => "Preset's own".to_owned(),
+        Some(id) => builtins
+            .iter()
+            .find(|t| t.id() == id)
+            .map(|t| t.name().to_owned())
+            .or_else(|| yours.iter().find(|(y, _)| y == id).map(|(_, n)| n.clone()))
+            .unwrap_or_else(|| id.to_owned()),
+    };
+    section(ui, "TITLE THEME");
+    let mut pick = nav.state.storyboard.start.title_theme.clone();
+    egui::ComboBox::from_id_salt("start-title-theme")
+        .width(200.0)
+        .selected_text(label(pick.as_deref()))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut pick, None, "Preset's own")
+                .on_hover_text("Each title keeps the theme the preset or template gives it");
+            ui.separator();
+            for t in builtins {
+                ui.selectable_value(&mut pick, Some(t.id().to_owned()), t.name());
+            }
+            if !yours.is_empty() {
+                ui.separator();
+                ui.weak("Yours");
+                for (id, name) in &yours {
+                    ui.selectable_value(&mut pick, Some(id.clone()), name);
+                }
+            }
+        })
+        .response
+        .on_hover_text("Every title card and text overlay starts in this theme (the credits card too); change any later in the Inspector");
+    nav.state.storyboard.start.title_theme = pick;
+}
+
 /// The Start screen's Frame heading: what new storyboards will be, e.g. `Frame · Vertical 9:16, 30 fps`.
 fn frame_heading(nav: &Navigator) -> String {
     let f = nav.session.default_frame();
@@ -1168,6 +1219,7 @@ pub(crate) fn create_board(nav: &mut Navigator) {
     let (style, track, length, autofill, density, shape) =
         (start.style, start.track.clone(), start.length, start.autofill, start.density(), start.shape);
     let credits = nav.session.credits_on();
+    let title_theme = nav.state.storyboard.start.title_theme.clone();
     // Auto-fill only when there is something to fill with: an empty Organizer isn't an error.
     let files = nav.session.items().iter().filter(|e| e.kind == assetcraft_fs::EntryKind::File).count();
     let autofill = autofill && files > 0;
@@ -1181,6 +1233,7 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             if !name.is_empty() {
                 params["name"] = json!(name);
             }
+            params["titleTheme"] = json!(title_theme);
             let made = nav.run("storyboard.generate", params).is_some();
             if made && autofill {
                 nav.run("storyboard.autofill", json!({}));
@@ -1207,15 +1260,18 @@ pub(crate) fn create_board(nav: &mut Navigator) {
             if !name.is_empty() {
                 params["name"] = json!(name);
             }
+            params["titleTheme"] = json!(title_theme);
             let made = nav.run("storyboard.new", params).is_some();
             if made && autofill {
                 nav.run("storyboard.autofill", json!({}));
             }
             made
         }
-        Style::Sample => nav.run("storyboard.new", json!({ "sample": true, "credits": credits })).is_some(),
+        Style::Sample => nav
+            .run("storyboard.new", json!({ "sample": true, "credits": credits, "titleTheme": title_theme }))
+            .is_some(),
         Style::Blank => {
-            let mut params = json!({ "credits": credits });
+            let mut params = json!({ "credits": credits, "titleTheme": title_theme });
             if !name.is_empty() {
                 params["name"] = json!(name);
             }
