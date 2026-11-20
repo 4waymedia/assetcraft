@@ -276,7 +276,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Themes",
         "Storyboard",
         None,
-        "{reload?: bool} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate; loaded at startup, `reload: true` reads the folder again)",
+        "{reload?: bool} → {themes: [{id, name, tags, source: builtin|user|pack, colors: {background, text, accent}, display, body, titleIn?, path?, warnings?, pack?, designs?: [{role, name, width, height, seconds, controls: [{name, fills}], path}], assets?: [{role, path, license, credit}]}], problems: [{path, reason}], builtinDesigns: [{id, role, name, width, height, seconds, controls}], folder} (the built-ins Bold, Minimal, Cinematic, Paper, Noir Gold, Neon Night, Field Notes, Blueprint, then <working>/Themes/*.theme.json and theme packs <working>/Themes/<pack>/theme.json with their designs/*.ectemplate; loaded at startup, `reload: true` reads the folder again)",
         crate::theme_cmd::sb_themes
     ),
     cmd!(
@@ -584,7 +584,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Import Theme",
         "File",
         None,
-        "{path: .theme.json file | theme pack folder, replace?: bool, dryRun?: bool} → {id, name, kind: file|pack, to, files, warnings, dryRun, message} (copies the theme file, and a pack's theme.json and the designs it lists, into <working>/Themes — nothing else from the folder; read with the same checks as loading; a theme already loaded under that id only with `replace`; then loads it)",
+        "{path: .theme.json file | theme pack folder, replace?: bool, dryRun?: bool} → {id, name, kind: file|pack, to, files, warnings, dryRun, message} (copies the theme file, and a pack's theme.json and the designs and assets it lists that pass, into <working>/Themes — nothing else from the folder; read with the same checks as loading; a theme already loaded under that id only with `replace`; then loads it)",
         crate::theme_cmd::sb_import_theme
     ),
     cmd!(

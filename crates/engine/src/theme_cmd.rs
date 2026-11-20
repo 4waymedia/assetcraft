@@ -35,6 +35,39 @@ pub struct UserTheme {
     pub pack: Option<PathBuf>,
     /// The pack's designs that opened, by role.
     pub designs: Vec<PackDesign>,
+    /// The pack's assets that pass the rules and whose files look like what they say (TP3a).
+    pub assets: Vec<PackAsset>,
+}
+
+/// A pack's asset that can be used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackAsset {
+    /// Its role (`logo`, `texture`, …).
+    pub role: String,
+    /// The file.
+    pub path: PathBuf,
+    /// Its licence.
+    pub license: String,
+    /// Who to credit, if anyone.
+    pub credit: Option<String>,
+}
+
+/// Whether `head` (a file's first bytes) starts like a file with extension `ext`. A cheap
+/// check at load; the file is decoded when it's used.
+fn looks_like(ext: &str, head: &[u8]) -> bool {
+    let at = |i: usize, sig: &[u8]| head.get(i..i + sig.len()) == Some(sig);
+    match ext {
+        "png" => at(0, b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => at(0, &[0xFF, 0xD8, 0xFF]),
+        "webp" => at(0, b"RIFF") && at(8, b"WEBP"),
+        "mp4" | "mov" => at(4, b"ftyp") || at(4, b"moov") || at(4, b"wide") || at(4, b"mdat"),
+        "webm" => at(0, &[0x1A, 0x45, 0xDF, 0xA3]),
+        "wav" => at(0, b"RIFF") && at(8, b"WAVE"),
+        "mp3" => at(0, b"ID3") || head.first() == Some(&0xFF) && head.get(1).is_some_and(|b| b & 0xE0 == 0xE0),
+        "ttf" => at(0, &[0, 1, 0, 0]) || at(0, b"true"),
+        "otf" => at(0, b"OTTO"),
+        _ => false,
+    }
 }
 
 /// A design in a theme pack that opened.
@@ -192,18 +225,22 @@ impl Session {
                         bad.push((path, format!("id {:?} is already taken", theme.id)));
                         continue;
                     }
-                    let designs = match &pack {
-                        Some(dir) => self.pack_designs(dir, &theme, &mut warnings),
+                    let (designs, assets) = match &pack {
+                        Some(dir) => (
+                            self.pack_designs(dir, &theme, &mut warnings),
+                            self.pack_assets(dir, &theme, &mut warnings),
+                        ),
                         None => {
-                            if !theme.designs.is_empty() {
+                            if !theme.designs.is_empty() || !theme.assets.is_empty() {
                                 warnings.push(
-                                    "designs are read only from a theme pack (a folder with a theme.json)".into(),
+                                    "designs and assets are read only from a theme pack (a folder with a theme.json)"
+                                        .into(),
                                 );
                             }
-                            Vec::new()
+                            (Vec::new(), Vec::new())
                         }
                     };
-                    ok.push(UserTheme { path, theme, warnings, pack, designs });
+                    ok.push(UserTheme { path, theme, warnings, pack, designs, assets });
                 }
                 Err(e) => bad.push((path, e.to_string())),
             }
@@ -242,6 +279,50 @@ impl Session {
             match Design::read(&bytes) {
                 Ok(design) => out.push(PackDesign { role: role.clone(), path, design }),
                 Err(e) => warnings.push(format!("design {role}: {e}")),
+            }
+        }
+        out
+    }
+}
+
+impl Session {
+    /// A pack's assets that can be used (TP3a): each passes `asset_rule`, is a regular file in
+    /// its role's folder (a link isn't followed), within its size cap, and starts like its kind.
+    /// One that doesn't is a warning.
+    fn pack_assets(&self, pack: &std::path::Path, theme: &Theme, warnings: &mut Vec<String>) -> Vec<PackAsset> {
+        let mut out = Vec::new();
+        let mut listed: std::collections::HashMap<&str, Vec<(String, u64)>> = std::collections::HashMap::new();
+        for a in &theme.assets {
+            let Ok(folder) = assetcraft_storyboard::asset_rule(a) else { continue };
+            let files = listed.entry(folder).or_insert_with(|| {
+                let opts = ListOptions { include_hidden: false, max_entries: MAX_USER_THEMES };
+                self.services
+                    .list_entries(&pack.join(folder), &opts)
+                    .map(|l| {
+                        l.entries.into_iter().filter(|e| e.kind == EntryKind::File).map(|e| (e.name, e.size)).collect()
+                    })
+                    .unwrap_or_default()
+            });
+            let name = a.path.rsplit('/').next().unwrap_or_default();
+            let Some((_, size)) = files.iter().find(|(n, _)| n == name) else {
+                warnings.push(format!("asset {}: isn't in the pack (or is a link); not used", a.path));
+                continue;
+            };
+            if *size > assetcraft_storyboard::asset_cap(folder) {
+                warnings.push(format!("asset {}: larger than the {folder} cap; not used", a.path));
+                continue;
+            }
+            let path = pack.join(folder).join(name);
+            let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+            match self.services.read_head(&path, 16) {
+                Ok(head) if looks_like(&ext, &head) => out.push(PackAsset {
+                    role: a.role.clone(),
+                    path,
+                    license: a.license.clone(),
+                    credit: a.credit.clone(),
+                }),
+                Ok(_) => warnings.push(format!("asset {}: isn't a .{ext} file; not used", a.path)),
+                Err(e) => warnings.push(format!("asset {}: {e}; not used", a.path)),
             }
         }
         out
@@ -298,6 +379,12 @@ pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
                 })
                 .collect();
             v["designs"] = json!(designs);
+            let assets: Vec<Value> = u
+                .assets
+                .iter()
+                .map(|a| json!({ "role": a.role, "path": a.path.to_string_lossy(), "license": a.license, "credit": a.credit }))
+                .collect();
+            v["assets"] = json!(assets);
         }
         themes.push(v);
     }
@@ -332,6 +419,27 @@ pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
     Ok(out)
 }
 
+/// Copy `from` to `to` whole or not at all: into a temp file beside `to`, flushed, then
+/// renamed over it (as `document_cmd::write_atomic`, without holding a large video in memory).
+fn copy_atomic(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let dir = to.parent().filter(|d| !d.as_os_str().is_empty()).ok_or_else(|| std::io::Error::other("no folder"))?;
+    std::fs::create_dir_all(dir)?;
+    let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let copied = (|| {
+        let mut src = std::fs::File::open(from)?;
+        let mut dst = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        std::io::copy(&mut src, &mut dst)?;
+        dst.sync_all()?;
+        drop(dst);
+        std::fs::rename(&tmp, to)
+    })();
+    if copied.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    copied
+}
+
 /// What an import copies: the theme file, and for a pack its listed designs that open.
 struct ImportPlan {
     theme: Theme,
@@ -361,7 +469,14 @@ pub(crate) fn sb_import_theme(s: &mut Session, p: &Value) -> CmdResult {
     let (replace, dry) = (flag("replace")?, flag("dryRun")?);
     let plan = s.import_plan(&src, replace)?;
     let kind = if plan.pack { "pack" } else { "file" };
-    let designs = plan.files.len().saturating_sub(1);
+    let in_folder = |dir: &str| {
+        plan.files
+            .iter()
+            .filter(|(_, to)| to.parent().and_then(|p| p.file_name()) == Some(std::ffi::OsStr::new(dir)))
+            .count()
+    };
+    let designs = in_folder(DESIGNS_DIR);
+    let assets = plan.files.len().saturating_sub(1 + designs);
     let files: Vec<Value> = plan.files.iter().map(|(_, to)| json!(to.to_string_lossy())).collect();
     let mut out = json!({
         "id": plan.theme.id, "name": plan.theme.name, "kind": kind, "to": plan.dest.to_string_lossy(),
@@ -372,15 +487,18 @@ pub(crate) fn sb_import_theme(s: &mut Session, p: &Value) -> CmdResult {
         return Ok(out);
     }
     for (from, to) in &plan.files {
-        let bytes = s.services.read_head(from, MAX_DESIGN_BYTES.max(MAX_THEME_BYTES) + 1).map_err(CmdError::Fs)?;
-        crate::document_cmd::write_atomic(to, &bytes)
-            .map_err(|e| CmdError::Unavailable(format!("couldn't write {}: {e}", to.display())))?;
+        copy_atomic(from, to).map_err(|e| CmdError::Unavailable(format!("couldn't copy {}: {e}", to.display())))?;
     }
     s.reload_themes();
     let what = match (plan.pack, designs) {
         (false, _) => String::new(),
-        (true, 1) => " (a pack, 1 design)".into(),
-        (true, n) => format!(" (a pack, {n} designs)"),
+        (true, n) => {
+            let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+            match assets {
+                0 => format!(" (a pack, {})", plural(n, "design", "designs")),
+                a => format!(" (a pack, {}, {})", plural(n, "design", "designs"), plural(a, "asset", "assets")),
+            }
+        }
     };
     out["message"] = json!(format!("Imported theme “{}”{what}", plan.theme.name));
     Ok(out)
@@ -437,8 +555,14 @@ impl Session {
         let mut files = vec![(file, theme_dest)];
         if is_dir {
             files.extend(self.import_designs(src, &dest, &theme, &mut warnings));
-        } else if !theme.designs.is_empty() {
-            warnings.push("designs are read only from a theme pack (a folder with a theme.json)".into());
+            // The assets that pass (the same checks as loading), into the same folders.
+            for a in self.pack_assets(src, &theme, &mut warnings) {
+                if let Ok(rel) = a.path.strip_prefix(src) {
+                    files.push((a.path.clone(), dest.join(rel)));
+                }
+            }
+        } else if !theme.designs.is_empty() || !theme.assets.is_empty() {
+            warnings.push("designs and assets are read only from a theme pack (a folder with a theme.json)".into());
         }
         Ok(ImportPlan { theme, pack: is_dir, dest, files, warnings })
     }

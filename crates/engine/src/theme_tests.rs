@@ -364,3 +364,63 @@ fn the_viewer_gets_design_frames_for_clips_drawn_through_a_pack() {
     assert_eq!((f.width, f.height, &f.rgba), (direct.width, direct.height, &direct.rgba), "as the export draws it");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP3a: a pack's assets are listed when they pass the rules and their files look right; each
+/// one that doesn't is a warning, and an import copies only the good ones.
+#[test]
+fn a_packs_assets_are_checked_listed_and_imported() {
+    let (mut s, dir) = session("assets");
+    let src = outside("assets").join("Acme Assets");
+    for f in ["images", "video", "sounds", "fonts", "designs"] {
+        std::fs::create_dir_all(src.join(f)).unwrap();
+    }
+    let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_data/library");
+    std::fs::copy(lib.join("environments/soul_light_forest.jpg"), src.join("images/texture.jpg")).unwrap();
+    std::fs::copy(lib.join("environments/snow_clearing_flythrough.mp4"), src.join("video/loop.mp4")).unwrap();
+    std::fs::write(src.join("images/logo.png"), b"not a png at all").unwrap();
+    std::fs::write(src.join("images/unlisted.png"), b"\x89PNG\r\n\x1a\n....").unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-assets".into();
+    t.name = "Acme Assets".into();
+    let a = |role: &str, path: &str, license: &str, credit: Option<&str>| assetcraft_storyboard::ThemeAsset {
+        role: role.into(),
+        path: path.into(),
+        license: license.into(),
+        credit: credit.map(Into::into),
+    };
+    t.assets = vec![
+        a("texture", "images/texture.jpg", "CC-BY-4.0", Some("Test Library")),
+        a("backgroundVideo", "video/loop.mp4", "own", None),
+        a("logo", "images/logo.png", "own", None),
+        a("intro", "video/missing.mp4", "own", None),
+        a("musicBed", "sounds/bed.wav", "MIT", None),
+    ];
+    std::fs::write(src.join("theme.json"), t.to_json()).unwrap();
+    let out = run(&mut s, "storyboard.importTheme", json!({ "path": src.to_string_lossy() }));
+    assert_eq!(out["message"], "Imported theme “Acme Assets” (a pack, 0 designs, 2 assets)", "{out}");
+    let warns = out["warnings"].to_string();
+    for w in ["logo.png", "missing.mp4", "bed.wav"] {
+        assert!(warns.contains(w), "{w} in {warns}");
+    }
+    let dest = dir.join("Themes").join("acme-assets");
+    let mut copied: Vec<String> =
+        walk(&dest).iter().map(|p| p.strip_prefix(&dest).unwrap().to_string_lossy().replace('\\', "/")).collect();
+    copied.sort();
+    assert_eq!(copied, ["images/texture.jpg", "theme.json", "video/loop.mp4"], "only what passed");
+    assert_eq!(std::fs::read(dest.join("video/loop.mp4")).unwrap(), std::fs::read(src.join("video/loop.mp4")).unwrap());
+    // Loaded and listed.
+    let listed = run(&mut s, "storyboard.themes", json!({}));
+    let row = listed["themes"].as_array().unwrap().iter().find(|t| t["id"] == "acme-assets").unwrap().clone();
+    let roles: Vec<&str> = row["assets"].as_array().unwrap().iter().filter_map(|a| a["role"].as_str()).collect();
+    assert_eq!(roles, ["texture", "backgroundVideo"]);
+    assert_eq!(row["assets"][0]["credit"], "Test Library");
+    // A loose theme file naming assets gets a warning.
+    let mut loose = t.clone();
+    loose.id = "loose-assets".into();
+    std::fs::write(dir.join("Themes").join("loose-assets.theme.json"), loose.to_json()).unwrap();
+    let listed = run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    let row = listed["themes"].as_array().unwrap().iter().find(|t| t["id"] == "loose-assets").unwrap().clone();
+    assert!(row["warnings"].to_string().contains("only from a theme pack"), "{row}");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+}

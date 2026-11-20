@@ -1752,3 +1752,40 @@ fn a_clip_picks_its_design_and_the_default_is_not_written() {
     let shot = board.clips.iter().find(|c| c.text_kind().is_none()).map(|c| c.id).expect("a shot");
     assert!(set_text_design(&mut board, shot, Some(DesignPick::None)).is_err(), "only text clips");
 }
+
+#[test]
+fn theme_assets_follow_the_pack_rules_and_a_bad_one_is_only_a_warning() {
+    use crate::{Theme, ThemeAsset, asset_rule};
+    let a = |role: &str, path: &str, license: &str, credit: Option<&str>| ThemeAsset {
+        role: role.into(),
+        path: path.into(),
+        license: license.into(),
+        credit: credit.map(Into::into),
+    };
+    assert_eq!(asset_rule(&a("logo", "images/logo.png", "own", None)), Ok("images"));
+    assert_eq!(asset_rule(&a("backgroundVideo", "video/loop.MOV", "CC0-1.0", None)), Ok("video"));
+    assert_eq!(asset_rule(&a("font", "fonts/Brand.ttf", "OFL-1.1", None)), Ok("fonts"));
+    assert_eq!(asset_rule(&a("musicBed", "sounds/bed.mp3", "CC-BY-4.0", Some("Name, https://x"))), Ok("sounds"));
+    for (bad, why) in [
+        (a("poster", "images/p.png", "own", None), "role"),
+        (a("logo", "video/logo.png", "own", None), "images/"),
+        (a("logo", "images/logo.gif", "own", None), "png"),
+        (a("logo", "images/../theme.json", "own", None), "inside the pack"),
+        (a("logo", "images/logo.png", "MIT", None), "licence"),
+        (a("logo", "images/logo.png", "OFL-1.1", None), "font licence"),
+        (a("logo", "images/logo.png", "CC-BY-4.0", None), "credit"),
+        (a("logo", "images/logo.png", "CC-BY-4.0", Some("  ")), "credit"),
+    ] {
+        let e = asset_rule(&bad).unwrap_err();
+        assert!(e.contains(why), "{bad:?}: {e}");
+    }
+    let mut t = Theme::builtin(crate::TextTheme::Bold);
+    t.id = "pack".into();
+    t.assets = vec![a("logo", "images/logo.png", "own", None), a("logo", "images/logo.gif", "own", None)];
+    let (back, warnings) = Theme::parse(t.to_json().as_bytes(), false).unwrap();
+    assert_eq!(back.assets, t.assets, "round trip");
+    assert!(warnings.iter().any(|w| w.contains("logo.gif") && w.contains("not used")), "{warnings:?}");
+    t.assets = (0..65).map(|i| a("logo", &format!("images/{i}.png"), "own", None)).collect();
+    assert!(Theme::parse(t.to_json().as_bytes(), false).is_err(), "at most 64");
+    assert!(!Theme::builtin(crate::TextTheme::Bold).to_json().contains("assets"), "none written when empty");
+}

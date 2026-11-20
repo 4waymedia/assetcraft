@@ -77,6 +77,85 @@ pub struct Theme {
     /// `"designs/banner.ectemplate"`, relative to the pack folder.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub designs: std::collections::BTreeMap<String, String>,
+    /// A pack's images, sounds, video and fonts, each with a role and a licence (theme-packs.md
+    /// §3, TP3; TD1). An entry that breaks [`asset_rule`] is a warning and isn't used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ThemeAsset>,
+}
+
+/// One file a theme pack uses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeAsset {
+    /// What it's for: one of [`ASSET_ROLES`].
+    pub role: String,
+    /// Relative to the pack: `<folder>/<name>` in the role's folder.
+    pub path: String,
+    /// `own`, `CC0-1.0`, `CC-BY-4.0` (with `credit`) or `OFL-1.1` (fonts only).
+    pub license: String,
+    /// Who to credit (required for `CC-BY-4.0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit: Option<String>,
+}
+
+/// The asset roles: `(role, folder, extensions)` (theme-packs.md §3).
+pub const ASSET_ROLES: [(&str, &str, &[&str]); 10] = [
+    ("logo", "images", &["png", "jpg", "jpeg", "webp"]),
+    ("texture", "images", &["png", "jpg", "jpeg", "webp"]),
+    ("backgroundImage", "images", &["png", "jpg", "jpeg", "webp"]),
+    ("backgroundVideo", "video", &["mp4", "mov", "webm"]),
+    ("intro", "video", &["mp4", "mov", "webm"]),
+    ("outro", "video", &["mp4", "mov", "webm"]),
+    ("titleSound", "sounds", &["wav", "mp3"]),
+    ("transitionSound", "sounds", &["wav", "mp3"]),
+    ("musicBed", "sounds", &["wav", "mp3"]),
+    ("font", "fonts", &["ttf", "otf"]),
+];
+
+/// The licences a pack's asset may carry.
+pub const ASSET_LICENSES: [&str; 4] = ["own", "CC0-1.0", "CC-BY-4.0", "OFL-1.1"];
+
+/// At most this many assets in one theme.
+pub const MAX_ASSETS: usize = 64;
+
+/// The size cap for an asset of `folder` (`images`, `video`, `sounds`, `fonts`), in bytes.
+pub fn asset_cap(folder: &str) -> u64 {
+    match folder {
+        "images" => 32 << 20,
+        "video" => 512 << 20,
+        "sounds" => 64 << 20,
+        _ => 16 << 20,
+    }
+}
+
+/// Whether `a` can be used: a known role, a path in that role's folder with an allowed
+/// extension, a known licence (`OFL-1.1` only for fonts, `CC-BY-4.0` with a credit). Returns
+/// the role's folder.
+pub fn asset_rule(a: &ThemeAsset) -> Result<&'static str, String> {
+    let (_, folder, exts) =
+        ASSET_ROLES.iter().find(|(r, ..)| *r == a.role).ok_or_else(|| format!("{:?} isn't an asset role", a.role))?;
+    let parts = pack_path(&a.path)?;
+    if parts.len() != 2 || parts[0] != *folder {
+        return Err(format!("{} files go in the pack's {folder}/ folder", a.role));
+    }
+    let ext = parts[1].rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    if !exts.contains(&ext.as_str()) {
+        return Err(format!("{} must be {}", a.path, exts.join(", ")));
+    }
+    if !ASSET_LICENSES.contains(&a.license.as_str()) {
+        return Err(format!("licence {:?} isn't one of {}", a.license, ASSET_LICENSES.join(", ")));
+    }
+    if a.license == "OFL-1.1" && *folder != "fonts" {
+        return Err("OFL-1.1 is a font licence".into());
+    }
+    let credit = a.credit.as_deref().map(str::trim).unwrap_or_default();
+    if a.license == "CC-BY-4.0" && credit.is_empty() {
+        return Err("CC-BY-4.0 needs a credit".into());
+    }
+    if credit.chars().count() > 200 || credit.chars().any(char::is_control) {
+        return Err("the credit is too long or has control characters".into());
+    }
+    Ok(folder)
 }
 
 /// Shapes a theme draws besides the text (themes 1d–1e), in `color.accent` (a pattern in
@@ -356,9 +435,9 @@ pub fn contrast(a: u32, b: u32) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
-/// A design's path in its pack: `designs/<name>.ectemplate`, relative, `/`-separated, no
-/// `..`, no drive or root, at most 200 characters. Returns its parts (`["designs", name]`).
-pub fn design_path(path: &str) -> Result<Vec<&str>, String> {
+/// A path inside a pack: relative, `/`-separated, no `..`, no drive or root, at most 200
+/// characters. Returns its parts.
+pub fn pack_path(path: &str) -> Result<Vec<&str>, String> {
     if path.is_empty() || path.chars().count() > 200 || path.chars().any(char::is_control) {
         return Err("the path is empty, too long or has control characters".into());
     }
@@ -369,6 +448,13 @@ pub fn design_path(path: &str) -> Result<Vec<&str>, String> {
     if parts.iter().any(|p| p.is_empty() || *p == "." || *p == "..") {
         return Err(format!("{path:?} must stay inside the pack"));
     }
+    Ok(parts)
+}
+
+/// A design's path in its pack: `designs/<name>.ectemplate` ([`pack_path`]'s rules). Returns
+/// its parts (`["designs", name]`).
+pub fn design_path(path: &str) -> Result<Vec<&str>, String> {
+    let parts = pack_path(path)?;
     if parts.len() != 2 || parts[0] != DESIGNS_DIR {
         return Err(format!("{path:?} must be in the pack's {DESIGNS_DIR}/ folder"));
     }
@@ -505,6 +591,14 @@ impl Theme {
             }
             design_path(path).map_err(|why| ThemeError(format!("designs.{role}: {why}")))?;
         }
+        if self.assets.len() > MAX_ASSETS {
+            return Err(ThemeError(format!("at most {MAX_ASSETS} assets")));
+        }
+        for a in &self.assets {
+            if let Err(why) = asset_rule(a) {
+                warnings.push(format!("asset {}: {why}; not used", a.path));
+            }
+        }
         Ok(warnings)
     }
 
@@ -632,6 +726,7 @@ impl Theme {
                 pattern: l.decor.pattern,
             },
             designs: Default::default(),
+            assets: Vec::new(),
         }
     }
 
