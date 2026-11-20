@@ -555,7 +555,9 @@ fn an_overlay_with_a_pack_banner_exports_through_the_design() {
     assert!(problems.contains("not-loaded") && !problems.contains("banner.ectemplate"), "{problems}");
     // 3 s in, the banner holds: its accent bar is magenta (the theme's accent, not the design's gold).
     let mut reader = assetcraft_media::VideoReader::open(&path).unwrap();
-    let f = reader.frame(3.0, 384).unwrap();
+    // Mid-hold: the 4 s shot is shorter than the 6 s design, so it is fitted (R-T15) and its
+    // hold is the middle third.
+    let f = reader.frame(2.0, 384).unwrap();
     let (x, y) = ((134.0 / 1920.0 * f.width as f32) as u32, (834.0 / 1080.0 * f.height as f32) as u32);
     let i = ((y * f.width + x) * 4) as usize;
     let p = &f.rgba[i..i + 3];

@@ -216,9 +216,35 @@ pub fn design_fill(d: &ThemeDesign, words: &str) -> assetcraft_titles::Fill {
     fill
 }
 
-/// The time a design shows at `elapsed` into its clip: at rest (not finite), half way (the hold).
-pub fn design_secs(d: &ThemeDesign, elapsed: f64) -> f64 {
-    if elapsed.is_finite() { elapsed } else { d.design.seconds() / 2.0 }
+/// How much of a design's start and end is its in and its out, kept whole on a short clip
+/// (R-T15): up to this many seconds each, a third of the design at most.
+pub const DESIGN_EDGE_SECS: f64 = 2.0;
+
+/// The time a design shows at `elapsed` into a text `shown` seconds long (its clip, or its
+/// duration if shorter): at rest (not finite), half way (the hold). Shown at least as long as the
+/// design, it plays as made. Shorter (R-T15; Paul, 2026-11-20: Laser Trace ran unfinished on a
+/// short title), its in and its out (its first and last [`DESIGN_EDGE_SECS`]) play whole, each in
+/// up to that long but no more than a third of the text (sped up to fit), and the hold between
+/// gets the rest, at least a third, so the words rest to be read; it ends with the text.
+pub fn design_secs(d: &ThemeDesign, elapsed: f64, shown: f64) -> f64 {
+    let len = d.design.seconds();
+    if !elapsed.is_finite() {
+        return len / 2.0;
+    }
+    let e = elapsed.max(0.0);
+    if !shown.is_finite() || shown <= 0.0 || shown >= len || len <= 0.0 {
+        return e;
+    }
+    // Design time in each edge, and the text time it gets.
+    let edge = DESIGN_EDGE_SECS.min(len / 3.0);
+    let room = edge.min(shown / 3.0);
+    if e <= room {
+        e * edge / room
+    } else if e >= shown - room {
+        (len - (shown - e) * edge / room).min(len)
+    } else {
+        edge + (e - room) * (len - 2.0 * edge) / (shown - 2.0 * room)
+    }
 }
 
 /// How many videos a compositor keeps open at once.
@@ -519,7 +545,8 @@ impl Compositor {
         // A pack design for this role draws instead of the theme's words (TP2a-3); if it can't,
         // the words draw as before and the export lists why.
         if let Some(d) = find_design(&self.designs, clip) {
-            match self.draw_design(out, &d, words, elapsed) {
+            let shown = style.shown_secs(clip.duration.as_secs_f64());
+            match self.draw_design(out, &d, words, elapsed, shown) {
                 Ok(()) => return,
                 Err(e) => {
                     self.failed.insert(d.path.clone(), e);
@@ -618,8 +645,16 @@ impl Compositor {
     }
 
     /// Fill `d` with the clip's words (first line → Headline, the rest → Caption) and draw its
-    /// frame `elapsed` seconds in (at rest: half way, the hold), placed by the board's crop.
-    fn draw_design(&self, out: &mut Rgba, d: &ThemeDesign, words: &str, elapsed: f64) -> Result<(), String> {
+    /// frame `elapsed` seconds into a text `shown` seconds long ([`design_secs`]; at rest: half
+    /// way, the hold), placed by the board's crop.
+    fn draw_design(
+        &self,
+        out: &mut Rgba,
+        d: &ThemeDesign,
+        words: &str,
+        elapsed: f64,
+        shown: f64,
+    ) -> Result<(), String> {
         let fill = design_fill(d, words);
         let (dw, dh) = d.design.size();
         let (fw, fh) = (self.width as f32, self.height as f32);
@@ -631,7 +666,7 @@ impl Compositor {
             None => draw::contain_rect(self.width, self.height, (dw, dh)),
         };
         let scale = f64::from(w) / f64::from(dw.max(1));
-        let frame = d.design.render(&fill, design_secs(d, elapsed), scale).map_err(|e| e.to_string())?;
+        let frame = d.design.render(&fill, design_secs(d, elapsed, shown), scale).map_err(|e| e.to_string())?;
         let image = Rgba { width: frame.width, height: frame.height, data: frame.rgba };
         draw::over(out, &image, x.round() as i64, y.round() as i64);
         Ok(())

@@ -689,3 +689,47 @@ fn a_pack_themes_words_are_set_in_its_display_font() {
     let mut junk = compositor(320, 180).with_user_looks(looks).with_designs(set(b"not a font".as_slice().into()));
     assert_eq!(junk.clip_frame(&card, f64::INFINITY).data, plain.data);
 }
+
+/// R-T15: a design on a text shorter than it plays its in and out whole (sped up when the text
+/// is short) and squeezes the hold, which keeps at least a third of the text; it always ends
+/// when the text does.
+#[test]
+fn a_short_text_plays_its_designs_in_and_out_whole() {
+    use crate::{DESIGN_EDGE_SECS, ThemeDesign, design_secs};
+    let laser = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    let d = ThemeDesign {
+        theme: assetcraft_storyboard::ThemeId::new("bold").unwrap(),
+        role: "banner".into(),
+        path: std::path::PathBuf::new(),
+        design: Arc::new(laser),
+        fill: assetcraft_titles::Fill::default(),
+        stamp: 0,
+    };
+    assert_eq!(DESIGN_EDGE_SECS, 2.0);
+    let at = |e: f64, shown: f64| design_secs(&d, e, shown);
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // Long enough: as made.
+    assert!(close(at(5.0, 8.0), 5.0) && close(at(5.0, 6.0), 5.0));
+    // 4.5 s: the in (2 s of design in 1.5 s), the hold (1.5 s), the out, ending with the text.
+    assert!(close(at(1.5, 4.5), 2.0), "the in done after a third");
+    assert!(close(at(2.25, 4.5), 3.0), "mid-hold");
+    assert!(close(at(3.0, 4.5), 4.0), "the out starts after two thirds");
+    assert!(close(at(4.5, 4.5), 6.0));
+    // Just under the design's length: nearly as made (no jump at the boundary).
+    assert!((at(1.0, 5.9) - 1.0).abs() < 0.05 && (at(5.4, 5.9) - 5.5).abs() < 0.05);
+    // 2 s: still a third at rest.
+    assert!(close(at(0.666_666_666_666_7, 2.0), 2.0) && close(at(1.0, 2.0), 3.0) && close(at(2.0, 2.0), 6.0));
+    // At rest: the hold; nonsense lengths: as made.
+    assert!(close(at(f64::INFINITY, 2.0), 3.0));
+    assert!(close(at(1.0, f64::NAN), 1.0) && close(at(1.0, 0.0), 1.0));
+    // Always forward, never past the end.
+    for shown in [1.0, 3.5, 4.0, 5.0] {
+        let mut last = -1.0;
+        for i in 0..=100 {
+            let t = at(shown * f64::from(i) / 100.0, shown);
+            assert!(t >= last - 1e-9 && t <= 6.0 + 1e-9, "{shown}: {t} after {last}");
+            last = t;
+        }
+        assert!(close(last, 6.0), "{shown} ends at the design's end: {last}");
+    }
+}

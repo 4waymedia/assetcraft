@@ -645,7 +645,9 @@ impl Session {
     pub fn design_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
         let (d, job) = self.design_job(clip)?;
         let frames = self.design_frames.get_or_init(assetcraft_titles::frames::DesignFrames::new);
-        Some(frames.frame(&job, assetcraft_animatic::design_secs(&d, elapsed), width))
+        // Fitted to the text's own length (R-T15), as the export does.
+        let shown = clip.text_style.shown_secs(clip.duration.as_secs_f64());
+        Some(frames.frame(&job, assetcraft_animatic::design_secs(&d, elapsed, shown), width))
     }
 
     /// While playing (P2): decode `seconds` of `path` from `from` ahead of the playhead, on the
