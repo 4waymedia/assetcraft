@@ -623,7 +623,7 @@ impl Session {
         let d = assetcraft_animatic::find_design(&designs, clip)?;
         let fill = assetcraft_animatic::design_fill(&d, clip.text().unwrap_or_default());
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (&d.path, &d.role, format!("{fill:?}")).hash(&mut h);
+        (&d.path, &d.role, d.stamp, format!("{fill:?}")).hash(&mut h);
         let job = std::sync::Arc::new(assetcraft_titles::frames::DesignJob {
             key: h.finish(),
             design: std::sync::Arc::clone(&d.design),

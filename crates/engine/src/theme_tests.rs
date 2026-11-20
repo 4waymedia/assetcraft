@@ -661,3 +661,101 @@ fn a_packs_font_draws_its_designs_headline() {
     assert_eq!(effectcraft_text::fonts::all_faces().len(), faces);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// TP4c: Edit in EffectCraft. The edit copy is written from the template (once, never over a
+/// file that's there), opened in EffectCraft, and used while it's newer than the template; a
+/// broken one is a warning and the template draws.
+#[test]
+fn a_pack_design_opens_in_effectcraft_and_its_saved_edit_copy_is_used() {
+    use assetcraft_titles::builtin::{LASER_TRACE, STACK, builtin};
+    use assetcraft_titles::{Fill, Slot};
+    let (_, dir) = session("edit");
+    let pack = dir.join("Themes").join("acme-edit");
+    std::fs::create_dir_all(pack.join("designs")).unwrap();
+    let laser = builtin(LASER_TRACE).unwrap().unwrap();
+    let stack = builtin(STACK).unwrap().unwrap();
+    std::fs::write(pack.join("designs/card.ectemplate"), laser.to_template()).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-edit".into();
+    t.name = "Acme Edit".into();
+    t.designs = [("card".to_string(), "designs/card.ectemplate".to_string())].into_iter().collect();
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let launcher = Arc::new(RecordingLauncher::default());
+    let new_session = |installed: bool| {
+        let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+        let apps = if installed { vec![("effectcraft", PathBuf::from("/opt/ec/effectcraft"))] } else { Vec::new() };
+        Session::new(Arc::new(RealFs), launcher.clone(), prefs)
+            .with_app_locator(Arc::new(FakeLocator { installed: apps }))
+    };
+    let edit = pack.join("designs/card.ecproj");
+    let params = json!({ "theme": "acme-edit", "role": "card" });
+    // Not installed: refused before anything is written.
+    let e = new_session(false).execute("storyboard.editDesign", &params).unwrap_err().to_string();
+    assert!(e.contains("EffectCraft isn't installed"), "{e}");
+    assert!(!edit.exists());
+    let mut s = new_session(true);
+    // A dry run says what would happen and does nothing.
+    let dry = run(&mut s, "storyboard.editDesign", json!({ "theme": "acme-edit", "role": "card", "dryRun": true }));
+    assert_eq!((dry["created"].as_bool(), dry["dryRun"].as_bool()), (Some(true), Some(true)));
+    assert!(!edit.exists() && launcher.spawned.lock().unwrap().is_empty());
+    // For real: the edit copy is the template's project, and EffectCraft gets `-- <path>`.
+    let r = run(&mut s, "storyboard.editDesign", params.clone());
+    assert!(r["message"].as_str().unwrap().contains("made its edit copy"), "{r}");
+    let (text, _, _) = assetcraft_titles::template_project(&laser.to_template()).unwrap();
+    assert_eq!(std::fs::read_to_string(&edit).unwrap(), text);
+    assert_eq!(
+        launcher.spawned.lock().unwrap().last().cloned(),
+        Some((PathBuf::from("/opt/ec/effectcraft"), vec!["--".into(), edit.clone().into_os_string()]))
+    );
+    // "Saved in EffectCraft": the edit copy now holds Stack. A reload uses it, under a new stamp.
+    let before = s.theme_designs().packs[0].stamp;
+    let (stack_text, _, _) = assetcraft_titles::template_project(&stack.to_template()).unwrap();
+    std::fs::write(&edit, &stack_text).unwrap();
+    let listed = run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    let theme = listed["themes"].as_array().unwrap().iter().find(|t| t["id"] == "acme-edit").unwrap().clone();
+    assert_eq!(theme["designs"][0]["editCopy"], json!(edit.to_string_lossy()));
+    let card = s.theme_designs().packs[0].clone();
+    assert_ne!(card.stamp, before, "the Viewer's cache sees a new design");
+    let fill = Fill::default().text(Slot::Headline, "ACME");
+    let at = |d: &assetcraft_titles::Design| d.render(&fill, 0.9, 0.25).unwrap();
+    assert_eq!(at(&card.design), at(&stack), "the edit draws");
+    assert_eq!(card.design.name(), laser.name(), "under the template's name");
+    // Again: the copy is opened, never rewritten.
+    let r = run(&mut s, "storyboard.editDesign", params.clone());
+    assert_eq!(r["created"], false);
+    assert_eq!(std::fs::read_to_string(&edit).unwrap(), stack_text);
+    assert_eq!(launcher.spawned.lock().unwrap().len(), 2);
+    // A broken edit copy: a warning, and the template draws.
+    std::fs::write(&edit, "{ not a project").unwrap();
+    run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    assert!(
+        s.loaded_themes()[0]
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("design card: its edit copy card.ecproj can't be used")),
+        "{:?}",
+        s.loaded_themes()[0].warnings
+    );
+    assert_eq!(at(&s.theme_designs().packs[0].design), at(&laser));
+    // A template newer than the edit copy wins (a pack update dropped over an old edit).
+    std::fs::write(&edit, &stack_text).unwrap();
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+    std::fs::File::options()
+        .write(true)
+        .open(pack.join("designs/card.ectemplate"))
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    assert!(s.theme_designs().packs[0].design.render(&fill, 0.9, 0.25).unwrap() == at(&laser));
+    // Bad asks.
+    for (p, why) in [
+        (json!({ "theme": "nope", "role": "card" }), "no loaded theme"),
+        (json!({ "theme": "acme-edit", "role": "banner" }), "has no banner design"),
+        (json!({ "theme": "acme-edit" }), "`role` is required"),
+    ] {
+        let e = s.execute("storyboard.editDesign", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

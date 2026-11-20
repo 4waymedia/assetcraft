@@ -587,6 +587,7 @@ fn an_overlay_naming_a_pack_theme_draws_through_its_banner_design() {
             design: Arc::new(banner),
             // A magenta accent: the bar shows it.
             fill: Fill::default().color(Slot::Accent, [1.0, 0.0, 1.0, 1.0]),
+            stamp: 0,
         }],
         ..crate::DesignSet::default()
     });

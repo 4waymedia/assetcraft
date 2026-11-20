@@ -249,6 +249,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     });
     let id = clip.id.0;
     let mut style_edit: Option<serde_json::Value> = None;
+    let mut edit_design: Option<serde_json::Value> = None;
     // The user's loaded themes (TP2a-2): picked by id, listed after the built-ins.
     let looks = nav.session.user_looks().clone();
     let yours: Vec<(String, String, Look)> = nav
@@ -355,6 +356,22 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             );
             ui.end_row();
         }
+        // TP4c: the pack's own design opens in EffectCraft (its edit copy); a reload picks up the save.
+        if let (Some(uid), Some(_), None) = (&picked_user, &pack_design, style.design) {
+            ui.label("");
+            let installed = nav.session.app_program("effectcraft").is_some();
+            let tip = if installed {
+                "Opens this design's edit copy (designs/<name>.ecproj) in EffectCraft, making it from the \
+                 template the first time. Save there, then File › Reload Themes."
+            } else {
+                "EffectCraft isn't installed here (or set ASSETCRAFT_EFFECTCRAFT_EXE to its program, then press F5)"
+            };
+            let button = ui.add_enabled(installed, egui::Button::new("Edit in EffectCraft…").small());
+            if button.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
+                edit_design = Some(json!({ "theme": uid, "role": assetcraft_animatic::design_role(kind) }));
+            }
+            ui.end_row();
+        }
         let theme_moves = style.look_with(&looks).motion;
         ui.label("In").on_hover_text("How the text arrives");
         let pick = move_combo(
@@ -414,6 +431,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     });
     if let Some(p) = style_edit {
         nav.run("storyboard.text.style", p);
+    }
+    if let Some(p) = edit_design {
+        nav.run("storyboard.editDesign", p);
     }
     // Preview: replays the intro, then holds for a second.
     // In the board's frame (F2): a vertical post previews tall, held to a sensible height.

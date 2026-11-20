@@ -61,6 +61,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // `assetcraft-cli analyze --cuemap` and automation; the app analyses through storyboard.analyse.
     "track.analyze",
     "storyboard.text.style",
+    // The Inspector's Design row: "Edit in EffectCraft…" (TP4c).
+    "storyboard.editDesign",
     // The Inspector's MOTION section drives it (SB-3D1).
     "storyboard.motion",
     // The Inspector's Duration field and the Strip's card edge drive it (SR1).

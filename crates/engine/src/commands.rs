@@ -579,6 +579,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::track_cmd::sb_listen_volume
     ),
     cmd!(
+        EDIT_IN_APP,
+        "storyboard.editDesign",
+        "Edit Design in EffectCraft",
+        "Storyboard",
+        None,
+        "{theme: pack theme id, role: card|banner|…, dryRun?: bool} → {theme, role, path, created, program, dryRun, message} (opens the pack design's edit copy, designs/<name>.ecproj, in EffectCraft; writes it from the template first if it isn't there, atomically, never over an existing one; while it's newer than the template, loading uses it — save in EffectCraft, then storyboard.themes {reload: true})",
+        crate::theme_cmd::sb_edit_design
+    ),
+    cmd!(
         SAVE,
         "storyboard.importTheme",
         "Import Theme",

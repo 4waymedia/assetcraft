@@ -93,6 +93,15 @@ impl Effects {
     /// Starts another program on the user's files (`file.open`, `file.openIn`, `file.reveal`).
     pub const LAUNCH: Effects =
         Effects { idempotent: false, confirm_always: true, note: Some(STARTS_A_PROGRAM), ..Effects::APP };
+    /// Writes a design's edit copy into its pack if missing and opens it in EffectCraft
+    /// (`storyboard.editDesign`, TP4c): a user file and a program, so it always confirms.
+    pub const EDIT_IN_APP: Effects = Effects {
+        classes: COPY_IN,
+        idempotent: false,
+        confirm_always: true,
+        note: Some(STARTS_A_PROGRAM),
+        ..Effects::READ
+    };
     /// Runs a program the user picked (`file.run`). Anything can happen, and never remotely.
     pub const RUN: Effects = Effects { destructive: true, remote_allowed: false, ..Effects::LAUNCH };
     /// Copies files into the AssetCraft working folder (`storyboard.musicImport`): new files only,
@@ -167,6 +176,7 @@ mod tests {
                 "file.openIn",
                 "file.reveal",
                 "file.run",
+                "storyboard.editDesign",
                 "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",
@@ -199,11 +209,12 @@ mod tests {
             ])
         );
         // User-file writers: the Copy import into the working folder (W1), the storyboard's own
-        // document (SF1), the export (SF5-4) and a theme import into Themes (TP2a). Nothing else
-        // writes a user file yet.
+        // document (SF1), the export (SF5-4), a theme import into Themes (TP2a) and a pack
+        // design's edit copy (TP4c). Nothing else writes a user file yet.
         assert_eq!(
             ids(|e| e.classes.contains(&EffectClass::WriteUserFile)),
             BTreeSet::from([
+                "storyboard.editDesign",
                 "storyboard.importTheme",
                 "storyboard.musicImport",
                 "storyboard.save",

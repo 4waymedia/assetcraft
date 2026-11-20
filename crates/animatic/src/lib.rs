@@ -116,6 +116,9 @@ pub struct ThemeDesign {
     pub design: std::sync::Arc<assetcraft_titles::Design>,
     /// The theme's colours and fonts; the clip's words are added when drawn.
     pub fill: assetcraft_titles::Fill,
+    /// Names this version of the design (a hash of the bytes it was read from, TP4c): an edited
+    /// design is a new one in the Viewer's cache. 0 for a built-in.
+    pub stamp: u64,
 }
 
 /// The design role a text kind draws through.
@@ -190,6 +193,7 @@ pub fn find_design(set: &DesignSet, clip: &Clip) -> Option<ThemeDesign> {
                 path: PathBuf::from(format!("built-in design {id}")),
                 design: std::sync::Arc::clone(design),
                 fill: set.fill(&key).cloned().unwrap_or_default(),
+                stamp: 0,
             })
         }
         None => {

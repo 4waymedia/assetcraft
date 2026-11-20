@@ -56,3 +56,22 @@ fn a_file_that_isnt_a_font_is_refused() {
     assert!(register_font(cut).is_err(), "a truncated font");
     assert!(register_font(vec![0; fonts::MAX_FONT_BYTES + 1]).is_err(), "too big");
 }
+
+/// TP4c: an edit copy (the template's project, as EffectCraft saves it) reads as the same
+/// design; one whose composition id moved falls back to its composition with controls; junk
+/// and a project with no controls are refused.
+#[test]
+fn an_edit_copy_reads_like_its_template() {
+    let d = builtin::builtin(builtin::STACK).expect("listed").expect("builds");
+    let template = d.to_template();
+    let (text, comp, name) = super::template_project(&template).expect("a template");
+    assert_eq!(name.as_deref(), Some(d.name()));
+    let fill = Fill::default().text(Slot::Headline, "EDIT");
+    let copy = Design::read_project(&text, comp).expect("reads");
+    assert_eq!(copy.render(&fill, 1.0, 0.25).expect("renders"), d.render(&fill, 1.0, 0.25).expect("renders"));
+    let moved = Design::read_project(&text, comp + 9999).expect("falls back to the comp with controls");
+    assert_eq!(moved.controls(), d.controls());
+    assert!(Design::read_project("{ not a project", comp).is_err());
+    assert!(Design::read_project(&effectcraft_project::Project::default().to_json(), comp).is_err(), "no controls");
+    assert!(super::template_project(b"not a zip").is_err());
+}

@@ -111,10 +111,15 @@ impl assetcraft_titles::MovieFrames for PackMovie {
 pub struct PackDesign {
     /// Its role (`banner`, `card`, …).
     pub role: String,
-    /// The file.
+    /// The file (the template `theme.json` names).
     pub path: PathBuf,
     /// The design.
     pub design: Design,
+    /// Its edit copy (`designs/<name>.ecproj`, TP4c), when that's what was read: it's newer than
+    /// the template.
+    pub edit: Option<PathBuf>,
+    /// A hash of the bytes the design was read from (the Viewer's cache knows an edit by it).
+    pub stamp: u64,
 }
 
 /// The user's themes as last loaded (at startup, on reload, after an import).
@@ -197,6 +202,7 @@ impl Session {
                         path: d.path.clone(),
                         design: std::sync::Arc::new(d.design.clone()),
                         fill: fill.clone(),
+                        stamp: d.stamp,
                     }
                 })
             })
@@ -325,12 +331,67 @@ impl Session {
                     continue;
                 }
             };
+            // The edit copy (TP4c) wins while it's newer than the template; one that can't be
+            // read is a warning, and the template is used.
+            if let Some(edit) = self.edit_copy(&dir, name, &files, &path) {
+                match self.read_edit_copy(&edit, &bytes) {
+                    Ok((design, stamp)) => {
+                        out.push(PackDesign { role: role.clone(), path, design, edit: Some(edit), stamp });
+                        continue;
+                    }
+                    Err(e) => {
+                        let file = edit.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        warnings.push(format!("design {role}: its edit copy {file} can't be used ({e}); using {name}"));
+                    }
+                }
+            }
             match Design::read(&bytes) {
-                Ok(design) => out.push(PackDesign { role: role.clone(), path, design }),
+                Ok(design) => {
+                    out.push(PackDesign { role: role.clone(), path, design, edit: None, stamp: stamp_of(&bytes) })
+                }
                 Err(e) => warnings.push(format!("design {role}: {e}")),
             }
         }
         out
+    }
+
+    /// `designs/<stem>.ecproj` for the template `name`, if it's a regular file in `designs/`
+    /// (`files`) at least as new as the template.
+    fn edit_copy(
+        &self,
+        dir: &std::path::Path,
+        name: &str,
+        files: &[String],
+        template: &std::path::Path,
+    ) -> Option<PathBuf> {
+        let stem = std::path::Path::new(name).file_stem()?.to_str()?;
+        let edit_name = format!("{stem}.{EDIT_EXT}");
+        if !files.contains(&edit_name) {
+            return None;
+        }
+        let edit = dir.join(edit_name);
+        let newer = match (self.services.entry(&edit).ok()?.modified, self.services.entry(template).ok()?.modified) {
+            (Some(e), Some(t)) => e >= t,
+            // No times to compare: the edit copy is the user's working file.
+            _ => true,
+        };
+        newer.then_some(edit)
+    }
+
+    /// The edit copy as a design: its project, at the composition the template names.
+    fn read_edit_copy(&self, edit: &std::path::Path, template: &[u8]) -> Result<(Design, u64), String> {
+        let (_, comp, name) = assetcraft_titles::template_project(template).map_err(|e| e.to_string())?;
+        let bytes = self.services.read_head(edit, MAX_DESIGN_BYTES + 1).map_err(|e| e.to_string())?;
+        if bytes.len() > MAX_DESIGN_BYTES {
+            return Err("too big".into());
+        }
+        let text = std::str::from_utf8(&bytes).map_err(|_| "not a project file".to_string())?;
+        let design = Design::read_project(text, comp).map_err(|e| e.to_string())?;
+        let design = match name {
+            Some(n) => design.named(&n),
+            None => design,
+        };
+        Ok((design, stamp_of(&bytes)))
     }
 }
 
@@ -522,6 +583,84 @@ impl Session {
     }
 }
 
+/// The edit copy's extension: an EffectCraft project (TP4c).
+const EDIT_EXT: &str = "ecproj";
+
+/// A design file's stamp: a hash of its bytes.
+fn stamp_of(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+/// `storyboard.editDesign {theme, role, dryRun?}` (TP4c): open a pack design's edit copy in
+/// EffectCraft, writing it from the template first if it isn't there.
+pub(crate) fn sb_edit_design(s: &mut Session, p: &Value) -> CmdResult {
+    let id = p.get("theme").and_then(Value::as_str).ok_or_else(|| CmdError::BadParams("`theme` is required".into()))?;
+    let role = p.get("role").and_then(Value::as_str).ok_or_else(|| CmdError::BadParams("`role` is required".into()))?;
+    let dry = match p.get("dryRun") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(CmdError::BadParams("`dryRun` must be true or false".into())),
+    };
+    let u = s
+        .themes
+        .themes
+        .iter()
+        .find(|u| u.theme.id == id)
+        .ok_or_else(|| CmdError::BadParams(format!("no loaded theme `{id}`")))?;
+    if u.pack.is_none() {
+        return Err(CmdError::BadParams(format!("“{}” is a theme file, not a pack: it has no designs", u.theme.name)));
+    }
+    let d = u
+        .designs
+        .iter()
+        .find(|d| d.role == role)
+        .ok_or_else(|| CmdError::BadParams(format!("“{}” has no {role} design", u.theme.name)))?;
+    let theme_name = u.theme.name.clone();
+    let template = d.path.clone();
+    let edit = template.with_extension(EDIT_EXT);
+    let app = crate::find_app("effectcraft").ok_or_else(|| CmdError::Unavailable("EffectCraft isn't known".into()))?;
+    let program = s.app_program(app.id).map(std::path::Path::to_path_buf).ok_or_else(|| {
+        CmdError::Unavailable(format!(
+            "{} isn't installed (or set {} to its program, then press F5)",
+            app.label,
+            app.env_var()
+        ))
+    })?;
+    let exists = s.services.entry(&edit).is_ok_and(|e| e.kind == EntryKind::File);
+    let file = edit.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let created = !exists;
+    let mut message = format!("Opened the {role} design of “{theme_name}” in EffectCraft ({file})");
+    if created {
+        message.push_str(" — made its edit copy from the template");
+    }
+    message.push_str(". Save there, then Reload Themes.");
+    let out = |dry: bool, message: String| {
+        json!({
+            "theme": id, "role": role, "path": edit.to_string_lossy(), "created": created,
+            "program": program.to_string_lossy(), "dryRun": dry, "message": message,
+        })
+    };
+    if dry {
+        return Ok(out(true, message));
+    }
+    if created {
+        // Never over a file that's there (a link, a folder: refused by `entry` above or here).
+        if s.services.entry(&edit).is_ok() {
+            return Err(CmdError::Unavailable(format!("{file} is in the way (not a regular file)")));
+        }
+        let bytes = s.services.read_head(&template, MAX_DESIGN_BYTES + 1)?;
+        let (text, _, _) =
+            assetcraft_titles::template_project(&bytes).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+        crate::document_cmd::write_atomic(&edit, text.as_bytes())
+            .map_err(|e| CmdError::Unavailable(format!("couldn't write {file}: {e}")))?;
+    }
+    s.launcher.spawn(&program, &app.argv(std::slice::from_ref(&edit))).map_err(CmdError::Unavailable)?;
+    Ok(out(false, message))
+}
+
 /// A design as the listing shows it.
 fn design_json(role: &str, d: &Design) -> Value {
     let (width, height) = d.size();
@@ -568,6 +707,7 @@ pub(crate) fn sb_themes(s: &mut Session, p: &Value) -> CmdResult {
                 .map(|d| {
                     let mut j = design_json(&d.role, &d.design);
                     j["path"] = json!(d.path.to_string_lossy());
+                    j["editCopy"] = json!(d.edit.as_ref().map(|e| e.to_string_lossy()));
                     j
                 })
                 .collect();

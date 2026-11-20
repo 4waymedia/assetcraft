@@ -278,42 +278,88 @@ pub struct Design {
 impl Design {
     /// Open an `.ectemplate` file's bytes.
     pub fn read(bytes: &[u8]) -> Result<Design, DesignError> {
-        if bytes.len() > MAX_FILE {
-            return Err(DesignError::TooBig("file"));
+        let (text, comp, name) = template_project(bytes)?;
+        let mut design = Design::project_design(&text, comp, false)?;
+        if let Some(name) = name {
+            design.name = name;
         }
-        let entries = catch_unwind(|| effectcraft_lottie::zip::read_stored(bytes))
-            .map_err(|_| DesignError::NotTemplate("the archive can't be read".into()))?;
-        if entries.is_empty() {
-            return Err(DesignError::NotTemplate("not a stored ZIP archive".into()));
-        }
-        let entry = |name: &str| entries.iter().find(|(n, _)| n == name).map(|(_, b)| b.as_slice());
-        let manifest = entry("manifest.json").ok_or_else(|| DesignError::NotTemplate("no manifest.json".into()))?;
-        if manifest.len() > MAX_MANIFEST {
-            return Err(DesignError::TooBig("manifest"));
-        }
-        let manifest: serde_json::Value =
-            serde_json::from_slice(manifest).map_err(|e| DesignError::NotTemplate(format!("manifest.json: {e}")))?;
-        if manifest.get("format").and_then(serde_json::Value::as_str) != Some(TEMPLATE_FORMAT) {
-            return Err(DesignError::NotTemplate("its manifest isn't an EffectCraft template's".into()));
-        }
-        let version = manifest.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        if version > TEMPLATE_VERSION {
-            return Err(DesignError::Newer(version));
-        }
-        let comp = manifest.get("comp").and_then(serde_json::Value::as_u64).ok_or(DesignError::NoComp)?;
-        let text = entry("project.ecproj").ok_or_else(|| DesignError::NotTemplate("no project.ecproj".into()))?;
+        Ok(design)
+    }
+
+    /// A design from an EffectCraft project file (`.ecproj` text, TP4c): the edit copy of a
+    /// pack design. `comp` is the composition the template named; if the project no longer has
+    /// it with Essential Graphics, its first composition that has them is used.
+    pub fn read_project(text: &str, comp: u64) -> Result<Design, DesignError> {
+        Design::project_design(text, comp, true)
+    }
+
+    /// `text`'s composition `comp`; with `fallback`, its first composition with Essential
+    /// Graphics when `comp` has none (an edit copy); without, `comp` or nothing (a template's
+    /// manifest names its composition).
+    fn project_design(text: &str, comp: u64, fallback: bool) -> Result<Design, DesignError> {
         if text.len() > MAX_PROJECT {
             return Err(DesignError::TooBig("project"));
         }
-        let text = std::str::from_utf8(text).map_err(|e| DesignError::Project(e.to_string()))?;
         let project = catch_unwind(|| Project::from_json(text))
             .map_err(|_| DesignError::Project("the project can't be parsed".into()))?
             .map_err(|e| DesignError::Project(e.to_string()))?;
-        let mut design = Design::from_project(project, ItemId(comp))?;
-        if let Some(name) = manifest.get("name").and_then(serde_json::Value::as_str).filter(|n| !n.trim().is_empty()) {
-            design.name = name.trim().to_string();
-        }
-        Ok(design)
+        let has_controls = |id: ItemId| project.comp(id).is_some_and(|c| c.essential.is_some());
+        let comp = if !fallback || has_controls(ItemId(comp)) {
+            ItemId(comp)
+        } else {
+            let mut ids: Vec<ItemId> = project.items.keys().copied().filter(|i| has_controls(*i)).collect();
+            ids.sort_by_key(|i| i.0);
+            ids.first().copied().ok_or(DesignError::NoComp)?
+        };
+        Design::from_project(project, comp)
+    }
+}
+
+/// A template's project (`project.ecproj` text), the composition its manifest names, and its
+/// name if it has one (TP4c: the edit copy is written from this).
+pub fn template_project(bytes: &[u8]) -> Result<(String, u64, Option<String>), DesignError> {
+    if bytes.len() > MAX_FILE {
+        return Err(DesignError::TooBig("file"));
+    }
+    let entries = catch_unwind(|| effectcraft_lottie::zip::read_stored(bytes))
+        .map_err(|_| DesignError::NotTemplate("the archive can't be read".into()))?;
+    if entries.is_empty() {
+        return Err(DesignError::NotTemplate("not a stored ZIP archive".into()));
+    }
+    let entry = |name: &str| entries.iter().find(|(n, _)| n == name).map(|(_, b)| b.as_slice());
+    let manifest = entry("manifest.json").ok_or_else(|| DesignError::NotTemplate("no manifest.json".into()))?;
+    if manifest.len() > MAX_MANIFEST {
+        return Err(DesignError::TooBig("manifest"));
+    }
+    let manifest: serde_json::Value =
+        serde_json::from_slice(manifest).map_err(|e| DesignError::NotTemplate(format!("manifest.json: {e}")))?;
+    if manifest.get("format").and_then(serde_json::Value::as_str) != Some(TEMPLATE_FORMAT) {
+        return Err(DesignError::NotTemplate("its manifest isn't an EffectCraft template's".into()));
+    }
+    let version = manifest.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    if version > TEMPLATE_VERSION {
+        return Err(DesignError::Newer(version));
+    }
+    let comp = manifest.get("comp").and_then(serde_json::Value::as_u64).ok_or(DesignError::NoComp)?;
+    let text = entry("project.ecproj").ok_or_else(|| DesignError::NotTemplate("no project.ecproj".into()))?;
+    if text.len() > MAX_PROJECT {
+        return Err(DesignError::TooBig("project"));
+    }
+    let text = std::str::from_utf8(text).map_err(|e| DesignError::Project(e.to_string()))?;
+    let name = manifest
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string);
+    Ok((text.to_string(), comp, name))
+}
+
+impl Design {
+    /// This design under `name` (the template's name for its edit copy, TP4c).
+    pub fn named(mut self, name: &str) -> Design {
+        self.name = name.trim().to_string();
+        self
     }
 
     /// A design from a project built in code (the built-in designs, tests).
