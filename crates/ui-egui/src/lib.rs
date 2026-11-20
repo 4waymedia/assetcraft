@@ -83,6 +83,8 @@ struct UiState {
     hidden: dock::Hidden,
     drawn: Vec<(PathBuf, Badge)>,
     fonts_installed: bool,
+    /// The theme packs whose display faces egui has (TP4b-2): refreshed when themes reload.
+    pack_fonts: Option<std::sync::Arc<assetcraft_animatic::DesignSet>>,
     show_shortcuts: bool,
     /// Draw the window's own title bar and resize edges (W2b); set by the app when it turned the
     /// OS decorations off.
@@ -310,12 +312,29 @@ impl Navigator {
         self.state.grid_columns.max(1)
     }
 
+    /// Give egui each pack theme's display face (TP4b-2) when the loaded themes change, so the
+    /// Viewer sets their words as the export does. Takes effect from the next pass.
+    fn install_pack_fonts(&mut self, ctx: &egui::Context) {
+        let designs = self.session.theme_designs();
+        if self.state.pack_fonts.as_ref().is_some_and(|d| std::sync::Arc::ptr_eq(d, &designs)) {
+            return;
+        }
+        let had = self.state.pack_fonts.as_ref().is_some_and(|d| !d.fonts.is_empty());
+        if had || !designs.fonts.is_empty() {
+            ctx.set_fonts(theme::font_definitions_with(
+                designs.fonts.iter().map(|(id, f)| (id.as_str(), &f.bytes[..], f.index)),
+            ));
+        }
+        self.state.pack_fonts = Some(designs);
+    }
+
     /// Draw one frame. Call from `eframe::App::ui`, or from `Context::run_ui` in tests.
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         if !std::mem::replace(&mut self.state.fonts_installed, true) {
             theme::install(&ctx);
         }
+        self.install_pack_fonts(&ctx);
         self.apply_theme(&ctx);
         self.pump_watcher(&ctx);
         self.thumbs.begin_frame();

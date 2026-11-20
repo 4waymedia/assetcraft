@@ -83,6 +83,8 @@ pub struct Compositor {
     look: RenderOptions,
     decode: DecodeOptions,
     fonts: text::Fonts,
+    /// Pack themes' display fonts as set (TP4b), by theme id; `None`: the bytes weren't a font.
+    theme_fonts: HashMap<String, Option<text::Fonts>>,
     stills: HashMap<PathBuf, Arc<Rgba>>,
     stills_order: Vec<PathBuf>,
     stills_bytes: usize,
@@ -134,12 +136,38 @@ pub struct DesignSet {
     pub builtins: Vec<(String, std::sync::Arc<assetcraft_titles::Design>)>,
     /// Each theme's fill by id: the loaded user themes and the built-ins.
     pub fills: Vec<(String, assetcraft_titles::Fill)>,
+    /// A pack theme's display font by theme id (TP4b): built-in looks on that theme set their
+    /// words in it; a theme without one stays on Inter.
+    pub fonts: Vec<(String, ThemeFont)>,
 }
 
 impl DesignSet {
     /// The fill for theme `id`, if known.
     pub fn fill(&self, id: &str) -> Option<&assetcraft_titles::Fill> {
         self.fills.iter().find(|(i, _)| i == id).map(|(_, f)| f)
+    }
+
+    /// Theme `id`'s display font, if its pack brings one.
+    pub fn font(&self, id: &str) -> Option<&ThemeFont> {
+        self.fonts.iter().find(|(i, _)| i == id).map(|(_, f)| f)
+    }
+}
+
+/// A pack theme's display font (TP4b): the face matching its `type.display`, as file bytes
+/// (shared, so the Viewer's text can use the same face).
+#[derive(Clone)]
+pub struct ThemeFont {
+    /// Its family (`Brand Sans`).
+    pub family: String,
+    /// Its face in the file (0 for a single-face `.ttf` / `.otf`).
+    pub index: u32,
+    /// The font file.
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+impl std::fmt::Debug for ThemeFont {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ThemeFont({} #{}, {} bytes)", self.family, self.index, self.bytes.len())
     }
 }
 
@@ -223,6 +251,7 @@ impl Compositor {
             look,
             decode,
             fonts: text::Fonts::bundled().ok_or(AnimaticError::Font)?,
+            theme_fonts: HashMap::new(),
             stills: HashMap::new(),
             stills_order: Vec::new(),
             stills_bytes: 0,
@@ -454,9 +483,22 @@ impl Compositor {
         }
     }
 
+    /// The font a clip's words are set in: its pack theme's display font (TP4b) when the theme
+    /// is loaded and brings one, else Inter.
+    fn fonts_for(&mut self, style: &assetcraft_storyboard::TextStyle) -> text::Fonts {
+        let Some(id) = style.theme_id.filter(|id| self.user_looks.contains(*id)) else { return self.fonts.clone() };
+        let Some(font) = self.designs.font(id.as_str()) else { return self.fonts.clone() };
+        let set = self
+            .theme_fonts
+            .entry(id.as_str().to_owned())
+            .or_insert_with(|| text::Fonts::from_bytes(&font.family, font.bytes.to_vec(), font.index));
+        set.clone().unwrap_or_else(|| self.fonts.clone())
+    }
+
     fn paint_text(&mut self, out: &mut Rgba, clip: &Clip, elapsed: f64) {
         let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
         let style = clip.text_style;
+        let fonts = self.fonts_for(&style);
         let look = style.look_with(&self.user_looks);
         let anim = style.frame_at_with(&self.user_looks, elapsed, clip.duration.as_secs_f64());
         if kind == TextKind::Card {
@@ -500,7 +542,7 @@ impl Compositor {
             TextKind::Overlay => style.position.anchor(),
         };
         // Place by the finished text's size so a typewriter doesn't drift as it types.
-        let block = self.fonts.measure(&full, height, tracking, wrap);
+        let block = fonts.measure(&full, height, tracking, wrap);
         let anchor_x = w * ax;
         let left = match align {
             -1 => anchor_x,
@@ -524,7 +566,7 @@ impl Compositor {
                     );
                 }
                 None => {
-                    self.fonts.draw(
+                    fonts.draw(
                         out,
                         &shown,
                         height,
@@ -545,9 +587,9 @@ impl Compositor {
         // Shadow, outline or glow: the same words, under them (themes 1f).
         for p in assetcraft_storyboard::finish_passes(&look, height) {
             let a = p.alpha * anim.alpha;
-            self.fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
+            fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
         }
-        self.fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
+        fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
     }
 
     /// Draw text that names a user theme with that theme's look (TP2a-2).
@@ -559,6 +601,7 @@ impl Compositor {
     /// Draw cards and overlays whose pack theme has a design through it (TP2a-3).
     pub fn with_designs(mut self, designs: std::sync::Arc<DesignSet>) -> Self {
         self.designs = designs;
+        self.theme_fonts.clear();
         self
     }
 

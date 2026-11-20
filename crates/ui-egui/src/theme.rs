@@ -99,6 +99,41 @@ pub fn warn_color(visuals: &Visuals) -> Color32 {
     visuals.warn_fg_color
 }
 
+/// The egui family a pack theme's words are set in (TP4b-2): `pack:<theme id>`.
+pub fn pack_family(theme_id: &str) -> FontFamily {
+    FontFamily::Name(format!("pack:{theme_id}").into())
+}
+
+/// [`font_definitions`] plus each pack theme's display face (`(theme id, font file, face
+/// index)`) as the family [`pack_family`] names, falling back to the proportional stack for
+/// glyphs it lacks. A face egui can't read is left out, so its theme's words stay Inter.
+pub fn font_definitions_with<'a>(packs: impl IntoIterator<Item = (&'a str, &'a [u8], u32)>) -> FontDefinitions {
+    let mut fonts = font_definitions();
+    let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    for (id, bytes, index) in packs {
+        let data = FontData { font: bytes.to_vec().into(), index, tweak: egui::FontTweak::default() };
+        if !egui_reads(&data) {
+            continue;
+        }
+        let name = format!("pack:{id}");
+        fonts.font_data.insert(name.clone(), Arc::new(data));
+        let mut stack = vec![name];
+        stack.extend(fallback.iter().cloned());
+        fonts.families.insert(pack_family(id), stack);
+    }
+    fonts
+}
+
+/// Whether egui can read `data`. egui panics on a font it can't parse when the fonts are next
+/// built (every frame after `set_fonts`), so a face is tried here, alone, first.
+fn egui_reads(data: &FontData) -> bool {
+    let mut probe = FontDefinitions::empty();
+    probe.font_data.insert("probe".into(), Arc::new(data.clone()));
+    probe.families.insert(FontFamily::Proportional, vec!["probe".into()]);
+    std::panic::catch_unwind(|| egui::epaint::text::FontsImpl::new(egui::epaint::text::TextOptions::default(), probe))
+        .is_ok()
+}
+
 /// Install fonts, text styles and both themes' colours. Fonts take effect from the next pass.
 pub fn install(ctx: &egui::Context) {
     ctx.set_visuals_of(Theme::Dark, dark_visuals());
@@ -192,5 +227,24 @@ mod tests {
         );
         assert_eq!(fonts.families[&FontFamily::Name(MEDIUM.into())].first().map(String::as_str), Some("Inter-Medium"));
         assert!(fonts.font_data.values().all(|d| !d.font.is_empty()));
+    }
+
+    /// TP4b-2: each pack theme's face is its own family (Inter behind it); one egui can't read
+    /// is left out instead of panicking on the next frame.
+    #[test]
+    fn pack_faces_become_families_and_unreadable_ones_are_left_out() {
+        let junk: &[u8] = b"not a font at all";
+        let fonts = font_definitions_with([("broken", junk, 0), ("acme-type", JETBRAINS_MONO, 0)]);
+        let stack = &fonts.families[&pack_family("acme-type")];
+        assert_eq!(stack.first().map(String::as_str), Some("pack:acme-type"));
+        assert_eq!(stack.get(1).map(String::as_str), Some("Inter"), "Inter for glyphs it lacks");
+        assert!(!fonts.families.contains_key(&pack_family("broken")));
+        assert!(!fonts.font_data.contains_key("pack:broken"));
+        // Usable: egui builds these fonts.
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear(); // no renderer here
+        assert!(ctx.fonts(|f| f.families().contains(&pack_family("acme-type"))));
     }
 }

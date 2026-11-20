@@ -628,7 +628,7 @@ fn a_packs_font_draws_its_designs_headline() {
     let has = |text: &str| loaded.warnings.iter().any(|w| w == text);
     assert!(has("asset fonts/broken.ttf: no font in the file; not used"), "{:?}", loaded.warnings);
     assert!(
-        has("Acme Pack Mono is the pack's font: its designs use it; built-in looks use Inter for now"),
+        has("Acme Pack Mono is the pack's font: its designs use it, and so do built-in looks"),
         "{:?}",
         loaded.warnings
     );
@@ -649,6 +649,11 @@ fn a_packs_font_draws_its_designs_headline() {
     };
     assert_eq!(with("Acme Pack Mono"), with("JetBrains Mono"));
     assert_ne!(with("Acme Pack Mono"), with("Inter"));
+    // TP4b: the display face, for built-in looks on this theme (the one font file, face 0).
+    let font = designs.font("acme-type").expect("the display font");
+    assert_eq!((font.family.as_str(), font.index), ("Acme Pack Mono", 0));
+    assert_eq!(font.bytes.len(), renamed_mono("Acme Pack Mono").len());
+    assert!(designs.font("bold").is_none(), "a built-in theme brings none");
     // Reloading registers nothing new.
     let faces = effectcraft_text::fonts::all_faces().len();
     let mut s = s;

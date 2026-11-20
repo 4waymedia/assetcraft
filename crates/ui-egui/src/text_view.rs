@@ -57,9 +57,11 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
     let shown = shown_text(words, look.uppercase, &anim);
     let color = rgb(look.text).gamma_multiply(anim.alpha);
     let wrap = frame.width() * if kind == TextKind::Card { 0.8 } else { 0.6 };
-    let galley = painter.layout_job(job(&shown, height, look.tracking * height, color, wrap));
+    let family = family_for(&painter, &style, looks);
+    let galley = painter.layout_job(job(&shown, &family, height, look.tracking * height, color, wrap));
     let full = painter.layout_job(job(
         &shown_text(words, look.uppercase, &AnimFrame::REST),
+        &family,
         height,
         look.tracking * height,
         color,
@@ -90,7 +92,7 @@ fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame
             }
             None => {
                 let shadow = Color32::from_black_alpha((160.0 * anim.alpha) as u8);
-                let g = painter.layout_job(job(&shown, height, look.tracking * height, shadow, wrap));
+                let g = painter.layout_job(job(&shown, &family, height, look.tracking * height, shadow, wrap));
                 painter.galley(at + vec2(1.0, 1.5), g, shadow);
             }
         }
@@ -149,9 +151,21 @@ fn shown_text(words: &str, uppercase: bool, anim: &AnimFrame) -> String {
     text.chars().take(n).collect()
 }
 
-fn job(text: &str, height: f32, tracking: f32, color: Color32, wrap: f32) -> LayoutJob {
+/// The family a clip's words are set in: its pack theme's display face (TP4b-2) when the theme
+/// is loaded and egui has the face (it arrives a pass after themes load), else Inter.
+pub(crate) fn family_for(
+    painter: &Painter,
+    style: &assetcraft_storyboard::TextStyle,
+    looks: &UserLooks,
+) -> egui::FontFamily {
+    let Some(id) = style.theme_id.filter(|id| looks.contains(*id)) else { return egui::FontFamily::Proportional };
+    let family = crate::theme::pack_family(id.as_str());
+    if painter.ctx().fonts(|f| f.families().contains(&family)) { family } else { egui::FontFamily::Proportional }
+}
+
+fn job(text: &str, family: &egui::FontFamily, height: f32, tracking: f32, color: Color32, wrap: f32) -> LayoutJob {
     let format = TextFormat {
-        font_id: FontId::proportional(height),
+        font_id: FontId::new(height, family.clone()),
         color,
         extra_letter_spacing: tracking,
         ..TextFormat::default()

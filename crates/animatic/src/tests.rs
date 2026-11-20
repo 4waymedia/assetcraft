@@ -629,6 +629,7 @@ fn a_built_in_banner_picked_on_any_theme_draws_with_that_themes_fill() {
         )],
         // Bold's fill with a cyan accent, so the bar is easy to find.
         fills: vec![("bold".into(), Fill::default().color(Slot::Accent, [0.0, 1.0, 1.0, 1.0]))],
+        fonts: Vec::new(),
     });
     let mut shot = clip(5, ShotType::Ws, 6);
     shot.overlay = Some("ISTANBUL".into());
@@ -649,4 +650,41 @@ fn a_built_in_banner_picked_on_any_theme_draws_with_that_themes_fill() {
     assert_eq!(c.clip_frame(&shot, 3.0).data, plain.clip_frame(&words, 3.0).data);
     shot.text_style.design = Some(DesignPick::None);
     assert_eq!(c.clip_frame(&shot, 3.0).data, plain.clip_frame(&words, 3.0).data);
+}
+
+#[test]
+fn a_pack_themes_words_are_set_in_its_display_font() {
+    use assetcraft_storyboard::{TextTheme, ThemeId, UserLooks};
+    let mono: Arc<[u8]> = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf").as_slice().into();
+    let set = |bytes: Arc<[u8]>| {
+        Arc::new(crate::DesignSet {
+            fonts: vec![("acme-brand".into(), crate::ThemeFont { family: "Acme Mono".into(), index: 0, bytes })],
+            ..crate::DesignSet::default()
+        })
+    };
+    let looks = UserLooks::new([("acme-brand", TextTheme::Bold.look())]);
+    let mut card = clip(4, ShotType::Ttl, 2);
+    card.description = "ACME WIDE WORDS".into();
+    card.text_style.theme_id = ThemeId::new("acme-brand");
+    let mut inter = compositor(320, 180).with_user_looks(looks.clone());
+    let mut packed = compositor(320, 180).with_user_looks(looks.clone()).with_designs(set(Arc::clone(&mono)));
+    let plain = inter.clip_frame(&card, f64::INFINITY);
+    let set_in_mono = packed.clip_frame(&card, f64::INFINITY);
+    assert_ne!(set_in_mono.data, plain.data, "the pack's font, not Inter");
+    // An overlay too (the same text path).
+    let mut over = clip(5, ShotType::Ws, 2);
+    over.overlay = Some("ACME".into());
+    over.text_style.theme_id = ThemeId::new("acme-brand");
+    assert_ne!(packed.clip_frame(&over, 0.5).data, inter.clip_frame(&over, 0.5).data);
+    // A built-in theme's words stay Inter, font set or not.
+    let mut bold = card.clone();
+    bold.text_style.theme_id = None;
+    assert_eq!(packed.clip_frame(&bold, f64::INFINITY).data, inter.clip_frame(&bold, f64::INFINITY).data);
+    // A theme that isn't loaded falls back to its built-in theme, in Inter.
+    let mut unloaded = compositor(320, 180).with_designs(set(Arc::clone(&mono)));
+    let mut builtin_only = compositor(320, 180);
+    assert_eq!(unloaded.clip_frame(&card, f64::INFINITY).data, builtin_only.clip_frame(&card, f64::INFINITY).data);
+    // Bytes that aren't a font: Inter, never a crash.
+    let mut junk = compositor(320, 180).with_user_looks(looks).with_designs(set(b"not a font".as_slice().into()));
+    assert_eq!(junk.clip_frame(&card, f64::INFINITY).data, plain.data);
 }

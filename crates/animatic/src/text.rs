@@ -1,25 +1,27 @@
-//! Text in a frame: the bundled Inter Regular (the UI's font, `assets/fonts/`, SIL OFL 1.1)
-//! set with `ab_glyph` — word wrap at a width, extra letter spacing, lines centred or
+//! Text in a frame: the bundled Inter Regular (the UI's font, `assets/fonts/`, SIL OFL 1.1), or
+//! a theme pack's display font (theme-packs.md TP4b), set with `ab_glyph` — word wrap at a width, extra letter spacing, lines centred or
 //! left/right aligned as the Viewer's `text_view` does with egui's layout. Not a text engine:
 //! no shaping, no bidi; a glyph the font lacks draws its `.notdef` box, as egui would show a
 //! fallback.
 
 use crate::draw::Rgba;
-use ab_glyph::{Font, FontRef, Glyph, GlyphId, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontVec, Glyph, GlyphId, PxScale, ScaleFont};
 
 const INTER: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
 
 /// Line height as a multiple of the text height (egui's row height for Inter is close to this).
 const LINE: f32 = 1.2;
 
-/// The fonts a frame can set.
+/// The font a frame's words are set in (cheap to clone: the face is shared).
+#[derive(Clone)]
 pub struct Fonts {
-    regular: FontRef<'static>,
+    regular: FontArc,
+    name: String,
 }
 
 impl std::fmt::Debug for Fonts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Fonts(Inter)")
+        write!(f, "Fonts({})", self.name)
     }
 }
 
@@ -32,10 +34,18 @@ struct Line {
 impl Fonts {
     /// The bundled font; `None` only if the embedded bytes are not a font (a build problem).
     pub fn bundled() -> Option<Fonts> {
-        FontRef::try_from_slice(INTER).ok().map(|regular| Fonts { regular })
+        ab_glyph::FontRef::try_from_slice(INTER).ok().map(|f| Fonts { regular: FontArc::new(f), name: "Inter".into() })
     }
 
-    fn scaled(&self, height: f32) -> ab_glyph::PxScaleFont<&FontRef<'static>> {
+    /// Face `index` of a font file (a pack's display font, TP4b), named `name`; `None` when the
+    /// bytes aren't a font.
+    pub fn from_bytes(name: &str, bytes: Vec<u8>, index: u32) -> Option<Fonts> {
+        FontVec::try_from_vec_and_index(bytes, index)
+            .ok()
+            .map(|f| Fonts { regular: FontArc::new(f), name: name.into() })
+    }
+
+    fn scaled(&self, height: f32) -> ab_glyph::PxScaleFont<&FontArc> {
         // `height` is the text height in pixels the Viewer asks for; egui sizes a font by its
         // point size, which for Inter is close to the pixel scale.
         self.regular.as_scaled(PxScale::from(height.max(1.0)))

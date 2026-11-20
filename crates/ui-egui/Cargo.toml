@@ -19,6 +19,8 @@ assetcraft-probe = { workspace = true }
 assetcraft-thumbs = { workspace = true }
 assetcraft-watch = { workspace = true }
 assetcraft-storyboard = { workspace = true }
+# The pack fonts' set (`DesignSet`, TP4b-2), as the engine hands it over.
+assetcraft-animatic = { workspace = true }
 craft-ui = { workspace = true }
 egui = { workspace = true }
 serde = { workspace = true }

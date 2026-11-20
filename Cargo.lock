@@ -475,6 +475,7 @@ dependencies = [
 name = "assetcraft-ui-egui"
 version = "0.0.1"
 dependencies = [
+ "assetcraft-animatic",
  "assetcraft-engine",
  "assetcraft-fs",
  "assetcraft-probe",

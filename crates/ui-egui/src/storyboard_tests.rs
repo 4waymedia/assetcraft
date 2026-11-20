@@ -2534,3 +2534,60 @@ fn a_card_picks_a_built_in_banner_design() {
     let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().clone();
     assert!(nav.session().clip_design(&clip).is_none());
 }
+
+/// TP4b-2: a pack theme's display font reaches egui when themes load, and the Viewer sets that
+/// theme's words in it (as the export does); a built-in theme stays Inter.
+#[test]
+fn the_viewer_sets_a_pack_themes_words_in_its_font() {
+    let dir = std::env::temp_dir().join(format!("assetcraft-ui-font-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Themes").join("acme-type").join("fonts")).unwrap();
+    let dir = dir.canonicalize().unwrap();
+    let pack = dir.join("Themes").join("acme-type");
+    let mono = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/JetBrainsMono-Regular.ttf");
+    std::fs::copy(mono, pack.join("fonts/Mono.ttf")).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = "acme-type".into();
+    t.name = "Acme Type".into();
+    t.type_.display.family = "JetBrains Mono".into();
+    t.type_.display.weight = 400;
+    t.assets = vec![assetcraft_storyboard::ThemeAsset {
+        role: "font".into(),
+        path: "fonts/Mono.ttf".into(),
+        license: "OFL-1.1".into(),
+        credit: None,
+    }];
+    std::fs::write(pack.join("theme.json"), t.to_json()).unwrap();
+    let prefs = assetcraft_engine::Prefs { working_folder: Some(dir.clone()), ..assetcraft_engine::Prefs::default() };
+    let session = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
+    let mut nav = Navigator::with_one_worker(session);
+    let ctx = Context::default();
+    let family = crate::theme::pack_family("acme-type");
+    for i in 0..2 {
+        frame(&ctx, &mut nav, Vec::new(), f64::from(i) * 0.02);
+    }
+    assert!(ctx.fonts(|f| f.families().contains(&family)), "egui has the pack's face");
+    let looks = nav.session().user_looks().clone();
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let style = |id: Option<&str>| assetcraft_storyboard::TextStyle {
+        theme_id: id.and_then(assetcraft_storyboard::ThemeId::new),
+        ..Default::default()
+    };
+    assert_eq!(crate::text_view::family_for(&painter, &style(Some("acme-type")), &looks), family);
+    assert_eq!(crate::text_view::family_for(&painter, &style(None), &looks), egui::FontFamily::Proportional);
+    // Not loaded: Inter (the clip draws its built-in theme).
+    assert_eq!(
+        crate::text_view::family_for(&painter, &style(Some("elsewhere")), &looks),
+        egui::FontFamily::Proportional
+    );
+    // The face is the pack's: monospaced, so "iiii" is as wide as "MMMM" (Inter's isn't).
+    let width = |family: &egui::FontFamily, text: &str| {
+        ctx.fonts_mut(|f| {
+            f.layout_no_wrap(text.into(), egui::FontId::new(20.0, family.clone()), egui::Color32::WHITE).size().x
+        })
+    };
+    assert!((width(&family, "iiii") - width(&family, "MMMM")).abs() < 0.5);
+    let inter = egui::FontFamily::Proportional;
+    assert!(width(&inter, "MMMM") > width(&inter, "iiii") * 1.5);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -128,6 +128,22 @@ pub(crate) struct ThemeLibrary {
     designs: std::sync::Arc<assetcraft_animatic::DesignSet>,
 }
 
+/// The style name a `type` weight asks for (`700` → `Bold`): what a design's font control and a
+/// pack's display font are matched by.
+pub(crate) fn weight_style(w: u16) -> &'static str {
+    match w {
+        0..=150 => "Thin",
+        151..=250 => "ExtraLight",
+        251..=350 => "Light",
+        351..=450 => "Regular",
+        451..=550 => "Medium",
+        551..=650 => "SemiBold",
+        651..=750 => "Bold",
+        751..=850 => "ExtraBold",
+        _ => "Black",
+    }
+}
+
 /// What a theme fills a design with (theme-packs.md §3): its colours and fonts; the clip's words
 /// are added when it draws.
 pub(crate) fn theme_fill(t: &Theme) -> assetcraft_titles::Fill {
@@ -138,17 +154,7 @@ pub(crate) fn theme_fill(t: &Theme) -> assetcraft_titles::Fill {
             [ch(16), ch(8), ch(0), 1.0]
         })
     };
-    let style = |w: u16| match w {
-        0..=150 => "Thin",
-        151..=250 => "ExtraLight",
-        251..=350 => "Light",
-        351..=450 => "Regular",
-        451..=550 => "Medium",
-        551..=650 => "SemiBold",
-        651..=750 => "Bold",
-        751..=850 => "ExtraBold",
-        _ => "Black",
-    };
+    let style = weight_style;
     let c = &t.color;
     let mut fill = assetcraft_titles::Fill::default();
     for (slot, hex) in [
@@ -172,6 +178,10 @@ impl Session {
     /// working folder).
     pub(crate) fn reload_themes(&mut self) {
         let (mut themes, problems) = self.user_themes();
+        // Each pack's fonts registered for its designs, and its display face for its built-in
+        // looks (TP4a, TP4b).
+        let display_fonts: Vec<Option<assetcraft_animatic::ThemeFont>> =
+            themes.iter_mut().map(|u| self.pack_fonts(u)).collect();
         // Each theme's fill: its colours and fonts, and a pack's pictures (TP3b).
         let pack_fills: Vec<assetcraft_titles::Fill> = themes.iter_mut().map(|u| self.pack_fill(u)).collect();
         let looks = assetcraft_storyboard::UserLooks::new(themes.iter().map(|u| (u.theme.id.as_str(), u.theme.look())));
@@ -204,7 +214,8 @@ impl Session {
             .map(|t| (t.id.clone(), theme_fill(t)))
             .chain(themes.iter().zip(pack_fills).map(|(u, f)| (u.theme.id.clone(), f)))
             .collect();
-        let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills };
+        let fonts = themes.iter().zip(display_fonts).filter_map(|(u, f)| Some((u.theme.id.clone(), f?))).collect();
+        let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills, fonts };
         self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set) };
     }
 
@@ -333,7 +344,6 @@ impl Session {
     fn pack_fill(&self, u: &mut UserTheme) -> assetcraft_titles::Fill {
         use assetcraft_titles::Slot;
         use std::hash::{Hash, Hasher};
-        self.pack_fonts(u);
         let mut fill = theme_fill(&u.theme);
         for a in &u.assets {
             let slot = match a.role.as_str() {
@@ -376,9 +386,15 @@ impl Session {
     /// Register `u`'s fonts (TP4a) for its designs: each `font` asset is read (within the cap)
     /// and added to the designs' font database; one with no font in it is a warning. The
     /// theme's "isn't bundled" warning for a family the pack brings says what draws with it now;
-    /// for a family it doesn't bring, it names the families the pack has.
-    fn pack_fonts(&self, u: &mut UserTheme) {
+    /// for a family it doesn't bring, it names the families the pack has. The face matching
+    /// `type.display` (its family, then the style its weight asks for, else the family's first
+    /// face) is returned for built-in looks on this theme (TP4b).
+    fn pack_fonts(&self, u: &mut UserTheme) -> Option<assetcraft_animatic::ThemeFont> {
         let mut families: Vec<String> = Vec::new();
+        let display = &u.theme.type_.display;
+        let want = weight_style(display.weight);
+        // (exact style?, the font) for the best display face so far.
+        let mut best: Option<(bool, assetcraft_animatic::ThemeFont)> = None;
         for a in u.assets.iter().filter(|a| a.role == "font") {
             let name = u.pack.as_deref().and_then(|p| a.path.strip_prefix(p).ok()).unwrap_or(&a.path);
             let name = name.to_string_lossy().replace('\\', "/");
@@ -386,9 +402,29 @@ impl Session {
                 .services
                 .read_head(&a.path, assetcraft_titles::fonts::MAX_FONT_BYTES + 1)
                 .map_err(|e| e.to_string())
-                .and_then(assetcraft_titles::register_font);
+                .and_then(|bytes| {
+                    let shared: std::sync::Arc<[u8]> = bytes.as_slice().into();
+                    assetcraft_titles::register_font(bytes).map(|faces| (faces, shared))
+                });
             match faces {
-                Ok(faces) => {
+                Ok((faces, shared)) => {
+                    for (index, f) in faces.iter().enumerate() {
+                        if !f.family.eq_ignore_ascii_case(&display.family)
+                            || best.as_ref().is_some_and(|(exact, _)| *exact)
+                        {
+                            continue;
+                        }
+                        let exact = f.style.eq_ignore_ascii_case(want);
+                        if exact || best.is_none() {
+                            let index = u32::try_from(index).unwrap_or(0);
+                            let font = assetcraft_animatic::ThemeFont {
+                                family: f.family.clone(),
+                                index,
+                                bytes: std::sync::Arc::clone(&shared),
+                            };
+                            best = Some((exact, font));
+                        }
+                    }
                     for f in faces {
                         if !families.iter().any(|g| g.eq_ignore_ascii_case(&f.family)) {
                             families.push(f.family);
@@ -399,7 +435,7 @@ impl Session {
             }
         }
         if families.is_empty() {
-            return;
+            return None;
         }
         for face in [&u.theme.type_.display, &u.theme.type_.body] {
             let unbundled = format!(
@@ -410,14 +446,22 @@ impl Session {
             let Some(w) = u.warnings.iter_mut().find(|w| **w == unbundled) else { continue };
             *w = if families.iter().any(|f| f.eq_ignore_ascii_case(&face.family)) {
                 format!(
-                    "{} is the pack's font: its designs use it; built-in looks use {} for now",
+                    "{} is the pack's font: its designs use it{}",
                     face.family,
-                    assetcraft_storyboard::BUNDLED_FONTS[0]
+                    if std::ptr::eq(face, &u.theme.type_.display) {
+                        ", and so do built-in looks".to_string()
+                    } else {
+                        format!(
+                            "; built-in looks set all their words in the display font ({})",
+                            u.theme.type_.display.family
+                        )
+                    }
                 )
             } else {
                 format!("{unbundled} (the pack's fonts: {})", families.join(", "))
             };
         }
+        best.map(|(_, f)| f)
     }
 
     /// A pack's video as a design's movie (TP3b-2): opened once here to check it plays and to
