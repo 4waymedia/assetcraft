@@ -310,9 +310,11 @@ impl Session {
             themes: theme_cmd::ThemeLibrary::default(),
             design_frames: std::sync::OnceLock::new(),
         };
-        session.reload_themes();
         session.refresh_favorites();
         session.rescan_places();
+        // After the places: the default working folder (Documents, else home) is one of them,
+        // and the user's themes live in it.
+        session.reload_themes();
         let start = prefs
             .last_folder
             .into_iter()

@@ -213,7 +213,14 @@ works with any Style › Preset, so the timing and the look are chosen apart.
 
   ```powershell
   assetcraft-cli exec storyboard.themes
+  assetcraft-cli exec storyboard.themes --working D:\Brand\AssetCraft   # a working folder of your own
   ```
+
+  The CLI reads the default working folder (`Documents\AssetCraft`) unless you pass
+  `--working`; it doesn't read the app's setting. Each `exec` is a fresh session, so a storyboard
+  made with `storyboard.new` / `storyboard.generate` (`titleTheme`, `intro`, `outro`, `credits`)
+  can't be saved from the CLI yet (cli.md C3, `run`), and `storyboard.editDesign` writes the edit
+  copy but only records the EffectCraft launch.
 
 ### Your own theme files
 

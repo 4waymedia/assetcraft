@@ -59,6 +59,7 @@ $cli = '.\target\release\assetcraft-cli.exe'
 ```
 
 - **One session per process:** `exec` starts a fresh session each time, so selection doesn't carry over between calls. Pass `paths` explicitly, or use `run` / MCP / the control channel once they land.
+- **Working folder:** themes, theme packs and imported music come from the working folder. The CLI uses the default (`Documents\AssetCraft`, else `~\AssetCraft`), not the app's setting; pass `--working <folder>` to use another (`exec storyboard.themes --working D:\Brand\AssetCraft`).
 - **Exit codes:** 0 ok, 1 the command failed, 2 usage error.
 
 ### 4. Writing files (Stage 2 onward)

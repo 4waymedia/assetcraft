@@ -2547,6 +2547,19 @@ fn a_card_picks_a_built_in_banner_design() {
         t += 0.02;
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    // The Inspector stays its width and on screen with the design's note in it (Paul,
+    // 2026-11-20: picking Laser Trace or Stack pushed it off the window).
+    for design in ["banner-laser-trace", "banner-stack"] {
+        nav.run("storyboard.text.style", json!({ "clip": card, "design": design }));
+        for _ in 0..3 {
+            frame(&ctx, &mut nav, Vec::new(), t);
+            t += 0.02;
+        }
+        let panel =
+            egui::containers::panel::PanelState::load(&ctx, egui::Id::new("sb-inspector")).expect("the Inspector");
+        let r = panel.outer_rect;
+        assert!(r.width() <= crate::storyboard_view::INSPECTOR_W + 1.0 && r.right() <= 1361.0, "{design}: {r:?}");
+    }
     nav.run("storyboard.text.style", json!({ "clip": card, "design": "none" }));
     frame(&ctx, &mut nav, Vec::new(), t + 0.1);
     let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().clone();

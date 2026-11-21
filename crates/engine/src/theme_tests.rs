@@ -1021,3 +1021,52 @@ fn the_credits_carry_the_cc_by_lines_of_the_pack_files_used() {
     assert!(!credits(&s).contains("CC BY"), "{}", credits(&s));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Real disk, with Documents at `docs` (and no home), as a fresh install sees it.
+struct DocsAt {
+    docs: PathBuf,
+}
+
+impl assetcraft_fs::Services for DocsAt {
+    fn list_entries(&self, dir: &Path, opts: &ListOptions) -> Result<assetcraft_fs::Listing, FsError> {
+        RealFs.list_entries(dir, opts)
+    }
+    fn entry(&self, path: &Path) -> Result<Entry, FsError> {
+        RealFs.entry(path)
+    }
+    fn read_head(&self, path: &Path, max: usize) -> Result<Vec<u8>, FsError> {
+        RealFs.read_head(path, max)
+    }
+    fn read_range(&self, path: &Path, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
+        RealFs.read_range(path, offset, len)
+    }
+    fn volumes(&self) -> Vec<Volume> {
+        Vec::new()
+    }
+    fn home_dir(&self) -> Option<PathBuf> {
+        None
+    }
+    fn known_folder(&self, which: KnownFolder) -> Option<PathBuf> {
+        (which == KnownFolder::Documents).then(|| self.docs.clone())
+    }
+}
+
+#[test]
+fn packs_in_the_default_working_folder_load_at_startup() {
+    // No working folder set: Documents/AssetCraft. A new session (the app's start, every CLI
+    // run) has the pack without a reload, and a clip can name it.
+    let docs = std::env::temp_dir().join(format!("assetcraft-themes-docs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&docs);
+    let pack = docs.join("AssetCraft").join("Themes").join("acme");
+    std::fs::create_dir_all(&pack).unwrap();
+    std::fs::write(pack.join("theme.json"), pack_theme("acme", &[])).unwrap();
+    let docs = docs.canonicalize().unwrap();
+    let mut s =
+        Session::new(Arc::new(DocsAt { docs: docs.clone() }), Arc::new(RecordingLauncher::default()), Prefs::default());
+    assert_eq!(s.working_folder(), Some(docs.join("AssetCraft")));
+    let ids: Vec<&str> = s.loaded_themes().iter().map(|u| u.theme.id.as_str()).collect();
+    assert_eq!(ids, ["acme"]);
+    let out = run(&mut s, "storyboard.new", json!({ "sample": true, "titleTheme": "acme" }));
+    assert!(out["titlesThemed"].as_u64().unwrap_or(0) > 0, "{out}");
+    let _ = std::fs::remove_dir_all(&docs);
+}

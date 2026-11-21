@@ -40,18 +40,30 @@ the CLI exposes that as `--dry-run` (§3.4).
 
 ## 2. Shipped today (`main` @ `bd054c2`: C1 and V0.4 `info`)
 
-| Subcommand                                         | What                                                      | Engine path                     |
-|----------------------------------------------------|-----------------------------------------------------------|---------------------------------|
-| `list <dir> [--json] [--sort k] [--desc] [--hidden]` | A folder as the navigator shows it                      | `view.*`, `nav.open`, `app.state` |
-| `probe <file> [--json]`                            | Type, dimensions, size, times, header status              | `item.probe`                    |
-| `thumb <file> --out <png> [--size px] [--force] [--heic]` | A thumbnail PNG (atomic write, never overwrites without `--force`) | `assetcraft_thumbs::render` (the only direct call) |
-| `analyze <audio>… [--json]`                        | Duration, rate, channels, peak, RMS                       | `track.summary`                 |
-| `analyze <audio>… --cuemap [--force] [--json]`     | Beats, bars, sections, hits, fits → `<stem>.cuemap.json` beside each file (atomic write; kept unless `--force`); what the Start screen reads | `track.analyze` (A2c-1, 2026-10-25) |
-| `info <model>… [--json]`                           | 3D model facts: triangles, vertices, materials, images (sizes from headers), normals / UVs, bounds, warnings; GLB, glTF, OBJ; ≤ 1,000 files, exit 1 if any failed | `asset.meshInfo`                |
-| `commands [<filter>] [--json] [--dir <folder>]`    | Every command (id or label containing the filter), with ENABLED / `enabled` + `disabledReason` for a fresh session at `--dir` | `Session::command_infos` (`app.commands`) |
-| `describe <id> [--dir <folder>]`                   | One command's `app.commands` entry as JSON                | `Session::command_info`         |
-| `exec <id> [<json>] [--dir <folder>]`              | One command; pretty JSON result                           | `Session::execute`              |
-| `help [<cmd>]`, `-h`, `--help`, `-V`, `--version`  | Help to stdout, exit 0                                    | —                               |
+| Subcommand                                                           | What                                                                                                                                                              | Engine path                                        |
+|----------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------|
+| `list <dir> [--json] [--sort k] [--desc] [--hidden]`                 | A folder as the navigator shows it                                                                                                                                | `view.*`, `nav.open`, `app.state`                  |
+| `probe <file> [--json]`                                              | Type, dimensions, size, times, header status                                                                                                                      | `item.probe`                                       |
+| `thumb <file> --out <png> [--size px] [--force] [--heic]`            | A thumbnail PNG (atomic write, never overwrites without `--force`)                                                                                                | `assetcraft_thumbs::render` (the only direct call) |
+| `analyze <audio>… [--json]`                                          | Duration, rate, channels, peak, RMS                                                                                                                               | `track.summary`                                    |
+| `analyze <audio>… --cuemap [--force] [--json]`                       | Beats, bars, sections, hits, fits → `<stem>.cuemap.json` beside each file (atomic write; kept unless `--force`); what the Start screen reads                      | `track.analyze` (A2c-1, 2026-10-25)                |
+| `info <model>… [--json]`                                             | 3D model facts: triangles, vertices, materials, images (sizes from headers), normals / UVs, bounds, warnings; GLB, glTF, OBJ; ≤ 1,000 files, exit 1 if any failed | `asset.meshInfo`                                   |
+| `commands [<filter>] [--json] [--dir <folder>] [--working <folder>]` | Every command (id or label containing the filter), with ENABLED / `enabled` + `disabledReason` for a fresh session at `--dir`                                     | `Session::command_infos` (`app.commands`)          |
+| `describe <id> [--dir <folder>] [--working <folder>]`                | One command's `app.commands` entry as JSON                                                                                                                        | `Session::command_info`                            |
+| `exec <id> [<json>] [--dir <folder>] [--working <folder>]`           | One command; pretty JSON result                                                                                                                                   | `Session::execute`                                 |
+| `help [<cmd>]`, `-h`, `--help`, `-V`, `--version`                    | Help to stdout, exit 0                                                                                                                                            | —                                                  |
+
+`--working <folder>` (2026-11-20, CLI-1) sets the session's working folder through
+`app.workingFolder` before anything else runs, so the theme packs in `<folder>/Themes` load
+(theme-packs.md). Without it the CLI uses the default, `Documents/AssetCraft` else
+`~/AssetCraft`; it never reads the app's prefs.
+
+| ID    | Finding (2026-11-20 audit of TP1–TP5)                                                                                                                                              | Fix                                                                                                                                        | Owner  | Status                 |
+|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|--------|------------------------|
+| CLI-1 | Packs in a custom working folder were out of the CLI's reach                                                                                                                       | `--working` on `commands`, `describe`, `exec`                                                                                              | Claude | **built 2026-11-20**   |
+| CLI-2 | A new session loaded themes before it knew the known folders, so packs in the default working folder loaded only on a reload (the app's 1.5 s poll hid it; the CLI never saw them) | `Session::new` loads themes after `rescan_places` (`crates/engine/src/lib.rs`); test `packs_in_the_default_working_folder_load_at_startup` | Claude | **built 2026-11-20**   |
+| CLI-3 | One command per process: a storyboard made with `titleTheme` / `intro` / `outro` / `credits` can't be saved or exported from the CLI                                               | C3 `run` (one session for several commands)                                                                                                | Claude | open, Paul to schedule |
+| CLI-4 | `storyboard.editDesign` over the CLI writes the edit copy but only records the EffectCraft launch (`RecordingLauncher`)                                                            | documented here and in the README; the control channel (C5) runs it in the app                                                             | Claude | documented             |
 
 Already in line with the suite: exit codes 0/1/2, stdout/stderr split, closed-pipe handling,
 `--` ends flags, non-UTF-8 arguments refused with exit 2 (`apps/assetcraft-cli/src/main.rs:1-12`,

@@ -158,7 +158,7 @@ const COMMANDS_HELP: &str = "\
 assetcraft-cli commands: list every engine command
 
 USAGE:
-    assetcraft-cli commands [<filter>] [--json] [--dir <folder>]
+    assetcraft-cli commands [<filter>] [--json] [--dir <folder>] [--working <folder>]
 
 A filter keeps the commands whose id or label contains it, case-insensitively: `commands
 storyboard`, `commands open`. The ENABLED column (and `enabled` / `disabledReason` in the
@@ -167,25 +167,29 @@ an open storyboard, a selection or history is disabled with the reason its handl
 Commands whose only preconditions are their parameters are always enabled.
 
 OPTIONS:
-    --json           Print the app.commands JSON: the suite CommandInfo shape {id, label, menu,
-                     shortcut, params, enabled, disabledReason} plus AssetCraft's effects
-    --dir <folder>   Open this folder first (default: where the app would start)
-    -h, --help       Print help
+    --json              Print the app.commands JSON: the suite CommandInfo shape {id, label,
+                        menu, shortcut, params, enabled, disabledReason} plus AssetCraft's effects
+    --dir <folder>      Open this folder first (default: where the app would start)
+    --working <folder>  The working folder (Themes/, Music/): default Documents/AssetCraft,
+                        else ~/AssetCraft; the app's own setting isn't read
+    -h, --help          Print help
 ";
 
 const DESCRIBE_HELP: &str = "\
 assetcraft-cli describe: one engine command as JSON
 
 USAGE:
-    assetcraft-cli describe <command-id> [--dir <folder>]
+    assetcraft-cli describe <command-id> [--dir <folder>] [--working <folder>]
 
 Prints the command's app.commands entry: id, label, menu path, shortcut, params, effects
 (classes, destructive, undoable, idempotent, confirm, remoteAllowed, note), and `enabled` with
 `disabledReason` for a fresh session opened at --dir (null when it could run).
 
 OPTIONS:
-    --dir <folder>   Open this folder first (default: where the app would start)
-    -h, --help       Print help
+    --dir <folder>      Open this folder first (default: where the app would start)
+    --working <folder>  The working folder (Themes/, Music/): default Documents/AssetCraft,
+                        else ~/AssetCraft; the app's own setting isn't read
+    -h, --help          Print help
 
 Exit codes: 0 ok, 2 unknown command id.
 ";
@@ -194,7 +198,7 @@ const EXEC_HELP: &str = "\
 assetcraft-cli exec: run one engine command headlessly and print its JSON result
 
 USAGE:
-    assetcraft-cli exec <command-id> [<json-params>] [--dir <folder>]
+    assetcraft-cli exec <command-id> [<json-params>] [--dir <folder>] [--working <folder>]
 
 A fresh session is created (opened at --dir first when given; otherwise it starts where the app
 would: Pictures, else home). Params default to {}. file.open and file.reveal are recorded, never
@@ -204,12 +208,15 @@ EXAMPLES:
     assetcraft-cli exec app.state --dir test_data/library
     assetcraft-cli exec view.sort '{\"by\":\"size\",\"ascending\":false}' --dir .
     assetcraft-cli exec item.probe '{\"path\":\"shot.png\"}'
+    assetcraft-cli exec storyboard.themes --working D:/Brand/AssetCraft
 
 Exit codes: 0 ok, 1 the command failed, 2 unknown command id or bad params.
 
 OPTIONS:
-    --dir <folder>   Open this folder before running the command
-    -h, --help       Print help
+    --dir <folder>      Open this folder before running the command
+    --working <folder>  The working folder (Themes/, Music/): default Documents/AssetCraft,
+                        else ~/AssetCraft; the app's own setting isn't read
+    -h, --help          Print help
 ";
 
 const LIST_SPEC: Spec = Spec { switches: &["--json", "--desc", "--hidden"], values: &["--sort"] };
@@ -218,9 +225,9 @@ const THUMB_SPEC: Spec = Spec { switches: &["--force", "--heic"], values: &["--s
 const ANALYZE_SPEC: Spec = Spec { switches: &["--json", "--summary", "--cuemap", "--force"], values: &[] };
 const INFO_SPEC: Spec = Spec { switches: &["--json"], values: &[] };
 const SIDEBAR_SPEC: Spec = Spec { switches: &["--json", "--why"], values: &[] };
-const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir"] };
-const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
-const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir"] };
+const COMMANDS_SPEC: Spec = Spec { switches: &["--json"], values: &["--dir", "--working"] };
+const DESCRIBE_SPEC: Spec = Spec { switches: &[], values: &["--dir", "--working"] };
+const EXEC_SPEC: Spec = Spec { switches: &[], values: &["--dir", "--working"] };
 
 /// Default `thumb --size`.
 const DEFAULT_THUMB_SIZE: u32 = 256;
@@ -853,7 +860,7 @@ fn list_commands(p: &Parsed, help: &'static str) -> Outcome {
     let keep = |id: &str, label: &str| {
         filter.as_deref().is_none_or(|f| id.to_lowercase().contains(f) || label.to_lowercase().contains(f))
     };
-    let s = session_at(p.value("--dir"))?;
+    let s = session_at(p.value("--dir"), p.value("--working"))?;
     if p.has("--json") {
         let infos = commands().iter().filter(|c| keep(c.id, c.label)).map(|c| s.command_info(c)).collect();
         return Ok(pretty(&Value::Array(infos)));
@@ -889,14 +896,19 @@ fn describe(p: &Parsed, help: &'static str) -> Outcome {
     let pos = positionals(p, 1, 1, "<command-id>", help)?;
     let id = pos[0].as_str();
     let spec = assetcraft_engine::find(id).ok_or_else(|| Failure::BadCommand(format!("unknown command `{id}`")))?;
-    let s = session_at(p.value("--dir"))?;
+    let s = session_at(p.value("--dir"), p.value("--working"))?;
     Ok(pretty(&s.command_info(spec)))
 }
 
-/// A fresh session, opened at `--dir` when given.
-fn session_at(dir: Option<&str>) -> Result<Session, Failure> {
+/// A fresh session, its working folder `--working` and opened at `--dir` when given.
+fn session_at(dir: Option<&str>, working: Option<&str>) -> Result<Session, Failure> {
     let dir = dir.map(absolute);
     let mut s = session(dir.as_deref());
+    if let Some(working) = working.map(absolute) {
+        // As the app's setting does: its themes load from there (`app.workingFolder` reloads).
+        s.execute("app.workingFolder", &json!({ "path": path_str(&working)? }))
+            .map_err(|e| Failure::Failed(format!("can't use {} as the working folder: {e}", working.display())))?;
+    }
     if let Some(dir) = &dir {
         s.execute("nav.open", &json!({ "path": path_str(dir)? }))
             .map_err(|e| Failure::Failed(format!("can't open {}: {e}", dir.display())))?;
@@ -939,6 +951,6 @@ fn exec(p: &Parsed, help: &'static str) -> Outcome {
             serde_json::from_str(text).map_err(|e| Failure::Usage(format!("params are not JSON: {e}"), help))?
         }
     };
-    let mut s = session_at(p.value("--dir"))?;
+    let mut s = session_at(p.value("--dir"), p.value("--working"))?;
     execute(&mut s, id, &params)
 }

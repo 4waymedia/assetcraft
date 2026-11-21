@@ -376,6 +376,31 @@ fn screenshot() {
         }
     }
 
+    // Optional: a title card through each design (`AC_DESIGN=1`): the Inspector and Viewer with
+    // the theme's own, Laser Trace and Stack picked.
+    if std::env::var_os("AC_DESIGN").is_some() {
+        nav.run("storyboard.new", json!({ "sample": true, "titleTheme": "blueprint" }));
+        nav.run("storyboard.view", json!({ "view": "strip" }));
+        let card = nav
+            .session()
+            .storyboard()
+            .and_then(|b| b.clips.iter().find(|c| c.text_kind().is_some()).map(|c| c.id.0))
+            .unwrap_or(0);
+        nav.run("storyboard.select", json!({ "clip": card }));
+        nav.run("storyboard.pause", json!({ "at": 1.5 }));
+        for design in ["theme", "banner-laser-trace", "banner-stack"] {
+            nav.run("storyboard.text.style", json!({ "clip": card, "design": design }));
+            let mut shot = None;
+            for _ in 0..40 {
+                t += 0.05;
+                shot = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+                nav.wait_thumbs(Duration::from_millis(50));
+            }
+            if let Some(shot) = shot {
+                save(&out.with_file_name(format!("{stem}-design-{design}.png")), shot);
+            }
+        }
+    }
     // Optional: the Start screen over a music folder (`AC_MUSIC=/abs/folder`).
     if let Some(music) = std::env::var_os("AC_MUSIC") {
         nav.run("app.mode", json!({ "mode": "storyboard" }));

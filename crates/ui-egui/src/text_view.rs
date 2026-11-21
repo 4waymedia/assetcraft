@@ -274,6 +274,12 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             .map_or_else(|| format!("{uid} (not loaded)"), |(_, name, _)| name.clone()),
         None => style.theme.name().to_string(),
     };
+    // A built-in design (Laser Trace, Stack) or the pack's own is drawing: it brings its own in,
+    // effect and out, so those rows rest (Paul, 2026-11-20: "unable to make any changes").
+    let designed = drawn_by.is_some() && design_problem.is_none();
+    // The notes wrap inside the value column; unwrapped, a long one widened the Inspector past
+    // the window and it vanished (Paul, 2026-11-20).
+    let note_w = (ui.available_width() - NOTE_INDENT).max(80.0);
     egui::Grid::new(("sb-text-style", id)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Theme");
         egui::ComboBox::from_id_salt(("sb-theme", id)).selected_text(selected).show_ui(ui, |ui| {
@@ -305,7 +311,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         ui.end_row();
         if let Some(missing) = style.missing_theme(&looks) {
             ui.label("");
-            ui.label(
+            note(
+                ui,
+                note_w,
                 egui::RichText::new(format!(
                     "“{}” isn't loaded: drawing {}. Import it (File › Import Theme…) or pick another.",
                     missing.as_str(),
@@ -336,7 +344,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         ui.end_row();
         if let Some(why) = &design_problem {
             ui.label("");
-            ui.label(
+            note(
+                ui,
+                note_w,
                 egui::RichText::new(format!("The design couldn't draw ({why}); the theme's words show instead."))
                     .small()
                     .color(crate::theme::WARN),
@@ -346,10 +356,13 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         // R-T7: a design brings its own moves and case.
         if let Some((name, role)) = drawn_by.as_ref().filter(|_| design_problem.is_none()) {
             ui.label("");
-            ui.label(
+            let whose = if style.design.is_some() { "the built-in".to_owned() } else { format!("the pack's {role}") };
+            note(
+                ui,
+                note_w,
                 egui::RichText::new(format!(
-                    "Drawn through the pack's {role} design “{name}”: its own moves and capitals apply. \
-                     In, Duration, Effect and Out below are used only if the design can't draw."
+                    "Drawn through {whose} design “{name}”: its own in, effect, out and capitals apply; \
+                     Duration sets how long it's up."
                 ))
                 .small()
                 .weak(),
@@ -388,16 +401,19 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             ui.end_row();
         }
         let theme_moves = style.look_with(&looks).motion;
+        let rest = "The design brings its own; pick the theme's own design (or None) to set this";
         ui.label("In").on_hover_text("How the text arrives");
-        let pick = move_combo(
-            ui,
-            ("sb-anim", id),
-            style.animation,
-            theme_moves.animation,
-            &TextAnimation::ALL,
-            TextAnimation::name,
-            TextAnimation::id,
-        );
+        let pick = resting(ui, designed, rest, |ui| {
+            move_combo(
+                ui,
+                ("sb-anim", id),
+                style.animation,
+                theme_moves.animation,
+                &TextAnimation::ALL,
+                TextAnimation::name,
+                TextAnimation::id,
+            )
+        });
         if let Some(v) = pick {
             style_edit = Some(json!({ "clip": id, "animation": v }));
         }
@@ -408,22 +424,25 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         }
         ui.end_row();
         ui.label("Effect").on_hover_text("What the text does while it is up");
-        let pick = move_combo(
-            ui,
-            ("sb-effect", id),
-            style.effect,
-            theme_moves.effect,
-            &TextEffect::ALL,
-            TextEffect::name,
-            TextEffect::id,
-        );
+        let pick = resting(ui, designed, rest, |ui| {
+            move_combo(
+                ui,
+                ("sb-effect", id),
+                style.effect,
+                theme_moves.effect,
+                &TextEffect::ALL,
+                TextEffect::name,
+                TextEffect::id,
+            )
+        });
         if let Some(v) = pick {
             style_edit = Some(json!({ "clip": id, "effect": v }));
         }
         ui.end_row();
         ui.label("Out").on_hover_text("How the text leaves at the end of its duration");
-        let pick =
-            move_combo(ui, ("sb-exit", id), style.exit, theme_moves.exit, &TextExit::ALL, TextExit::name, TextExit::id);
+        let pick = resting(ui, designed, rest, |ui| {
+            move_combo(ui, ("sb-exit", id), style.exit, theme_moves.exit, &TextExit::ALL, TextExit::name, TextExit::id)
+        });
         if let Some(v) = pick {
             style_edit = Some(json!({ "clip": id, "exit": v }));
         }
@@ -499,6 +518,28 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         format!("Up for the whole clip ({clip_secs:.1} s)")
     };
     ui.weak(caption);
+}
+
+/// The width of the Inspector's label column and the gap after it: what a note in the value
+/// column leaves of the section's width.
+const NOTE_INDENT: f32 = 72.0;
+
+/// A note in the value column, wrapped to `width`.
+fn note(ui: &mut Ui, width: f32, text: egui::RichText) {
+    ui.scope(|ui| {
+        ui.set_max_width(width);
+        ui.add(egui::Label::new(text).wrap());
+    });
+}
+
+/// A row that rests (drawn disabled, with `why` on hover) while `resting`.
+fn resting<R>(ui: &mut Ui, resting: bool, why: &str, add: impl FnOnce(&mut Ui) -> Option<R>) -> Option<R> {
+    let r = ui.add_enabled_ui(!resting, add);
+    if resting {
+        r.response.on_disabled_hover_text(why);
+        return None;
+    }
+    r.inner
 }
 
 /// The preview's longest run, in seconds, and the pause before it replays.

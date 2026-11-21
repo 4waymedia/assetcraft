@@ -311,6 +311,39 @@ fn exec_runs_engine_commands() {
 }
 
 #[test]
+fn working_sets_where_theme_packs_load_from() {
+    // A pack in a working folder of the user's own (theme-packs.md TP1–TP5): reachable with
+    // --working, for listing, naming in a new storyboard, and describe.
+    let tmp = TempDir::new("working");
+    let pack = tmp.0.join("Themes").join("acme");
+    std::fs::create_dir_all(&pack).unwrap();
+    let theme = json!({
+        "version": 1, "id": "acme", "name": "Acme",
+        "color": { "background": "#101418", "surface": "#1C232B", "text": "#FFFFFF", "muted": "#9AA4AE", "accent": "#FF3FAE" },
+        "type": { "display": { "family": "Inter", "weight": 700 }, "body": { "family": "Inter" },
+                  "scale": { "card": 0.09, "overlay": 0.06 } }
+    });
+    std::fs::write(pack.join("theme.json"), theme.to_string()).unwrap();
+    let working = tmp.path("");
+    let themes = json_of(&["exec", "storyboard.themes", "--working", &working]);
+    let yours: Vec<&str> = themes["themes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["source"] == "pack")
+        .filter_map(|t| t["id"].as_str())
+        .collect();
+    assert_eq!(yours, ["acme"], "{themes}");
+    let new = json_of(&["exec", "storyboard.new", r#"{"sample":true,"titleTheme":"acme"}"#, "--working", &working]);
+    assert!(new["titlesThemed"].as_u64().unwrap() > 0);
+    let style = json_of(&["describe", "storyboard.text.style", "--working", &working]);
+    assert_eq!(style["id"], "storyboard.text.style");
+    // A file isn't a working folder.
+    std::fs::write(tmp.0.join("a-file"), b"x").unwrap();
+    assert_eq!(code(&["exec", "storyboard.themes", "--working", &tmp.path("a-file")]), Some(1));
+}
+
+#[test]
 fn exec_errors_exit_two() {
     assert_eq!(code(&["exec", "nav.nowhere"]), Some(2));
     assert_eq!(code(&["exec", "view.sort", r#"{"by":"colour"}"#, "--dir", &lib("")]), Some(2));
