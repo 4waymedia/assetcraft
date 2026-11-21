@@ -27,7 +27,8 @@ pub use draw::Rgba;
 use assetcraft_fs::Services;
 use assetcraft_mesh::{RenderOptions, View};
 use assetcraft_storyboard::{
-    AnimFrame, Camera, Clip, Corner, Inset, InsetKind, InsetSize, MotionKind, ShotType, Storyboard, TextKind, Ticks,
+    AnimFrame, BackgroundLayer, Camera, Clip, Corner, Inset, InsetKind, InsetSize, MotionKind, PlateLayer, Renderer,
+    ShotType, Storyboard, TextKind, Ticks, Title,
 };
 use assetcraft_thumbs::model::{Model, load_model, render_view};
 use assetcraft_thumbs::{DecodeOptions, ThumbError, ThumbKey};
@@ -119,6 +120,20 @@ pub struct ThemeDesign {
     /// Names this version of the design (a hash of the bytes it was read from, TP4c): an edited
     /// design is a new one in the Viewer's cache. 0 for a built-in.
     pub stamp: u64,
+}
+
+/// A card's background layer: the theme's backdrop and card decor, or the theme's colour as a
+/// scrim over the clip's own picture.
+fn draw_background(out: &mut Rgba, look: &assetcraft_storyboard::Look, bg: BackgroundLayer) {
+    match bg {
+        BackgroundLayer::Scrim { alpha } => draw::tint(out, rgb(look.background), alpha),
+        BackgroundLayer::Theme => {
+            draw::backdrop(out, &look.backdrop);
+            for r in assetcraft_storyboard::card_decor(look, out.width as f32, out.height as f32) {
+                draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha);
+            }
+        }
+    }
 }
 
 /// The design role a text kind draws through.
@@ -546,53 +561,54 @@ impl Compositor {
         set.clone().unwrap_or_else(|| self.fonts.clone())
     }
 
+    /// A text clip's title (L2): its layers from `title_of`, bottom to top — the background,
+    /// then an EffectCraft effect that draws the whole title, or else the plate and the words
+    /// with their in-app moves. A design that fails falls back to the theme's own layers, and
+    /// the export lists why.
     fn paint_text(&mut self, out: &mut Rgba, clip: &Clip, elapsed: f64) {
-        let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
-        let style = clip.text_style;
-        let fonts = self.fonts_for(&style);
-        let look = style.look_with(&self.user_looks);
-        let anim = style.frame_at_with(&self.user_looks, elapsed, clip.duration.as_secs_f64());
-        if kind == TextKind::Card {
-            if clip.background().is_some() {
-                // Over a background asset the theme colour is a scrim, so the image shows.
-                draw::tint(out, rgb(look.background), assetcraft_storyboard::SCRIM_ALPHA);
-            } else {
-                draw::backdrop(out, &look.backdrop);
-                for r in assetcraft_storyboard::card_decor(&look, out.width as f32, out.height as f32) {
-                    draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha);
-                }
-            }
+        let Some(words) = clip.text() else { return };
+        let Some(title) = title_of(&self.designs, &self.user_looks, clip) else { return };
+        if let Some(bg) = title.background {
+            draw_background(out, &title.look, bg);
         }
-        // A pack design for this role draws instead of the theme's words (TP2a-3); if it can't,
-        // the words draw as before and the export lists why.
-        if let Some(d) = find_design(&self.designs, clip) {
-            let shown = style.shown_secs(clip.duration.as_secs_f64());
+        let title = if title.renderer() == Renderer::EffectCraft {
+            // A built-in banner or a pack design takes the words (TP2a-3, TP2b-2).
+            let Some(d) = find_design(&self.designs, clip) else { return };
+            let shown = clip.text_style.shown_secs(clip.duration.as_secs_f64());
             match self.draw_design(out, &d, words, elapsed, shown) {
                 Ok(()) => return,
                 Err(e) => {
                     self.failed.insert(d.path.clone(), e);
                 }
             }
-        }
+            // Its theme's own layers instead.
+            let Some(own) = assetcraft_storyboard::title(clip, &self.user_looks, |_| false) else { return };
+            own
+        } else {
+            title
+        };
+        let anim = clip.text_style.frame_at_with(&self.user_looks, elapsed, clip.duration.as_secs_f64());
+        let fonts = self.fonts_for(&clip.text_style);
+        self.draw_words(out, &title, words, &anim, &fonts);
+    }
+
+    /// The title's plate (overlays), the words' decor and finish, and the words, as `anim`
+    /// moves them.
+    fn draw_words(&self, out: &mut Rgba, t: &Title, words: &str, anim: &AnimFrame, fonts: &text::Fonts) {
+        let (kind, look) = (t.kind, &t.look);
         // Past its duration (and its out) the words are gone; a Card keeps its background.
         if words.trim().is_empty() || anim.is_hidden() {
             return;
         }
         let (w, h) = (self.width as f32, self.height as f32);
-        let size = match kind {
-            TextKind::Card => look.card_size,
-            TextKind::Overlay => look.overlay_size,
-        };
+        let size = t.text.size;
         let height = (h * size * anim.scale).clamp(6.0, h);
-        let shown = shown_text(words, look.uppercase, &anim);
-        let full = shown_text(words, look.uppercase, &AnimFrame::REST);
+        let shown = shown_text(words, t.text.uppercase, anim);
+        let full = shown_text(words, t.text.uppercase, &AnimFrame::REST);
         let wrap = w * if kind == TextKind::Card { 0.8 } else { 0.6 };
         let tracking = look.tracking * height;
         let color = rgb(look.text);
-        let (ax, ay, align) = match kind {
-            TextKind::Card => (0.5, 0.5, 0),
-            TextKind::Overlay => style.position.anchor(),
-        };
+        let (ax, ay, align) = t.text.position.anchor();
         // Place by the finished text's size so a typewriter doesn't drift as it types.
         let block = fonts.measure(&full, height, tracking, wrap);
         let anchor_x = w * ax;
@@ -604,8 +620,8 @@ impl Compositor {
         let top = h * ay - block[1] / 2.0 + anim.offset_y * h;
         if kind == TextKind::Overlay {
             let pad = [height * 0.45, height * 0.25];
-            match look.plate {
-                Some((fill, alpha)) => {
+            match t.plate {
+                Some(PlateLayer { color: fill, alpha }) => {
                     let a = (f32::from(alpha) / 255.0 * anim.alpha).clamp(0.0, 1.0);
                     draw::rect(
                         out,
@@ -633,11 +649,11 @@ impl Compositor {
             }
         }
         let pad = [height * 0.45, height * 0.25];
-        for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block[0], block[1]], h, pad) {
+        for r in assetcraft_storyboard::text_decor(look, kind, [left, top, block[0], block[1]], h, pad) {
             draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha * anim.alpha);
         }
         // Shadow, outline or glow: the same words, under them (themes 1f).
-        for p in assetcraft_storyboard::finish_passes(&look, height) {
+        for p in assetcraft_storyboard::finish_passes(look, height) {
             let a = p.alpha * anim.alpha;
             fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
         }

@@ -1,4 +1,4 @@
-_2026-11-20 · Stage 4 (Storyboard) → suite · hybrid decided by Paul (D-M1a); TD1 decided; M1b, M1c, TP1–TP5 built (TP5b–c dropped); R-T15–R-T17 closed; title layers L1 built (§7)_
+_2026-11-20 · Stage 4 (Storyboard) → suite · hybrid decided by Paul (D-M1a); TD1 decided; M1b, M1c, TP1–TP5 built (TP5b–c dropped); R-T15–R-T17 closed; title layers L1–L2 built (§7)_
 
 - **Scope:** theme packs. A user designs branded title pieces in EffectCraft (a card, a banner,
   later a lower third and an end card), saves them as templates in a pack beside a
@@ -226,7 +226,7 @@ Title::renderer() -> InApp | EffectCraft
 | Step | What | Test |
 | ---- | ---- | ---- |
 | L1 | **Built 2026-11-20.** The model and `storyboard::title(clip, looks, can_draw)`; `animatic::title_of(set, looks, clip)` answers `can_draw` from the loaded designs; `storyboard.title {clip}` shows it (read only, for the CLI and automation). R-T19a's box renamed to the title's `area` (`TextBox`, `storyboard.text.area`). Nothing draws from it yet | Storyboard: card, picture scrim, overlay plate and position, typewriter per letter, still = no effect, built-in, not loaded, `none`, pack design for its role only, the area, the JSON. Animatic: for every pick, with and without a pack, card and overlay, the model's renderer is EffectCraft exactly when `find_design` finds a design. Engine: the command's layers, renderer and area |
-| L2 | The export draws through the layers (`Compositor::paint_text` walks them) | Export pixels identical before and after |
+| L2 | **Built 2026-11-20.** The export draws through the layers: `Compositor::paint_text` takes `title_of`, draws the background layer (`draw_background`), then an EffectCraft effect for the whole title, or else the plate and the words with their in-app moves (`draw_words`, reading the text layer's size, case and position and the plate layer); a design that fails falls back to the theme's own layers (`title(.., \|_\| false)`) and is listed. `SCRIM_ALPHA` shared | 1,704 frames (8 themes × card, pictured card, overlay × 5 positions × 3 ins × still / timed × 5 times, plus built-in, missing built-in, none and pack designs on cards and overlays) hashed before and after: identical. Existing animatic and export tests unchanged |
 | L3 | The Viewer draws titles with the same code (frames on a background thread, as designs are); the egui copy of the words retires (R-T20) | Viewer frame equals export frame |
 | L4 | `area` places every title: the words in a built-in look (wrap to the width, size from the height, aligned), the built-in banners built in the box (R-T19b), a pack design scaled whole into it (shape kept); a full-frame pack card keeps its frame | Box tests for a look, a banner and a pack design |
 | L5 | The Inspector: a section per layer; Align, Width, Height, Vertical, **Center**, **Reset** | UI test |
