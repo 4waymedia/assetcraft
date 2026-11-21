@@ -123,10 +123,21 @@ pub struct ThemeDesign {
 
 /// The design role a text kind draws through.
 pub fn design_role(kind: TextKind) -> &'static str {
-    match kind {
-        TextKind::Card => "card",
-        TextKind::Overlay => "banner",
-    }
+    assetcraft_storyboard::design_role(kind)
+}
+
+/// `clip`'s title as layers (L1), with the packs' designs this set holds.
+pub fn title_of(
+    set: &DesignSet,
+    looks: &assetcraft_storyboard::UserLooks,
+    clip: &Clip,
+) -> Option<assetcraft_storyboard::Title> {
+    use assetcraft_storyboard::EffectKind;
+    assetcraft_storyboard::title(clip, looks, |kind| match kind {
+        EffectKind::Built { effect } => set.builtins.iter().any(|(id, _)| id == effect.id()),
+        EffectKind::Design { theme, role } => set.packs.iter().any(|d| d.theme == *theme && d.role == *role),
+        EffectKind::InApp { .. } => true,
+    })
 }
 
 /// Every design a clip can draw through (TP2b-2): the loaded packs' own, the built-in banners,
@@ -544,7 +555,7 @@ impl Compositor {
         if kind == TextKind::Card {
             if clip.background().is_some() {
                 // Over a background asset the theme colour is a scrim, so the image shows.
-                draw::tint(out, rgb(look.background), 0.35);
+                draw::tint(out, rgb(look.background), assetcraft_storyboard::SCRIM_ALPHA);
             } else {
                 draw::backdrop(out, &look.backdrop);
                 for r in assetcraft_storyboard::card_decor(&look, out.width as f32, out.height as f32) {

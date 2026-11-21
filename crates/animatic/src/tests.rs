@@ -766,3 +766,44 @@ fn a_short_text_plays_its_designs_in_and_out_whole() {
         assert!((at(1.0, 5.9) - 1.0).abs() < 0.05 && (at(5.4, 5.9) - 5.5).abs() < 0.05);
     }
 }
+
+/// L1: the title model and the renderers agree on what draws a clip: EffectCraft exactly when
+/// `find_design` finds a design, for every pick, a pack theme with and without a design for
+/// the role, and a set missing a built-in.
+#[test]
+fn the_title_model_names_the_renderer_the_compositor_uses() {
+    use assetcraft_storyboard::{DesignPick, Renderer, ThemeId, UserLooks};
+    let laser =
+        Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap());
+    let acme = ThemeId::new("acme-brand").unwrap();
+    let set = crate::DesignSet {
+        packs: vec![crate::ThemeDesign {
+            theme: acme,
+            role: "banner".into(),
+            path: "Themes/acme-brand/designs/banner.ectemplate".into(),
+            design: Arc::clone(&laser),
+            fill: assetcraft_titles::Fill::default(),
+            stamp: 0,
+        }],
+        builtins: vec![("banner-laser-trace".into(), laser)],
+        ..crate::DesignSet::default()
+    };
+    let looks = UserLooks::new([("acme-brand", assetcraft_storyboard::TextTheme::Bold.look())]);
+    let mut over = clip(5, ShotType::Ws, 6);
+    over.overlay = Some("ISTANBUL".into());
+    let mut card = clip(6, ShotType::Ttl, 2);
+    card.description = "ACME".into();
+    for base in [over, card] {
+        for theme in [None, Some(acme)] {
+            for pick in [None, Some(DesignPick::None), Some(DesignPick::LaserTrace), Some(DesignPick::Stack)] {
+                let mut c = base.clone();
+                c.text_style.theme_id = theme;
+                c.text_style.design = pick;
+                let t = crate::title_of(&set, &looks, &c).expect("a title");
+                let expected =
+                    if crate::find_design(&set, &c).is_some() { Renderer::EffectCraft } else { Renderer::InApp };
+                assert_eq!(t.renderer(), expected, "{:?} {theme:?} {pick:?}", c.text_kind());
+            }
+        }
+    }
+}

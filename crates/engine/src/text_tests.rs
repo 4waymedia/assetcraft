@@ -265,3 +265,64 @@ fn style_picks_a_design_for_the_text() {
     assert!(s.execute("storyboard.text.style", &json!({"clip": 1, "design": "poster"})).is_err());
     assert!(s.execute("storyboard.text.style", &json!({"clip": 1, "design": 3})).is_err());
 }
+
+/// R-T19: a title's area, in percent of the frame; dead centre; back to where it falls by
+/// itself. Each change is one undo step; a no-op and a refusal are none.
+#[test]
+fn a_text_area_moves_and_sizes_the_title() {
+    let mut s = session();
+    let undo = s.boards.undo_len();
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "align": "right", "width": 40}));
+    assert_eq!(r["changed"], true);
+    assert_eq!(r["area"], json!({"align": "right", "width": 40.0, "height": 21.9, "y": 77.2}), "from the design's own");
+    assert_eq!(r["from"], json!({"align": "left", "width": 57.3, "height": 21.9, "y": 77.2}));
+    assert_eq!(s.boards.undo_len(), undo + 1);
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "center": true}));
+    assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 21.9, "y": 50.0}), "keeps its size");
+    // Too tall and too low: clamped inside the title-safe area.
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "height": 90, "y": 100}));
+    assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 60.0, "y": 65.0}));
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "height": 90, "y": 100}));
+    assert_eq!(r["changed"], false);
+    assert_eq!(s.boards.undo_len(), undo + 3, "a no-op is no undo step");
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "reset": true}));
+    assert_eq!((r["changed"].as_bool(), r["area"].is_null()), (Some(true), true));
+    assert!(first(&s).text_style.area.is_none());
+    for bad in [
+        json!({"clip": 1}),
+        json!({"clip": 1, "align": "middle"}),
+        json!({"clip": 1, "width": 120}),
+        json!({"clip": 1, "y": "low"}),
+        json!({"clip": 1, "reset": true, "width": 30}),
+        json!({"clip": 2, "width": 30}),
+    ] {
+        assert!(s.execute("storyboard.text.area", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(s.boards.undo_len(), undo + 4);
+    // Undo walks back: the reset, then the clamp, ...
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(first(&s).text_style.area.map(|b| b.y), Some(650));
+}
+
+/// L1: `storyboard.title` shows a clip's title as layers, and who draws it.
+#[test]
+fn title_shows_a_clips_layers_and_renderer() {
+    let mut s = session();
+    let r = run(&mut s, "storyboard.title", json!({"clip": 1}));
+    assert_eq!(
+        (r["clip"].as_u64(), r["kind"].as_str(), r["renderer"].as_str()),
+        (Some(1), Some("card"), Some("inApp"))
+    );
+    assert_eq!(r["background"]["kind"], "theme");
+    assert!(r["plate"].is_null() && r["area"].is_null(), "{r}");
+    assert_eq!(r["effects"][0]["kind"]["kind"], "inApp");
+    run(&mut s, "storyboard.text.style", json!({"clip": 1, "design": "banner-stack"}));
+    run(&mut s, "storyboard.text.area", json!({"clip": 1, "center": true}));
+    let r = run(&mut s, "storyboard.title", json!({"clip": 1}));
+    assert_eq!(r["renderer"], "effectCraft");
+    assert_eq!(r["effects"][0]["kind"], json!({"kind": "built", "effect": "stack"}));
+    assert_eq!(r["text"]["byEffect"], true);
+    assert_eq!(r["area"], json!({"align": "center", "width": 57.3, "height": 21.9, "y": 50.0}), "in percent, as set");
+    assert!(s.execute("storyboard.title", &json!({"clip": 2})).is_err(), "a shot has no title");
+    assert!(s.execute("storyboard.title", &json!({"clip": 999})).is_err());
+}

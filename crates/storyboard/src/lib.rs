@@ -40,6 +40,7 @@ pub mod template;
 pub mod text;
 pub mod theme;
 pub mod time;
+pub mod title;
 pub mod validate;
 
 pub use analyse::{ANALYZER, AnalyseError, FIT_TARGETS, TrackFacts, cue_map};
@@ -80,9 +81,9 @@ pub use template::{
     bundled_with as bundled_template_with, credits as credits_template,
 };
 pub use text::{
-    AnimFrame, Backdrop, DesignPick, KindChange, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextError,
-    TextExit, TextKind, TextPosition, TextStyle, TextTheme, ThemeChoice, ThemeId, Timing, UserLooks, accent_bar,
-    set_text_design, set_text_kind, set_text_style, set_text_timing,
+    AnimFrame, Backdrop, BoxAlign, DesignPick, KindChange, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox,
+    TextEffect, TextError, TextExit, TextKind, TextPosition, TextStyle, TextTheme, ThemeChoice, ThemeId, Timing,
+    UserLooks, accent_bar, set_text_area, set_text_design, set_text_kind, set_text_style, set_text_timing,
 };
 pub use theme::{
     ASSET_LICENSES, ASSET_ROLES, BUNDLED_FONTS, Background, BackgroundKind, DESIGN_ROLES, DESIGN_SUFFIX, DESIGNS_DIR,
@@ -90,6 +91,10 @@ pub use theme::{
     contrast, design_path, luminance, pack_path, parse_color,
 };
 pub use time::{Bpm, TICKS_PER_SECOND, Ticks};
+pub use title::{
+    BackgroundLayer, BuiltEffect, EffectKind, EffectLayer, Per, PlateLayer, Renderer, SCRIM_ALPHA, Target, TextLayer,
+    Title, design_role, title,
+};
 pub use validate::{BoardError, FORMAT_VERSION, Limits};
 
 /// Crate name, used by `assetcraft-cli --version` and the about box.

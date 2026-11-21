@@ -7,8 +7,9 @@
 use crate::storyboard::{clip_id, no_board};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{
-    DesignPick, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect, TextExit, TextKind, TextPosition, TextTheme,
-    ThemeChoice, ThemeId, set_text_design, set_text_kind, set_text_style, set_text_timing,
+    BoxAlign, DesignPick, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox, TextEffect, TextExit, TextKind,
+    TextPosition, TextTheme, ThemeChoice, ThemeId, set_text_area, set_text_design, set_text_kind, set_text_style,
+    set_text_timing,
 };
 use serde_json::{Value, json};
 
@@ -134,6 +135,92 @@ pub(crate) fn sb_text_style(s: &mut Session, p: &Value) -> CmdResult {
         "exit": t.exit.id(),
         "fromTheme": from_theme,
     }))
+}
+
+/// `storyboard.text.area {clip, align?, width?, height?, y?, center?, reset?}` (R-T19): where a
+/// clip's title sits and its size (its `area`), in percent of the frame. Starts from the clip's
+/// area, or `from` (the built-in banners' box); `center` puts it dead centre; `reset` lets the
+/// title fall where it does by itself. Values are clamped so the area stays inside the title-safe area. One undo step.
+pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
+    let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
+    let flag = |key: &str| -> Result<bool, CmdError> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(false),
+            Some(v) => v.as_bool().ok_or_else(|| CmdError::BadParams(format!("`{key}` must be true or false"))),
+        }
+    };
+    let percent = |key: &str| -> Result<Option<u16>, CmdError> {
+        match p.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v
+                .as_f64()
+                .filter(|v| v.is_finite() && (0.0..=100.0).contains(v))
+                .map(|v| Some((v * 10.0).round() as u16))
+                .ok_or_else(|| CmdError::BadParams(format!("`{key}` must be a percent of the frame, 0–100"))),
+        }
+    };
+    let align = parse(p, "align", BoxAlign::from_id, "left|center|right")?;
+    let (width, height, y) = (percent("width")?, percent("height")?, percent("y")?);
+    let (center, reset) = (flag("center")?, flag("reset")?);
+    if reset && (align.is_some() || width.is_some() || height.is_some() || y.is_some() || center) {
+        return Err(CmdError::BadParams("`reset` lets the title fall where it does by itself; give it alone".into()));
+    }
+    if !reset && !center && align.is_none() && width.is_none() && height.is_none() && y.is_none() {
+        return Err(CmdError::BadParams(
+            "give at least one of `align`, `width`, `height`, `y`, `center`, `reset`".into(),
+        ));
+    }
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let current = board.clip(id).and_then(|c| c.text_style.area);
+    let area = if reset {
+        None
+    } else {
+        let mut b = current.unwrap_or(TextBox::BANNER);
+        if center {
+            b = b.centered();
+        }
+        b.align = align.unwrap_or(b.align);
+        b.width = width.unwrap_or(b.width);
+        b.height = height.unwrap_or(b.height);
+        b.y = y.unwrap_or(b.y);
+        Some(b)
+    };
+    let changed = set_text_area(&mut board, id, area).map_err(|e| CmdError::BadParams(e.to_string()))?;
+    let area = board.clip(id).and_then(|c| c.text_style.area);
+    if changed {
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({
+        "clip": id.0,
+        "changed": changed,
+        "area": area.map(area_json),
+        "from": area_json(TextBox::BANNER),
+    }))
+}
+
+/// `storyboard.title {clip}` (L1): the clip's title as layers — area, background, plate, text,
+/// effects — and who draws it. Read only.
+pub(crate) fn sb_title(s: &mut Session, p: &Value) -> CmdResult {
+    let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
+    let board = s.storyboard().ok_or_else(no_board)?;
+    let clip = board.clip(id).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", id.0)))?;
+    let designs = s.theme_designs();
+    let title = assetcraft_animatic::title_of(&designs, s.user_looks(), clip)
+        .ok_or_else(|| CmdError::BadParams(format!("clip #{} has no text (only title cards and overlays do)", id.0)))?;
+    let mut out = serde_json::to_value(&title).map_err(|e| CmdError::Unavailable(e.to_string()))?;
+    if let Some(o) = out.as_object_mut() {
+        o.insert("clip".into(), json!(id.0));
+        o.insert("renderer".into(), json!(title.renderer()));
+        o.insert("area".into(), title.area.map_or(Value::Null, area_json));
+    }
+    Ok(out)
+}
+
+/// An area in percent of the frame, as the command takes it.
+fn area_json(b: TextBox) -> Value {
+    let pct = |v: u16| f64::from(v) / 10.0;
+    json!({ "align": b.align.id(), "width": pct(b.width), "height": pct(b.height), "y": pct(b.y) })
 }
 
 /// `theme`: a built-in's id, or a loaded user theme's (TP2a-2).

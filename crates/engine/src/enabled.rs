@@ -42,6 +42,7 @@ impl Session {
             | "storyboard.place"
             | "storyboard.text.kind"
             | "storyboard.text.style"
+            | "storyboard.text.area"
             | "storyboard.motion"
             | "storyboard.resize"
             | "storyboard.roll"

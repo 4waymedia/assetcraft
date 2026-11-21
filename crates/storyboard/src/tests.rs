@@ -1759,6 +1759,43 @@ fn a_clip_picks_its_design_and_the_default_is_not_written() {
 }
 
 #[test]
+fn a_clip_places_and_sizes_its_title_area_inside_the_title_safe_area() {
+    use crate::{BoxAlign, TextBox, set_text_area};
+    for a in BoxAlign::ALL {
+        assert_eq!(BoxAlign::from_id(a.id()), Some(a));
+    }
+    // The built-ins' own geometry, in thousandths of 1920 x 1080.
+    let d = TextBox::BANNER;
+    let pm = |px: u32, of: u32| ((px * 1000 + of / 2) / of) as u16;
+    assert_eq!((d.width, d.height, d.y), (pm(1100, 1920), pm(236, 1080), pm(1080 - 128 - 118, 1080)));
+    assert_eq!(d.clamped(), d, "the design's own is in range");
+    let c = d.centered();
+    assert_eq!((c.align, c.y, c.width, c.height), (BoxAlign::Center, 500, d.width, d.height));
+    // Out of range: sizes clamp, and the middle keeps the whole area inside the safe area.
+    let wild = TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0 }.clamped();
+    assert_eq!((wild.width, wild.height, wild.y), (900, 80, 90));
+    let low = TextBox { y: 1000, height: 600, ..d }.clamped();
+    assert_eq!(low.y, 650);
+    let mut board = crate::sample::sample();
+    let id = board.clips.iter().find(|c| c.text_kind().is_some()).map(|c| c.id).expect("a text clip");
+    assert!(set_text_area(&mut board, id, Some(TextBox { y: 2000, ..c })).unwrap());
+    assert_eq!(
+        board.clip(id).unwrap().text_style.area.map(|b| b.y),
+        Some(1000 - 50 - 110),
+        "stored clamped (half of 219, rounded up)"
+    );
+    assert!(!set_text_area(&mut board, id, Some(TextBox { y: 2000, ..c })).unwrap(), "no change");
+    let style = board.clip(id).unwrap().text_style;
+    let json = serde_json::to_string(&style).unwrap();
+    assert!(json.contains(r#""area":{"align":"center","width":573,"height":219,"y":840}"#), "{json}");
+    assert_eq!(serde_json::from_str::<TextStyle>(&json).unwrap(), style);
+    assert!(set_text_area(&mut board, id, None).unwrap());
+    assert!(!serde_json::to_string(&board.clip(id).unwrap().text_style).unwrap().contains("area"));
+    let shot = board.clips.iter().find(|c| c.text_kind().is_none()).map(|c| c.id).expect("a shot");
+    assert!(set_text_area(&mut board, shot, Some(d)).is_err(), "only text clips");
+}
+
+#[test]
 fn theme_assets_follow_the_pack_rules_and_a_bad_one_is_only_a_warning() {
     use crate::{Theme, ThemeAsset, asset_rule};
     let a = |role: &str, path: &str, license: &str, credit: Option<&str>| ThemeAsset {
@@ -1887,4 +1924,75 @@ fn credits_take_more_attribution_lines_under_the_songs() {
         board.clips.last().unwrap().description,
         "Film\nMusic: Sample track\nSting by Jo · CC BY 4.0\nintro.mp4 · CC BY 4.0\nMade with AssetCraft"
     );
+}
+
+/// L1: a text clip's title as layers, resolved from its style over its theme.
+#[test]
+fn a_text_clips_title_resolves_into_layers() {
+    use crate::{
+        BackgroundLayer, BuiltEffect, DesignPick, EffectKind, Per, PlateLayer, Renderer, Target, TextAnimation,
+        TextEffect, TextExit, TextKind, TextPosition, TextTheme, ThemeId, UserLooks, title,
+    };
+    let none = UserLooks::default();
+    let all = |_: &EffectKind| true;
+    let board = crate::sample::sample();
+    let card = board.clips.iter().find(|c| c.text_kind() == Some(TextKind::Card)).cloned().expect("a card");
+    let shot = board.clips.iter().find(|c| c.text_kind().is_none()).cloned().expect("a shot");
+    assert!(title(&shot, &none, all).is_none(), "a shot has no title");
+    // A card: the theme's backdrop, no plate, centred words, the theme's in-app moves.
+    let t = title(&card, &none, all).unwrap();
+    let look = card.text_style.look_with(&none);
+    assert_eq!((t.kind, t.background, t.plate, t.area), (TextKind::Card, Some(BackgroundLayer::Theme), None, None));
+    assert_eq!((t.text.position, t.text.size, t.text.by_effect), (TextPosition::Center, look.card_size, false));
+    assert_eq!(t.renderer(), Renderer::InApp);
+    let m = look.motion;
+    assert_eq!(t.effects.len(), 1);
+    assert_eq!(
+        (t.effects[0].target, t.effects[0].per, &t.effects[0].kind),
+        (Target::Text, Per::Whole, &EffectKind::InApp { animation: m.animation, effect: m.effect, exit: m.exit })
+    );
+    // Its own picture: the theme's colour as a scrim over it.
+    let mut pictured = card.clone();
+    pictured.set_assets(vec![crate::AssetId("/p/bg.png".into())]);
+    assert_eq!(title(&pictured, &none, all).unwrap().background, Some(BackgroundLayer::Scrim { alpha: 0.35 }));
+    // An overlay on Bold: no background, Bold's plate, its position; a typewriter goes a letter at a time.
+    let mut over = shot.clone();
+    over.overlay = Some("Over".into());
+    over.text_style.theme = TextTheme::Bold;
+    over.text_style.position = TextPosition::Top;
+    over.text_style.animation = Some(TextAnimation::Typewriter);
+    let t = title(&over, &none, all).unwrap();
+    assert_eq!((t.background, t.plate), (None, Some(PlateLayer { color: 0xe5243b, alpha: 235 })));
+    assert_eq!((t.text.position, t.effects[0].per), (TextPosition::Top, Per::Letter));
+    // Standing still: nothing moves, no effect.
+    over.text_style.animation = Some(TextAnimation::None);
+    over.text_style.effect = Some(TextEffect::None);
+    over.text_style.exit = Some(TextExit::None);
+    assert!(title(&over, &none, all).unwrap().effects.is_empty());
+    // A built-in banner: drawn by EffectCraft, the words go to it, no theme plate.
+    over.text_style.design = Some(DesignPick::Stack);
+    let t = title(&over, &none, all).unwrap();
+    assert_eq!(t.effects[0].kind, EffectKind::Built { effect: BuiltEffect::Stack });
+    assert_eq!(
+        (t.effects[0].target, t.text.by_effect, t.plate, t.renderer()),
+        (Target::Whole, true, None, Renderer::EffectCraft)
+    );
+    // Not loaded: the theme's words.
+    assert_eq!(title(&over, &none, |_| false).unwrap().renderer(), Renderer::InApp);
+    over.text_style.design = Some(DesignPick::None);
+    assert_eq!(title(&over, &none, all).unwrap().renderer(), Renderer::InApp);
+    // A pack theme: its own design for the role when loaded, else its words.
+    over.text_style.design = None;
+    let acme = ThemeId::new("acme").unwrap();
+    over.text_style.theme_id = Some(acme);
+    let t = title(&over, &none, all).unwrap();
+    assert_eq!(t.effects[0].kind, EffectKind::Design { theme: acme, role: "banner" });
+    let only_cards = |k: &EffectKind| matches!(k, EffectKind::Design { role: "card", .. });
+    assert_eq!(title(&over, &none, only_cards).unwrap().renderer(), Renderer::InApp);
+    // Its area comes with it; the JSON the CLI shows names every layer.
+    over.text_style.area = Some(crate::TextBox::BANNER.centered());
+    let json = serde_json::to_value(title(&over, &none, all).unwrap()).unwrap();
+    assert_eq!(json["area"]["align"], "center");
+    assert_eq!(json["effects"][0]["kind"]["kind"], "design");
+    assert!(json.get("look").is_none());
 }

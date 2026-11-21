@@ -61,6 +61,10 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // `assetcraft-cli analyze --cuemap` and automation; the app analyses through storyboard.analyse.
     "track.analyze",
     "storyboard.text.style",
+    // The Inspector's area controls (R-T19).
+    "storyboard.text.area",
+    // The title as layers (L1), for the CLI and automation; the Inspector reads it in L5.
+    "storyboard.title",
     // The Inspector's Design row: "Edit in EffectCraft…" (TP4c-1) and "Save into Template" (TP4c-2).
     "storyboard.editDesign",
     "storyboard.saveDesign",

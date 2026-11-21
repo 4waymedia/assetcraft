@@ -1,4 +1,4 @@
-_2026-11-19 · Stage 4 (Storyboard) → suite · hybrid decided by Paul (D-M1a); TD1 decided; M1b, M1c, TP1, TP2, TP3, TP4 and TP5 built (TP5b–c dropped); R-T15 and R-T16 closed_
+_2026-11-20 · Stage 4 (Storyboard) → suite · hybrid decided by Paul (D-M1a); TD1 decided; M1b, M1c, TP1–TP5 built (TP5b–c dropped); R-T15–R-T17 closed; title layers L1 built (§7)_
 
 - **Scope:** theme packs. A user designs branded title pieces in EffectCraft (a card, a banner,
   later a lower third and an end card), saves them as templates in a pack beside a
@@ -192,4 +192,47 @@ or leaving it out. One pack's designs follow its theme file, so changing a colou
 | R-T16 | Every design's in and out were taken as its first and last 2 s; a design whose in or out is longer was squeezed | R-T15 | Designs that keep their own timing | **Built 2026-11-20:** `titles::Design::phases()` reads the comp's markers (`HOLD_MARKER` = `hold`, its duration ending the hold; `OUT_MARKER` = `out`; any case; one outside the design or a hold after the out ignored); `animatic::design_edges` uses them, 2 s (a third at most) for an end not marked. The built-ins are marked (Laser Trace rests once its detail line has decoded, Stack once its seams close; both leave at 4.4 s). The in and out play at their own speed while the hold keeps a third of the text; only then do they speed up together. README: the marker convention for pack authors | Claude | closed 2026-11-20 |
 | R-T17 | Picking Laser Trace or Stack for a title pushed the Inspector off the window (Paul, 2026-11-20: "unable to make any changes to the card after"): the design's note was one unwrapped line in the style grid, so the 300 px panel grew to ~600 px and was laid out past the right edge | TP2b-2 | A Design pick that can be changed back | **Built 2026-11-20:** the notes wrap in the value column (`text_view::note`); while a design draws, In, Effect and Out are disabled, with a tooltip (`text_view::resting`; R-T7), and Duration stays live; the note names a built-in as built-in. Test: `a_card_picks_a_built_in_banner_design` asserts the panel's width and position for both designs (it fails without the fix, at x = 1430 in a 1360 px window). Screenshot: `AC_DESIGN=1` | Claude | closed 2026-11-20 |
 | R-T18 | A built-in design's own fields can't be set per clip: Stack and Laser Trace show their placeholder caption ("DETAIL · 00:00 HRS"), and a two-line title is cut to the headline's width | TP2b | A design's options in the Inspector (Paul, 2026-11-20: "have access to the options for that effect") | **Proposed TP6a:** `TextStyle.design_fields: Vec<(String, String)>` (control name → text); `storyboard.text.designField {clip, control, value \| "theme"}`, one undo step; the Inspector lists the design's Text controls (`Design::controls()`) under Design; export and Viewer pass them in `Fill` | Claude | open, next step |
+| R-T19 | A built-in banner is one fixed box (1100 × 236 px of 1920 × 1080, lower left), so a long title runs past it ("How to <do the thing>") and no title can be moved | TP2b-2 | Titles a user places and sizes (Paul, 2026-11-20: "slide the width, the height, and the placement … alignment left\|right\|center … a button for dead center"; "these controls should apply to all") | **R-T19a built 2026-11-20:** `storyboard::TextBox {align, width, height, y}` in ‰ of the frame (`BANNER` = the built-in banners' box; `clamped` keeps it inside the title-safe area), `BoxAlign`, `TextStyle.area` (unset = where the title falls by itself; written only when set), `set_text_area`; `storyboard.text.area {clip, align?, width?, height?, y?, center?, reset?}` in percent, one undo step. Drawing it for every title is L4, its controls L5 (§7) | Claude | R-T19a built; drawn in L4 |
+| R-T20 | The words of a built-in look are drawn twice: by egui in the Viewer (`text_view::paint_text`) and by AssetCraft's renderer in the export (`Compositor::paint_text`); whether a design draws is decided in three places (`animatic/src/lib.rs:557`, `ui-egui/src/strip_view.rs:1079/1120`, `engine/src/lib.rs:615/625`) | titles | The Viewer shows what exports; a title feature built once | The title as layers (§7): L1 the model, L2 the export and L3 the Viewer draw through it | Claude | L1 built 2026-11-20 |
+| R-T21 | Every title could be drawn by EffectCraft alone (M4), so the built-in looks open and edit in EffectCraft too | D-M1a | One renderer | Measured 2026-11-20 (release): a built-in look 10.5 ms at 640 × 360 and 102 ms at 1080p, against Stack's 40–75 and 150–190 ms. Revisit after L6 (rendered titles) and R-U5; with §7 only the `InApp` renderer would change | Claude | opportunity |
 | R-U2 | (from suite-reuse) the `--values` schema isn't documented                                   | EffectCraft CLI  | Templates as theme designs   | The §3 name table is AssetCraft's half; propose it as the documented schema             | EffectCraft | opportunity |
+
+## 7. Title layers (Paul, 2026-11-20)
+
+Paul: "What if we had a object {} → and the object had layers like: text, background, effect,
+renderer" · "generate certain text, banners, cards, title screens in app, and then utilize
+EffectCraft for advanced effects … a 'holder' card in places where EffectCraft needed to render
+out the effect clip" · "what if the user wants to animate the text as an effect? Like having
+lasers trace each letter".
+
+What a clip saves stays its `TextStyle`: only what it changes from its theme. The title is
+worked out from it (`storyboard::title`), so a theme change re-styles every title that follows it.
+
+```rust
+pub struct Title {                       // crates/storyboard/src/title.rs
+    kind: TextKind,                      // card | overlay
+    area: Option<TextBox>,               // where and how big (R-T19)
+    background: Option<BackgroundLayer>, // cards: Theme | Scrim { alpha } over the clip's picture
+    plate: Option<PlateLayer>,           // overlays: the theme's panel behind the words
+    text: TextLayer,                     // position, size, uppercase, byEffect (a design takes the words)
+    effects: Vec<EffectLayer>,           // { target: whole|text|plate|background, per: whole|line|word|letter,
+                                         //   kind: InApp{animation, effect, exit} | Built{laserTrace|stack}
+                                         //         | Design{theme, role}, durationMs }
+    look: Look,                          // the theme's look the layers draw with
+}
+Title::renderer() -> InApp | EffectCraft
+```
+
+| Step | What | Test |
+| ---- | ---- | ---- |
+| L1 | **Built 2026-11-20.** The model and `storyboard::title(clip, looks, can_draw)`; `animatic::title_of(set, looks, clip)` answers `can_draw` from the loaded designs; `storyboard.title {clip}` shows it (read only, for the CLI and automation). R-T19a's box renamed to the title's `area` (`TextBox`, `storyboard.text.area`). Nothing draws from it yet | Storyboard: card, picture scrim, overlay plate and position, typewriter per letter, still = no effect, built-in, not loaded, `none`, pack design for its role only, the area, the JSON. Animatic: for every pick, with and without a pack, card and overlay, the model's renderer is EffectCraft exactly when `find_design` finds a design. Engine: the command's layers, renderer and area |
+| L2 | The export draws through the layers (`Compositor::paint_text` walks them) | Export pixels identical before and after |
+| L3 | The Viewer draws titles with the same code (frames on a background thread, as designs are); the egui copy of the words retires (R-T20) | Viewer frame equals export frame |
+| L4 | `area` places every title: the words in a built-in look (wrap to the width, size from the height, aligned), the built-in banners built in the box (R-T19b), a pack design scaled whole into it (shape kept); a full-frame pack card keeps its frame | Box tests for a look, a banner and a pack design |
+| L5 | The Inspector: a section per layer; Align, Width, Height, Vertical, **Center**, **Reset** | UI test |
+| L6 | Rendered titles: `storyboard.renderTitle {clip}` renders an EffectCraft title once (in-process, pure-Rust H.264) to `<working>/Renders/<hash>.mp4`; a holder card shows progress, then the clip plays the file; any change re-renders | Stack renders once, then plays from the file |
+| L7 | Letter Trace: a built-in effect made from the clip's own words (`effectcraft_text::glyph_outline`, crates/text/src/lib.rs:77; trim paths traced letter by letter, `build::shape_trim`, crates/project/src/build.rs:526) | Each letter traced in turn; rendered through L6 |
+
+Upstream opportunity (EffectCraft, with R-U6): `shapes_from_text` lives in EffectCraft's engine
+(crates/engine/src/interchange/vector.rs:611, v0.24.1); in a library crate, Letter Trace and
+EffectCraft's own "Create Shapes from Text" would share it.

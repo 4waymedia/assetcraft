@@ -867,6 +867,10 @@ pub struct TextStyle {
     /// How it leaves; `None` = the theme's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit: Option<TextExit>,
+    /// Where the text's title sits in the frame and its size (R-T19, the title's `area`);
+    /// `None` = where it falls by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<TextBox>,
 }
 
 /// A text's moves, resolved: the clip's choices over its theme's ([`TextStyle::timing`]).
@@ -1101,6 +1105,106 @@ impl DesignPick {
     pub fn from_id(id: &str) -> Option<DesignPick> {
         DesignPick::ALL.into_iter().find(|d| d.id() == id)
     }
+}
+
+/// Which side of the title-safe area a text's area keeps to (R-T19).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BoxAlign {
+    /// Against the left edge of the title-safe area (the built-ins' own).
+    #[default]
+    Left,
+    /// Centred across the frame.
+    Center,
+    /// Against the right edge.
+    Right,
+}
+
+impl BoxAlign {
+    /// Every choice, left to right.
+    pub const ALL: [BoxAlign; 3] = [BoxAlign::Left, BoxAlign::Center, BoxAlign::Right];
+
+    /// The id in files and commands.
+    pub fn id(self) -> &'static str {
+        match self {
+            BoxAlign::Left => "left",
+            BoxAlign::Center => "center",
+            BoxAlign::Right => "right",
+        }
+    }
+
+    /// The name the Inspector shows.
+    pub fn name(self) -> &'static str {
+        match self {
+            BoxAlign::Left => "Left",
+            BoxAlign::Center => "Center",
+            BoxAlign::Right => "Right",
+        }
+    }
+
+    /// The choice with this id.
+    pub fn from_id(id: &str) -> Option<BoxAlign> {
+        BoxAlign::ALL.into_iter().find(|a| a.id() == id)
+    }
+}
+
+/// A title's area: its place and size in the frame (R-T19, Paul 2026-11-20: "slide the width,
+/// the height, and the placement … and a button for dead center"), in thousandths of the
+/// frame, so it holds on any board shape. Read from disk as anything: [`TextBox::clamped`]
+/// keeps it inside the title-safe area before it is used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TextBox {
+    /// Left, centre or right in the title-safe area.
+    #[serde(default)]
+    pub align: BoxAlign,
+    /// Width, ‰ of the frame's width.
+    pub width: u16,
+    /// Height, ‰ of the frame's height.
+    pub height: u16,
+    /// Where its middle is, ‰ of the frame's height from the top.
+    pub y: u16,
+}
+
+impl TextBox {
+    /// The title-safe area's inset, ‰ of the frame (90 % safe: 5 % each side).
+    pub const SAFE: u16 = 50;
+    /// The narrowest and widest an area can be, ‰ of the frame's width.
+    pub const WIDTH: (u16, u16) = (150, 1000 - 2 * TextBox::SAFE);
+    /// The shortest and tallest, ‰ of the frame's height.
+    pub const HEIGHT: (u16, u16) = (80, 600);
+    /// The built-in banners' own (Laser Trace, Stack): left, 1100 × 236 of 1920 × 1080, its
+    /// middle 834 px down. Where a new area starts until each title kind has its own (L4).
+    pub const BANNER: TextBox = TextBox { align: BoxAlign::Left, width: 573, height: 219, y: 772 };
+    /// Dead centre, at the same size.
+    pub fn centered(self) -> TextBox {
+        TextBox { align: BoxAlign::Center, y: 500, ..self }
+    }
+
+    /// The box with each value in range: sizes within [`WIDTH`](Self::WIDTH) and
+    /// [`HEIGHT`](Self::HEIGHT), the middle so the whole area stays inside the title-safe
+    /// area.
+    pub fn clamped(self) -> TextBox {
+        let width = self.width.clamp(Self::WIDTH.0, Self::WIDTH.1);
+        let height = self.height.clamp(Self::HEIGHT.0, Self::HEIGHT.1);
+        let half = height.div_ceil(2);
+        let lo = Self::SAFE + half;
+        let hi = (1000 - Self::SAFE).saturating_sub(half).max(lo);
+        TextBox { align: self.align, width, height, y: self.y.clamp(lo, hi) }
+    }
+}
+
+/// Clip `id`'s area: `None` = where its title falls by itself; `Some(b)` = `b`, clamped.
+/// Returns whether anything changed.
+pub fn set_text_area(board: &mut Storyboard, id: ClipId, area: Option<TextBox>) -> Result<bool, TextError> {
+    let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
+    if clip.text_kind().is_none() {
+        return Err(TextError::NoText(id));
+    }
+    let area = area.map(TextBox::clamped);
+    let changed = clip.text_style.area != area;
+    clip.text_style.area = area;
+    Ok(changed)
 }
 
 /// Clip `id`'s design: `None` = its theme pack's own; `Some(pick)` = that one. Returns whether

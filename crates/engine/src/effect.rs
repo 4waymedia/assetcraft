@@ -203,6 +203,7 @@ mod tests {
                 "storyboard.templates",
                 "storyboard.themes",
                 "storyboard.state",
+                "storyboard.title",
                 "storyboard.tracks",
                 "track.analyze",
                 "track.peaks",
