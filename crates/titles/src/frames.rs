@@ -104,6 +104,8 @@ struct State {
     queue: VecDeque<(Slot, Arc<dyn FrameJob>)>,
     busy: Vec<Slot>,
     failed: HashMap<u64, String>,
+    /// Jobs whose frames drew, but not all as made, and why (the latest).
+    problems: HashMap<u64, String>,
     stop: bool,
 }
 
@@ -217,6 +219,12 @@ impl DesignFrames {
         self.shared.lock().failed.get(&key).cloned()
     }
 
+    /// Why the job under `key` drew, but not all as made (a title whose design fell back to its
+    /// theme's words), from its latest frame; `None` while every frame drew as made.
+    pub fn problem(&self, key: u64) -> Option<String> {
+        self.shared.lock().problems.get(&key).cloned()
+    }
+
     /// How many render threads are running.
     pub fn workers(&self) -> usize {
         self.workers.len()
@@ -255,6 +263,14 @@ fn work(shared: &Shared) {
         s.busy.retain(|b| *b != slot);
         match rendered {
             Ok(f) => {
+                match &f.problem {
+                    Some(p) => {
+                        s.problems.insert(slot.key, p.clone());
+                    }
+                    None => {
+                        s.problems.remove(&slot.key);
+                    }
+                }
                 let frame = Arc::new(f);
                 s.bytes += frame.rgba.len();
                 s.cache.insert(slot, frame);

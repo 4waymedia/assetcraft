@@ -637,8 +637,10 @@ impl Session {
     /// Why `clip`'s design couldn't draw in the Viewer, if it failed (it shows the theme's
     /// words instead).
     pub fn design_problem(&self, clip: &assetcraft_storyboard::Clip) -> Option<String> {
-        let (_, job) = self.design_job(clip)?;
-        self.design_frames.get()?.failure(job.key)
+        let frames = self.design_frames.get()?;
+        // The Viewer draws titles whole (L3): a design that fell back says so on its frames.
+        let title = self.title_job(clip).and_then(|job| frames.problem(job.key));
+        title.or_else(|| self.design_job(clip).and_then(|(_, job)| frames.failure(job.key)))
     }
 
     /// `clip`'s pack design frame `elapsed` seconds in (at rest: the hold), `width` pixels wide,
@@ -652,17 +654,15 @@ impl Session {
         Some(frames.frame(&job, assetcraft_animatic::design_secs(&d, elapsed, shown), width))
     }
 
-    /// `clip`'s title `elapsed` seconds in (`f64::INFINITY`: at rest), `width` pixels wide, for
-    /// the Viewer (L3): drawn by the compositor as the export draws it, alone on a clear
-    /// picture to lay over the shot; `None` for a clip without text or no open storyboard.
-    /// Never waits: rendered on the background frame service, read ahead while playing.
-    pub fn title_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
+    /// `clip`'s title as a job for the frame service (L3): its key covers everything the
+    /// title's pixels follow — its words, style, length and kind, whether a card lies over its
+    /// own picture, the board's frame, and the loaded themes (one load, one set). `None` for a
+    /// clip without text or no open storyboard.
+    fn title_job(&self, clip: &assetcraft_storyboard::Clip) -> Option<std::sync::Arc<assetcraft_animatic::TitleJob>> {
         use std::hash::{Hash, Hasher};
         clip.text_kind()?;
         let frame = self.storyboard()?.frame.clone().unwrap_or_default();
         let designs = self.theme_designs();
-        // Everything the title's pixels follow: its words, style, length and kind, whether a card
-        // lies over its own picture, the board's frame, and the loaded themes (one load, one set).
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (
             clip.text(),
@@ -674,15 +674,22 @@ impl Session {
             std::sync::Arc::as_ptr(&designs) as usize,
         )
             .hash(&mut h);
-        let job: std::sync::Arc<dyn assetcraft_titles::frames::FrameJob> =
-            std::sync::Arc::new(assetcraft_animatic::TitleJob {
-                key: h.finish(),
-                clip: clip.clone(),
-                frame,
-                looks: self.user_looks_shared(),
-                designs,
-                services: std::sync::Arc::clone(&self.services),
-            });
+        Some(std::sync::Arc::new(assetcraft_animatic::TitleJob {
+            key: h.finish(),
+            clip: clip.clone(),
+            frame,
+            looks: self.user_looks_shared(),
+            designs,
+            services: std::sync::Arc::clone(&self.services),
+        }))
+    }
+
+    /// `clip`'s title `elapsed` seconds in (`f64::INFINITY`: at rest), `width` pixels wide, for
+    /// the Viewer (L3): drawn by the compositor as the export draws it, alone on a clear
+    /// picture to lay over the shot; `None` for a clip without text or no open storyboard.
+    /// Never waits: rendered on the background frame service, read ahead while playing.
+    pub fn title_frame(&self, clip: &assetcraft_storyboard::Clip, elapsed: f64, width: u32) -> Option<DesignLookup> {
+        let job: std::sync::Arc<dyn assetcraft_titles::frames::FrameJob> = self.title_job(clip)?;
         let frames = self.design_frames.get_or_init(assetcraft_titles::frames::DesignFrames::new);
         Some(frames.frame_of(&job, assetcraft_animatic::TitleJob::index_at(elapsed), width))
     }

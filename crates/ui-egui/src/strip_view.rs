@@ -194,14 +194,13 @@ impl std::fmt::Debug for VideoTextures {
     }
 }
 
-/// The Viewer's pack-design frames (TP2b): per clip, the frame shown (by identity) and its
-/// texture.
+/// The Viewer's title frames (L3): per clip, the frame shown (by identity) and its texture.
 #[derive(Default)]
-pub(crate) struct DesignTextures(pub(crate) HashMap<u32, (usize, egui::TextureHandle)>);
+pub(crate) struct TitleTextures(pub(crate) HashMap<u32, (usize, egui::TextureHandle)>);
 
-impl std::fmt::Debug for DesignTextures {
+impl std::fmt::Debug for TitleTextures {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DesignTextures({} clips)", self.0.len())
+        write!(f, "TitleTextures({} clips)", self.0.len())
     }
 }
 
@@ -292,8 +291,8 @@ pub(crate) struct SbUi {
     pub(crate) video_len: HashMap<String, Option<f64>>,
     /// The Viewer's video frames (P1): the frame number shown per file, and its texture.
     pub(crate) video_tex: VideoTextures,
-    /// The Viewer's pack-design frames (TP2b).
-    pub(crate) design_tex: DesignTextures,
+    /// The Viewer's title frames (L3).
+    pub(crate) title_tex: TitleTextures,
     /// Video cards' pictures (C6): per card, the in-point frame shown (in 1/24 s) and its texture.
     pub(crate) card_tex: VideoTextures,
     /// The last frame pass on which the Viewer waited for a video frame: cards leave the decoder
@@ -1075,9 +1074,7 @@ fn show_clip(
             let target = cover(frame, size);
             ui.painter().image(texture, frame, uv_for_cover(frame, target), Color32::WHITE);
         }
-        if !show_design(nav, ui, frame, clip, elapsed, place) {
-            crate::text_view::paint_text(ui.painter(), frame, clip, elapsed, nav.session.user_looks());
-        }
+        show_title(nav, ui, frame, clip, elapsed);
         return;
     }
     match clip.asset_ids.first() {
@@ -1116,42 +1113,35 @@ fn show_clip(
             );
         }
     }
-    if !show_design(nav, ui, frame, clip, elapsed, place) {
-        crate::text_view::paint_text(ui.painter(), frame, clip, elapsed, nav.session.user_looks());
-    }
+    show_title(nav, ui, frame, clip, elapsed);
 }
 
-/// A text clip drawn through its theme pack's design (TP2b), as the export draws it: a card's
-/// theme backdrop (unless a background asset already shows), then the design's frame placed by
-/// the board's crop. `false` when the clip has no design, or it failed: the caller draws the
-/// theme's words instead. While the first frame renders, nothing of the text shows yet.
-fn show_design(
-    nav: &mut Navigator,
-    ui: &mut Ui,
-    frame: Rect,
-    clip: &Clip,
-    elapsed: f64,
-    place: Option<&assetcraft_storyboard::FrameSpec>,
-) -> bool {
+/// A text clip's title as the export draws it (L3): the compositor's title, alone, from the
+/// background frame service, laid over the frame (a card's own picture is already under it; a
+/// card without one is drawn whole). While a frame renders, the clip's last one stays up, so
+/// typing or restyling never blinks; a clip without text draws nothing.
+fn show_title(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, elapsed: f64) {
     let width = (frame.width() * ui.ctx().pixels_per_point()).clamp(64.0, 1920.0) as u32;
-    let Some(lookup) = nav.session.design_frame(clip, elapsed, width) else { return false };
-    if clip.text_kind() == Some(assetcraft_storyboard::TextKind::Card) && clip.background().is_none() {
-        let look = clip.text_style.look_with(nav.session.user_looks());
-        crate::text_view::paint_backdrop(&ui.painter().with_clip_rect(frame), frame, &look.backdrop);
-    }
+    let Some(lookup) = nav.session.title_frame(clip, elapsed, width) else { return };
+    let key = clip.id.0;
     let shown = match lookup {
         assetcraft_engine::DesignLookup::Ready(f) => Some(f),
         assetcraft_engine::DesignLookup::Pending(near) => {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(15));
             near
         }
-        assetcraft_engine::DesignLookup::Failed(_) => return false,
+        assetcraft_engine::DesignLookup::Failed(_) => None,
     };
-    let Some(f) = shown else { return true };
+    let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    let Some(f) = shown else {
+        if let Some((_, tex)) = nav.state.storyboard.title_tex.0.get(&key) {
+            ui.painter().image(tex.id(), frame, full, Color32::WHITE);
+        }
+        return;
+    };
     let size = [f.width as usize, f.height as usize];
     let ident = std::sync::Arc::as_ptr(&f) as usize;
-    let key = clip.id.0;
-    let texture = match nav.state.storyboard.design_tex.0.get_mut(&key) {
+    let texture = match nav.state.storyboard.title_tex.0.get_mut(&key) {
         Some((shown, tex)) if *shown == ident && tex.size() == size => tex.clone(),
         Some((shown, tex)) => {
             tex.set(egui::ColorImage::from_rgba_unmultiplied(size, &f.rgba), egui::TextureOptions::LINEAR);
@@ -1159,20 +1149,19 @@ fn show_design(
             tex.clone()
         }
         None => {
-            if nav.state.storyboard.design_tex.0.len() >= 8 {
-                nav.state.storyboard.design_tex.0.clear();
+            if nav.state.storyboard.title_tex.0.len() >= 8 {
+                nav.state.storyboard.title_tex.0.clear();
             }
             let tex = ui.ctx().load_texture(
-                format!("sb-design-{key}"),
+                format!("sb-title-{key}"),
                 egui::ColorImage::from_rgba_unmultiplied(size, &f.rgba),
                 egui::TextureOptions::LINEAR,
             );
-            nav.state.storyboard.design_tex.0.insert(key, (ident, tex.clone()));
+            nav.state.storyboard.title_tex.0.insert(key, (ident, tex.clone()));
             tex
         }
     };
-    paint_placed(ui, frame, texture.id(), vec2(f.width as f32, f.height as f32), place);
-    true
+    ui.painter().image(texture.id(), frame, full, Color32::WHITE);
 }
 
 /// How far ahead of the playhead playback decodes video (P2).

@@ -2513,7 +2513,7 @@ fn the_viewer_shows_a_pack_design_for_a_card() {
     assert!(nav.session().clip_design(&clip).is_some());
     let mut t = 0.0;
     let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while !nav.state.storyboard.design_tex.0.contains_key(&card) {
+    while !nav.state.storyboard.title_tex.0.contains_key(&card) {
         assert!(std::time::Instant::now() < until, "the Viewer never showed the design");
         frame(&ctx, &mut nav, Vec::new(), t);
         t += 0.02;
@@ -2541,7 +2541,7 @@ fn a_card_picks_a_built_in_banner_design() {
     assert_eq!(r["drawnBy"]["name"], "Stack");
     let mut t = 0.0;
     let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while !nav.state.storyboard.design_tex.0.contains_key(&card) {
+    while !nav.state.storyboard.title_tex.0.contains_key(&card) {
         assert!(std::time::Instant::now() < until, "the Viewer never showed the design");
         frame(&ctx, &mut nav, Vec::new(), t);
         t += 0.02;
@@ -2566,8 +2566,9 @@ fn a_card_picks_a_built_in_banner_design() {
     assert!(nav.session().clip_design(&clip).is_none());
 }
 
-/// TP4b-2: a pack theme's display font reaches egui when themes load, and the Viewer sets that
-/// theme's words in it (as the export does); a built-in theme stays Inter.
+/// TP4b-2: a pack theme's display font reaches egui when themes load, and the Inspector's
+/// preview sets that theme's words in it (the Viewer draws titles through the compositor since
+/// L3, in the export's fonts); a built-in theme stays Inter.
 #[test]
 fn the_viewer_sets_a_pack_themes_words_in_its_font() {
     let dir = std::env::temp_dir().join(format!("assetcraft-ui-font-{}", std::process::id()));
@@ -2705,4 +2706,54 @@ fn the_start_screen_offers_a_packs_intro_and_outro() {
     assert_eq!(board.clips[0].description, "Intro");
     assert!(!board.clips.iter().any(|c| c.description == "Outro"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// L3b: the Viewer shows every title from the compositor's title frames, a plain card and an
+/// overlay as well as designs, and keeps the last frame up while a restyled one renders.
+#[test]
+fn the_viewer_shows_titles_as_the_export_draws_them() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let mut t = 0.0;
+    let shows = |nav: &mut Navigator, clip: u32, at: f64, t: &mut f64| {
+        nav.run("storyboard.select", json!({ "clip": clip }));
+        nav.run("storyboard.seek", json!({ "seconds": at }));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !nav.state.storyboard.title_tex.0.contains_key(&clip) {
+            assert!(std::time::Instant::now() < until, "the Viewer never showed clip {clip}'s title");
+            frame(&ctx, nav, Vec::new(), *t);
+            *t += 0.02;
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    let (card, card_at) = {
+        let b = nav.session().storyboard().unwrap();
+        let i = b.clips.iter().position(|c| c.text_kind() == Some(assetcraft_storyboard::TextKind::Card)).unwrap();
+        (b.clips[i].id.0, b.starts()[i].as_secs_f64() + 0.5)
+    };
+    shows(&mut nav, card, card_at, &mut t);
+    // An overlay on a shot.
+    let (shot, shot_at) = {
+        let b = nav.session().storyboard().unwrap();
+        let i = b.clips.iter().position(|c| c.text_kind().is_none()).unwrap();
+        (b.clips[i].id.0, b.starts()[i].as_secs_f64() + 0.5)
+    };
+    nav.run("storyboard.text.set", json!({ "clip": shot, "text": "Over the shot" })).expect("an overlay");
+    shows(&mut nav, shot, shot_at, &mut t);
+    // Restyled: the clip's texture stays while the new title renders, then changes.
+    let before = nav.state.storyboard.title_tex.0.get(&card).map(|(ident, _)| *ident);
+    nav.run("storyboard.select", json!({ "clip": card }));
+    nav.run("storyboard.seek", json!({ "seconds": card_at }));
+    nav.run("storyboard.text.style", json!({ "clip": card, "theme": "neon-night" }));
+    frame(&ctx, &mut nav, Vec::new(), t);
+    assert!(nav.state.storyboard.title_tex.0.contains_key(&card), "the last frame stays up");
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while nav.state.storyboard.title_tex.0.get(&card).map(|(ident, _)| *ident) == before {
+        assert!(std::time::Instant::now() < until, "the restyled title never showed");
+        t += 0.02;
+        frame(&ctx, &mut nav, Vec::new(), t);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
