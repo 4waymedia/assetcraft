@@ -807,3 +807,78 @@ fn the_title_model_names_the_renderer_the_compositor_uses() {
         }
     }
 }
+
+/// L3: a title drawn alone and laid over its shot (or a card's own picture) gives the export's
+/// frame, for every theme, card and overlay, still and moving, built-in looks and designs —
+/// to within 8-bit rounding: a translucent layer (a scrim, a glow pass) stored on a clear
+/// picture rounds its colour once more than drawn straight on the shot (measured worst: 5 of
+/// 255, Neon Night's glow over a pictured card).
+#[test]
+fn a_title_alone_over_its_shot_is_the_export_frame() {
+    const TOLERANCE: u8 = 6;
+    use assetcraft_storyboard::{DesignPick, TextAnimation, TextPosition, TextTheme};
+    let laser =
+        Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap());
+    let set = Arc::new(crate::DesignSet {
+        builtins: vec![("banner-laser-trace".into(), laser)],
+        ..crate::DesignSet::default()
+    });
+    let mut c = compositor(160, 90).with_designs(set);
+    let mut worst = 0u8;
+    let mut check = |c: &mut crate::Compositor, cl: &Clip, under: &Clip, t: f64| {
+        let want = c.clip_frame(cl, t);
+        let mut got = c.clip_frame(under, t);
+        let title = c.title_frame(cl, t).expect("a title");
+        crate::draw::over(&mut got, &title, 0, 0);
+        let d = want.data.iter().zip(&got.data).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+        assert!(d <= TOLERANCE, "{:?} {:?} {t}: off by {d}", cl.text_kind(), cl.text_style.theme);
+        worst = worst.max(d);
+    };
+    for theme in TextTheme::ALL {
+        // A card: alone it is the whole frame.
+        let mut card = clip(6, ShotType::Ttl, 4);
+        card.description = "Card words\ntwo".into();
+        card.text_style.theme = theme;
+        for t in [0.2, 1.5, f64::INFINITY] {
+            let alone = c.title_frame(&card, t).unwrap();
+            assert_eq!(alone, c.clip_frame(&card, t), "a card alone is opaque and whole");
+        }
+        // A card on its own picture: the scrim and words over it.
+        let mut pictured = card.clone();
+        pictured.asset_ids.push(asset("environments/ruins_vertical.png"));
+        for t in [0.2, f64::INFINITY] {
+            let want = c.clip_frame(&pictured, t);
+            let mut got = Rgba::filled(160, 90, [0, 0, 0]);
+            if let Some(img) = c.still(std::path::Path::new(&asset("environments/ruins_vertical.png").0)) {
+                crate::draw::cover(&mut got, &img);
+            }
+            crate::draw::over(&mut got, &c.title_frame(&pictured, t).unwrap(), 0, 0);
+            let d = want.data.iter().zip(&got.data).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            assert!(d <= TOLERANCE, "pictured {theme:?} {t}: off by {d}");
+        }
+        // An overlay over its shot, in every position, rising in.
+        let mut over = clip(5, ShotType::Ws, 4);
+        over.overlay = Some("Over the shot".into());
+        over.text_style.theme = theme;
+        over.text_style.animation = Some(TextAnimation::Rise);
+        let mut shot = over.clone();
+        shot.overlay = None;
+        for pos in TextPosition::ALL {
+            over.text_style.position = pos;
+            for t in [0.2, 1.5, f64::INFINITY] {
+                check(&mut c, &over, &shot, t);
+            }
+        }
+    }
+    // A design over its shot.
+    let mut over = clip(5, ShotType::Ws, 6);
+    over.overlay = Some("ISTANBUL".into());
+    over.text_style.design = Some(DesignPick::LaserTrace);
+    let mut shot = over.clone();
+    shot.overlay = None;
+    for t in [0.5, 2.0, f64::INFINITY] {
+        check(&mut c, &over, &shot, t);
+    }
+    assert!(c.title_frame(&shot, 1.0).is_none(), "a shot has no title");
+    eprintln!("worst difference: {worst}");
+}

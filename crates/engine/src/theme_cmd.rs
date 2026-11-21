@@ -128,7 +128,7 @@ pub(crate) struct ThemeLibrary {
     themes: Vec<UserTheme>,
     problems: Vec<(PathBuf, String)>,
     /// Each loaded theme's look, for clips that name one (TP2a-2).
-    looks: assetcraft_storyboard::UserLooks,
+    looks: std::sync::Arc<assetcraft_storyboard::UserLooks>,
     /// Each pack's card and banner designs, filled with its theme (TP2a-3).
     designs: std::sync::Arc<assetcraft_animatic::DesignSet>,
     /// The Themes folder's signature when these were loaded (TP4c-2): a reload `ifChanged`
@@ -253,7 +253,14 @@ impl Session {
         let fonts = themes.iter().zip(display_fonts).filter_map(|(u, f)| Some((u.theme.id.clone(), f?))).collect();
         let set = assetcraft_animatic::DesignSet { packs: designs, builtins, fills, fonts };
         let sounds = std::sync::Arc::new(PackSounds { title: PackSounds::first(&themes, "titleSound") });
-        self.themes = ThemeLibrary { themes, problems, looks, designs: std::sync::Arc::new(set), signature, sounds };
+        self.themes = ThemeLibrary {
+            themes,
+            problems,
+            looks: std::sync::Arc::new(looks),
+            designs: std::sync::Arc::new(set),
+            signature,
+            sounds,
+        };
     }
 
     /// Every design a clip can draw through: the packs' card and banner designs (TP2a-3), the
@@ -270,6 +277,11 @@ impl Session {
     /// The loaded themes' looks by id: what a clip naming one draws (TP2a-2).
     pub fn user_looks(&self) -> &assetcraft_storyboard::UserLooks {
         &self.themes.looks
+    }
+
+    /// The same, shared (the Viewer's title frames hold it, L3).
+    pub(crate) fn user_looks_shared(&self) -> std::sync::Arc<assetcraft_storyboard::UserLooks> {
+        std::sync::Arc::clone(&self.themes.looks)
     }
 
     /// The user's themes and packs as loaded, in file-name order (built-ins not included).

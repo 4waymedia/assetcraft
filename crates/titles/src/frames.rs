@@ -2,6 +2,9 @@
 //! a size-capped cache, read ahead while playing, so a design (Stack's drop costs 40–75 ms a
 //! frame at 640 × 360, R-T5) never stalls the UI. Mirrors `assetcraft_media::VideoFrames`: a
 //! lookup never waits; while a frame renders it hands back the nearest one at or before it.
+//!
+//! The service renders any [`FrameJob`]: a design filled one way ([`DesignJob`]), or a whole
+//! title drawn by the compositor (L3, `assetcraft_animatic::TitleJob`).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -30,6 +33,36 @@ pub struct DesignJob {
     pub fill: Fill,
 }
 
+/// Something the service renders a frame at a time: its cache key, its last frame, and one
+/// frame `width` pixels wide. Called from the render threads.
+pub trait FrameJob: Send + Sync {
+    /// The cache key: two jobs with one key draw the same frames.
+    fn key(&self) -> u64;
+    /// The last frame number (frames past it hold it; [`REST`] stands apart).
+    fn last_index(&self) -> u32;
+    /// Frame `index` (at [`FPS`]; [`REST`]: at rest), `width` pixels wide; `Err` when it can't
+    /// be drawn at all.
+    fn render(&self, index: u32, width: u32) -> Result<DesignFrame, String>;
+}
+
+/// The frame number of a title at rest (paused on it, not playing).
+pub const REST: u32 = u32::MAX;
+
+impl FrameJob for DesignJob {
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn last_index(&self) -> u32 {
+        frame_index(&self.design, f64::MAX)
+    }
+    fn render(&self, index: u32, width: u32) -> Result<DesignFrame, String> {
+        let (dw, _) = self.design.size();
+        let scale = f64::from(width) / f64::from(dw.max(1));
+        let f = self.design.render(&self.fill, f64::from(index) / FPS, scale).map_err(|e| e.to_string())?;
+        Ok(DesignFrame { index, width: f.width, height: f.height, rgba: f.rgba, problem: None })
+    }
+}
+
 /// A rendered frame: frame `index` (at [`FPS`]) at `width` pixels wide, straight RGBA.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesignFrame {
@@ -41,6 +74,8 @@ pub struct DesignFrame {
     pub height: u32,
     /// `width × height × 4` bytes.
     pub rgba: Vec<u8>,
+    /// Drawn, but not all as made (a title whose design failed shows its theme's words), and why.
+    pub problem: Option<String>,
 }
 
 /// What [`DesignFrames::frame`] has for the moment.
@@ -66,7 +101,7 @@ struct State {
     cache: HashMap<Slot, Arc<DesignFrame>>,
     order: VecDeque<Slot>,
     bytes: usize,
-    queue: VecDeque<(Slot, Arc<DesignJob>)>,
+    queue: VecDeque<(Slot, Arc<dyn FrameJob>)>,
     busy: Vec<Slot>,
     failed: HashMap<u64, String>,
     stop: bool,
@@ -132,24 +167,33 @@ impl DesignFrames {
     /// `job`'s frame at `secs`, `width` pixels wide; never waits. Asking queues it first and
     /// the next [`AHEAD`] frames after it.
     pub fn frame(&self, job: &Arc<DesignJob>, secs: f64, width: u32) -> DesignLookup {
+        let index = frame_index(&job.design, secs);
+        let job: Arc<dyn FrameJob> = Arc::clone(job) as Arc<dyn FrameJob>;
+        self.frame_of(&job, index, width)
+    }
+
+    /// `job`'s frame `index` (at [`FPS`], or [`REST`]), `width` pixels wide; never waits.
+    /// Asking queues it first and the next [`AHEAD`] frames after it.
+    pub fn frame_of(&self, job: &Arc<dyn FrameJob>, index: u32, width: u32) -> DesignLookup {
         if self.workers.is_empty() {
             return DesignLookup::Failed("the design renderer could not start".into());
         }
         let width = width.clamp(16, 4096);
-        let index = frame_index(&job.design, secs);
-        let last = frame_index(&job.design, f64::MAX);
+        let last = job.last_index();
+        let index = if index == REST { REST } else { index.min(last) };
+        let key = job.key();
         let mut s = self.shared.lock();
-        if let Some(why) = s.failed.get(&job.key) {
+        if let Some(why) = s.failed.get(&key) {
             return DesignLookup::Failed(why.clone());
         }
-        let want = Slot { key: job.key, index, width };
+        let want = Slot { key, index, width };
         if let Some(f) = s.cache.get(&want) {
             return DesignLookup::Ready(Arc::clone(f));
         }
         // The asked frame first, then the read-ahead; a slot already cached, queued or busy is
         // left alone.
         let mut fresh: Vec<Slot> = std::iter::once(want)
-            .chain((index + 1..=index.saturating_add(AHEAD).min(last)).map(|i| Slot { index: i, ..want }))
+            .chain((index.saturating_add(1)..=index.saturating_add(AHEAD).min(last)).map(|i| Slot { index: i, ..want }))
             .filter(|slot| !s.cache.contains_key(slot) && !s.busy.contains(slot))
             .collect();
         s.queue.retain(|(slot, _)| !fresh.contains(slot));
@@ -160,7 +204,7 @@ impl DesignFrames {
         let near = s
             .cache
             .iter()
-            .filter(|(slot, _)| slot.key == job.key && slot.width == width && slot.index <= index)
+            .filter(|(slot, _)| slot.key == key && slot.width == width && slot.index <= index)
             .max_by_key(|(slot, _)| slot.index)
             .map(|(_, f)| Arc::clone(f));
         drop(s);
@@ -204,14 +248,14 @@ fn work(shared: &Shared) {
                 s = shared.wake.wait(s).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        let (dw, _) = job.design.size();
-        let scale = f64::from(slot.width) / f64::from(dw.max(1));
-        let rendered = job.design.render(&job.fill, f64::from(slot.index) / FPS, scale);
+        // A job's own panic is contained: the slot is marked failed, the thread carries on.
+        let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job.render(slot.index, slot.width)))
+            .unwrap_or_else(|_| Err("the renderer stopped on this frame".into()));
         let mut s = shared.lock();
         s.busy.retain(|b| *b != slot);
         match rendered {
             Ok(f) => {
-                let frame = Arc::new(DesignFrame { index: slot.index, width: f.width, height: f.height, rgba: f.rgba });
+                let frame = Arc::new(f);
                 s.bytes += frame.rgba.len();
                 s.cache.insert(slot, frame);
                 s.order.push_back(slot);
@@ -223,7 +267,7 @@ fn work(shared: &Shared) {
                 }
             }
             Err(e) => {
-                s.failed.insert(slot.key, e.to_string());
+                s.failed.insert(slot.key, e);
                 let key = slot.key;
                 s.queue.retain(|(q, _)| q.key != key);
             }

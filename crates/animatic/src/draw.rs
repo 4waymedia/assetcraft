@@ -37,17 +37,38 @@ impl Rgba {
         self.data.get(i..i + 4).map_or([0, 0, 0, 255], |p| [p[0], p[1], p[2], p[3]])
     }
 
-    fn blend(&mut self, x: u32, y: u32, rgb: [u8; 3], alpha: f32) {
+    /// A transparent picture: a title drawn alone, to lay over a shot (L3).
+    pub fn clear(width: u32, height: u32) -> Rgba {
+        Rgba { width, height, data: vec![0; width as usize * height as usize * 4] }
+    }
+
+    /// `rgb` at `alpha` over the pixel at `(x, y)` (straight alpha, "over"). Over an opaque
+    /// pixel this is the plain mix, so a frame drawn on a shot is unchanged; over a clear one
+    /// the alpha builds up, so a title drawn alone and then laid over a shot gives the same
+    /// picture (L3).
+    pub(crate) fn blend(&mut self, x: u32, y: u32, rgb: [u8; 3], alpha: f32) {
         if x >= self.width || y >= self.height || alpha <= 0.0 {
             return;
         }
         let i = (y as usize * self.width as usize + x as usize) * 4;
         let a = alpha.min(1.0);
         if let Some(p) = self.data.get_mut(i..i + 4) {
-            for c in 0..3 {
-                p[c] = (f32::from(p[c]) * (1.0 - a) + f32::from(rgb[c]) * a).round() as u8;
+            if p[3] == 255 {
+                for c in 0..3 {
+                    p[c] = (f32::from(p[c]) * (1.0 - a) + f32::from(rgb[c]) * a).round() as u8;
+                }
+                return;
             }
-            p[3] = 255;
+            let da = f32::from(p[3]) / 255.0;
+            let out = a + da * (1.0 - a);
+            if out <= 0.0 {
+                return;
+            }
+            for c in 0..3 {
+                p[c] =
+                    ((f32::from(rgb[c]) * a + f32::from(p[c]) * da * (1.0 - a)) / out).round().clamp(0.0, 255.0) as u8;
+            }
+            p[3] = (out * 255.0).round().clamp(0.0, 255.0) as u8;
         }
     }
 

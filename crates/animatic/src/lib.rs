@@ -461,6 +461,17 @@ impl Compositor {
         );
     }
 
+    /// A text clip's title alone, `elapsed` seconds in, on a clear picture (L3): its layers as
+    /// [`clip_frame`](Self::clip_frame) draws them, without the shot or the card's own picture
+    /// under them. Laid over those (`draw::over`), it gives the export's frame, so the Viewer
+    /// can show the export's title over the shot it draws itself. `None` for a clip without text.
+    pub fn title_frame(&mut self, clip: &Clip, elapsed: f64) -> Option<Rgba> {
+        clip.text_kind()?;
+        let mut out = Rgba::clear(self.width, self.height);
+        self.paint_text(&mut out, clip, elapsed);
+        Some(out)
+    }
+
     /// `clip` as the Viewer shows it `elapsed` seconds in (`f64::INFINITY` = at rest).
     pub fn clip_frame(&mut self, clip: &Clip, elapsed: f64) -> Rgba {
         let mut out = Rgba::filled(self.width, self.height, [0, 0, 0]);
@@ -956,3 +967,80 @@ fn rgb(packed: u32) -> [u8; 3] {
 
 #[cfg(test)]
 mod tests;
+
+/// A text clip's title for the Viewer (L3): drawn by the compositor exactly as the export draws
+/// it, on a clear picture, a frame at a time on the background frame service
+/// ([`assetcraft_titles::frames`]). The Viewer lays it over the shot it draws itself.
+pub struct TitleJob {
+    /// The cache key: the caller's hash of everything the title's pixels depend on.
+    pub key: u64,
+    /// The clip, as it is now.
+    pub clip: Clip,
+    /// The board's frame: its shape, and the crop a design is placed by.
+    pub frame: assetcraft_storyboard::FrameSpec,
+    /// The user's loaded themes.
+    pub looks: Arc<assetcraft_storyboard::UserLooks>,
+    /// The theme packs' designs and the built-in ones.
+    pub designs: Arc<DesignSet>,
+    /// File access (a title reads no files; the compositor wants it).
+    pub services: Arc<dyn Services>,
+}
+
+impl std::fmt::Debug for TitleJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TitleJob(#{:016x}, clip {})", self.key, self.clip.id.0)
+    }
+}
+
+impl TitleJob {
+    /// The frame number shown `elapsed` seconds into the clip ([`frames::REST`] at rest).
+    pub fn index_at(elapsed: f64) -> u32 {
+        if elapsed.is_finite() {
+            (elapsed.max(0.0) * assetcraft_titles::frames::FPS).floor().min(f64::from(u32::MAX - 1)) as u32
+        } else {
+            assetcraft_titles::frames::REST
+        }
+    }
+
+    /// The picture's height for `width` pixels, by the board's shape (both even, at least 16).
+    fn size(&self, width: u32) -> (u32, u32) {
+        let (fw, fh) = (self.frame.width.max(1), self.frame.height.max(1));
+        let w = width.clamp(16, 4096) & !1;
+        let h = ((u64::from(w) * u64::from(fh) / u64::from(fw)) as u32).clamp(16, 8192) & !1;
+        (w, h)
+    }
+}
+
+impl assetcraft_titles::frames::FrameJob for TitleJob {
+    fn key(&self) -> u64 {
+        self.key
+    }
+
+    fn last_index(&self) -> u32 {
+        Self::index_at(self.clip.duration.as_secs_f64()).saturating_sub(1)
+    }
+
+    fn render(&self, index: u32, width: u32) -> Result<assetcraft_titles::frames::DesignFrame, String> {
+        let (w, h) = self.size(width);
+        let mut c =
+            Compositor::new(Arc::clone(&self.services), w, h, RenderOptions::new(16, 9), DecodeOptions::default())
+                .map_err(|e| e.to_string())?
+                .with_user_looks((*self.looks).clone())
+                .with_designs(Arc::clone(&self.designs))
+                .with_crop(Some(&self.frame));
+        let elapsed = if index == assetcraft_titles::frames::REST {
+            f64::INFINITY
+        } else {
+            f64::from(index) / assetcraft_titles::frames::FPS
+        };
+        let out = c.title_frame(&self.clip, elapsed).ok_or_else(|| "the clip has no text".to_owned())?;
+        let problem = c.problems().into_iter().next().map(|p| p.reason);
+        Ok(assetcraft_titles::frames::DesignFrame {
+            index,
+            width: out.width,
+            height: out.height,
+            rgba: out.data,
+            problem,
+        })
+    }
+}

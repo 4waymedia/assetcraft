@@ -152,15 +152,5 @@ impl Fonts {
 }
 
 fn blend(out: &mut Rgba, x: u32, y: u32, rgb: [u8; 3], alpha: f32) {
-    if x >= out.width || y >= out.height || alpha <= 0.0 {
-        return;
-    }
-    let i = (y as usize * out.width as usize + x as usize) * 4;
-    let a = alpha.min(1.0);
-    if let Some(p) = out.data.get_mut(i..i + 4) {
-        for c in 0..3 {
-            p[c] = (f32::from(p[c]) * (1.0 - a) + f32::from(rgb[c]) * a).round() as u8;
-        }
-        p[3] = 255;
-    }
+    out.blend(x, y, rgb, alpha);
 }

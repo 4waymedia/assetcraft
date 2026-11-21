@@ -326,3 +326,53 @@ fn title_shows_a_clips_layers_and_renderer() {
     assert!(s.execute("storyboard.title", &json!({"clip": 2})).is_err(), "a shot has no title");
     assert!(s.execute("storyboard.title", &json!({"clip": 999})).is_err());
 }
+
+/// L3: the Viewer's title frame is the compositor's title, drawn alone, on the background
+/// frame service: the same pixels the export lays over the shot, at rest and while moving; a
+/// change of style is a new title; a shot has none.
+#[test]
+fn the_viewers_title_frame_is_the_exports_title() {
+    let mut s = session();
+    let ready = |s: &Session, clip: &assetcraft_storyboard::Clip, t: f64| {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            match s.title_frame(clip, t, 320).expect("a title") {
+                crate::DesignLookup::Ready(f) => break f,
+                crate::DesignLookup::Failed(e) => panic!("{e}"),
+                crate::DesignLookup::Pending(_) => {
+                    assert!(std::time::Instant::now() < until, "never rendered");
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        }
+    };
+    let card = first(&s).clone();
+    let frame = s.storyboard().unwrap().frame.clone().unwrap_or_default();
+    let (w, h) = (320, (320 * u64::from(frame.height) / u64::from(frame.width)) as u32 & !1);
+    let mut direct = assetcraft_animatic::Compositor::new(
+        std::sync::Arc::new(assetcraft_fs::RealFs),
+        w,
+        h,
+        assetcraft_mesh::RenderOptions::new(16, 9),
+        assetcraft_thumbs::DecodeOptions::default(),
+    )
+    .unwrap()
+    .with_designs(s.theme_designs())
+    .with_crop(Some(&frame));
+    for t in [0.2, 1.0, f64::INFINITY] {
+        let f = ready(&s, &card, t);
+        // The service cuts time into 30 fps frames.
+        let at = if t.is_finite() { f64::from(assetcraft_animatic::TitleJob::index_at(t)) / 30.0 } else { t };
+        let want = direct.title_frame(&card, at).unwrap();
+        assert_eq!((f.width, f.height), (want.width, want.height));
+        assert!(f.rgba == want.data, "{t}: as the export draws it");
+        assert!(f.problem.is_none());
+    }
+    // Another style is another title.
+    let before = ready(&s, &card, f64::INFINITY);
+    run(&mut s, "storyboard.text.style", json!({"clip": 1, "theme": "neon-night"}));
+    let restyled = first(&s).clone();
+    assert!(ready(&s, &restyled, f64::INFINITY).rgba != before.rgba);
+    let shot = s.storyboard().unwrap().clips.iter().find(|c| c.text_kind().is_none()).cloned().unwrap();
+    assert!(s.title_frame(&shot, 1.0, 320).is_none());
+}
