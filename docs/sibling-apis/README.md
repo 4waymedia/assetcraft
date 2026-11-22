@@ -3,11 +3,12 @@
 _2026-10-15 · read from source at each app's latest release tag; nothing was built. Detail, with
 `file:line` for every claim and the full command-id lists, is in the three files below._
 
-| File                                                                         | Apps                                 |
-|------------------------------------------------------------------------------|--------------------------------------|
-| [photocraft-lightcraft-filmcraft.md](photocraft-lightcraft-filmcraft.md)     | PhotoCraft, LightCraft, FilmCraft    |
-| [pdfcraft-wordcraft-designcraft.md](pdfcraft-wordcraft-designcraft.md)       | PdfCraft, WordCraft, DesignCraft     |
-| [effectcraft-vectorcraft-soundcraft.md](effectcraft-vectorcraft-soundcraft.md) | EffectCraft, VectorCraft, SoundCraft |
+| File                                                                           | Apps                                                                           |
+|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| [photocraft-lightcraft-filmcraft.md](photocraft-lightcraft-filmcraft.md)       | PhotoCraft, LightCraft, FilmCraft                                              |
+| [pdfcraft-wordcraft-designcraft.md](pdfcraft-wordcraft-designcraft.md)         | PdfCraft, WordCraft, DesignCraft                                               |
+| [effectcraft-vectorcraft-soundcraft.md](effectcraft-vectorcraft-soundcraft.md) | EffectCraft, VectorCraft, SoundCraft                                           |
+| [filmcraft-otio-import.md](filmcraft-otio-import.md) (2026-11-22)              | FilmCraft's OTIO import, checked against an AssetCraft-shaped fixture (SF1b-0) |
 
 - **Scope:** every surface an outside program can use (launch args, CLI, command registry, MCP,
   control channel, library crates, file formats).

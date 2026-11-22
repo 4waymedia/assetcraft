@@ -1,0 +1,303 @@
+{
+  "OTIO_SCHEMA": "Timeline.1",
+  "name": "Hollow Saint teaser",
+  "global_start_time": {
+    "OTIO_SCHEMA": "RationalTime.1",
+    "rate": 30,
+    "value": 0
+  },
+  "metadata": {
+    "assetcraft": {
+      "version": 1,
+      "board": "Hollow Saint teaser",
+      "bpm": 92
+    }
+  },
+  "tracks": {
+    "OTIO_SCHEMA": "Stack.1",
+    "name": "tracks",
+    "children": [
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "name": "V1",
+        "kind": "Video",
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "name": "TITLE \u00b7 Some saints were never saved",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 0
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 117
+              }
+            },
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "target_url": "file:///C:/Users/Paul/Documents/AssetCraft/Hollow%20Saint.media/titles/c1-9f2a.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 117
+                  }
+                }
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "markers": [
+              {
+                "OTIO_SCHEMA": "Marker.2",
+                "name": "Some saints were never saved",
+                "color": "PURPLE",
+                "comment": "title card \u00b7 Blueprint \u00b7 Stack",
+                "marked_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 117
+                  }
+                }
+              }
+            ],
+            "effects": [],
+            "metadata": {
+              "assetcraft": {
+                "clip": 1,
+                "kind": "card",
+                "theme": "blueprint",
+                "design": "banner-stack",
+                "title": "Some saints were never saved"
+              }
+            }
+          },
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "name": "#02 EST",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 45
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 117
+              }
+            },
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "target_url": "file:///C:/Users/Paul/Pictures/library/environments/snow_clearing_flythrough.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 600
+                  }
+                }
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "markers": [],
+            "effects": [],
+            "metadata": {
+              "assetcraft": {
+                "clip": 2,
+                "kind": "shot"
+              }
+            }
+          },
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "name": "#03 WS \u00b7 Over the shot",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 0
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 78
+              }
+            },
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "target_url": "file:///C:/Users/Paul/Documents/AssetCraft/Hollow%20Saint.media/titles/c3-41bc.mp4",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 78
+                  }
+                }
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "markers": [
+              {
+                "OTIO_SCHEMA": "Marker.2",
+                "name": "Over the shot",
+                "color": "PURPLE",
+                "comment": "overlay \u00b7 Bold",
+                "marked_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 78
+                  }
+                }
+              }
+            ],
+            "effects": [],
+            "metadata": {
+              "assetcraft": {
+                "clip": 3,
+                "kind": "overlay",
+                "theme": "bold",
+                "design": null,
+                "title": "Over the shot",
+                "shot": "C:/Users/Paul/Pictures/library/environments/ruins.mp4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "name": "A1",
+        "kind": "Audio",
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "name": "Sample track",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 0
+              },
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 30,
+                "value": 312
+              }
+            },
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "target_url": "file:///C:/Users/Paul/Music/sample-track.wav",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 0
+                  },
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 30,
+                    "value": 1800
+                  }
+                }
+              }
+            },
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "markers": [],
+            "effects": [],
+            "metadata": {
+              "assetcraft": {
+                "song": true
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "markers": [
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "name": "Scene \u00b7 Some saints were never saved",
+        "color": "BLUE",
+        "comment": "",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 30,
+            "value": 0
+          },
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 30,
+            "value": 117
+          }
+        }
+      },
+      {
+        "OTIO_SCHEMA": "Marker.2",
+        "name": "Scene \u00b7 The village remembers",
+        "color": "BLUE",
+        "comment": "",
+        "marked_range": {
+          "OTIO_SCHEMA": "TimeRange.1",
+          "start_time": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 30,
+            "value": 117
+          },
+          "duration": {
+            "OTIO_SCHEMA": "RationalTime.1",
+            "rate": 30,
+            "value": 195
+          }
+        }
+      }
+    ]
+  },
+  "markers": []
+}
