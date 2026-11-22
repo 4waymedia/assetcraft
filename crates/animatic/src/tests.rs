@@ -974,4 +974,19 @@ fn a_titles_area_places_and_sizes_it() {
     let mid = (b[0] + b[2]) as f32 / 2.0;
     assert!((mid - w as f32 / 2.0).abs() < 8.0, "centred: {b:?}");
     assert!(inside(b, 12.0), "within the area, give or take its glow: {b:?}");
+    // L4c: built in the area's own shape, it fills the area's width and height both (a wide,
+    // short area is not a scaled-down banner).
+    let wide = TextBox { align: BoxAlign::Center, width: 800, height: 120, y: 300 };
+    banner.text_style.area = Some(wide);
+    let [wx, wy, ww, wh] = wide.rect(w as f32, h as f32);
+    let b = inked(&c.title_frame(&banner, f64::INFINITY).unwrap()).unwrap();
+    let (bw, bh) = ((b[2] - b[0]) as f32, (b[3] - b[1]) as f32);
+    assert!((bw - ww).abs() < 16.0 && (bh - wh).abs() < 16.0, "{b:?} for {:?}", [wx, wy, ww, wh]);
+    // A long title in the banner's own box: smaller words, none past the plate (Paul,
+    // 2026-11-20: "the background does not size to the text width").
+    banner.text_style.area = None;
+    banner.overlay = Some("How to <do the thing> and then some more words".into());
+    let b = inked(&c.title_frame(&banner, f64::INFINITY).unwrap()).unwrap();
+    let right = (128.0 + 1100.0) / 1920.0 * w as f32;
+    assert!((b[2] as f32) <= right + 8.0, "the words stay on the plate: {b:?} vs {right}");
 }

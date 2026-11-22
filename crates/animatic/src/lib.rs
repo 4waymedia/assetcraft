@@ -122,6 +122,36 @@ pub struct ThemeDesign {
     pub stamp: u64,
 }
 
+/// The built-in design `d` stands for (Laser Trace, Stack), if it is one: `find_design` names a
+/// built-in's path `built-in design <id>`.
+fn builtin_id(d: &ThemeDesign) -> Option<&'static str> {
+    let id = d.path.to_str()?.strip_prefix("built-in design ")?;
+    assetcraft_titles::builtin::BUILTINS.into_iter().find(|b| *b == id)
+}
+
+/// A built-in banner's box for a title (L4c): its area (`[x, y, w, h]` in frame pixels) moved
+/// into the comp placed at `placed`, else the banner's own box, with the words' sizes fitted
+/// to `words` (the first line the headline, the rest the caption).
+fn builtin_banner(words: &str, area: Option<[f32; 4]>, placed: [f32; 4]) -> assetcraft_titles::builtin::Banner {
+    use assetcraft_titles::builtin::Banner;
+    let (cw, ch) = Banner::COMP;
+    let rect = match area {
+        Some([ax, ay, aw, ah]) => {
+            let [px, py, pw, ph] = placed.map(f64::from);
+            let (sx, sy) = (cw / pw.max(1.0), ch / ph.max(1.0));
+            [(f64::from(ax) - px) * sx, (f64::from(ay) - py) * sy, f64::from(aw) * sx, f64::from(ah) * sy]
+        }
+        None => {
+            let d = Banner::DEFAULT;
+            [d.x, d.y, d.w, d.h]
+        }
+    };
+    let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
+    let headline = lines.next().unwrap_or_default();
+    let caption = lines.collect::<Vec<_>>().join(" ");
+    Banner::fit(rect, headline, &caption)
+}
+
 /// Where a design goes for a title's area (L4): the whole design scaled evenly so what it covers
 /// at rest ([`Design::visible_bounds`](assetcraft_titles::Design::visible_bounds)) fits inside
 /// `area` (`[x, y, w, h]` px), keeping its shape, aligned left, centred or right with it and in
@@ -827,12 +857,29 @@ impl Compositor {
             }
             None => draw::contain_rect(self.width, self.height, (dw, dh)),
         };
-        let [x, y, w] = match area.and_then(|a| design_in_area(&d.design, [x, y, w, h], a.rect(fw, fh), a.align)) {
-            Some(placed) => placed,
-            None => [x, y, w],
+        // A built-in banner is built in the title's box at sizes its words fit (L4c); a pack's
+        // design is scaled whole into the area, keeping its shape (L4).
+        let (design, [x, y, w]) = match builtin_id(d) {
+            Some(id) => {
+                let banner = builtin_banner(words, area.map(|a| a.rect(fw, fh)), [x, y, w, h]);
+                let design = if banner == assetcraft_titles::builtin::Banner::DEFAULT {
+                    std::sync::Arc::clone(&d.design)
+                } else {
+                    match assetcraft_titles::builtin::builtin_kept(id, banner) {
+                        Some(Ok(built)) => built,
+                        Some(Err(e)) => return Err(e.to_string()),
+                        None => std::sync::Arc::clone(&d.design),
+                    }
+                };
+                (design, [x, y, w])
+            }
+            None => {
+                let placed = area.and_then(|a| design_in_area(&d.design, [x, y, w, h], a.rect(fw, fh), a.align));
+                (std::sync::Arc::clone(&d.design), placed.unwrap_or([x, y, w]))
+            }
         };
         let scale = f64::from(w) / f64::from(dw.max(1));
-        let frame = d.design.render(&fill, design_secs(d, elapsed, shown), scale).map_err(|e| e.to_string())?;
+        let frame = design.render(&fill, design_secs(d, elapsed, shown), scale).map_err(|e| e.to_string())?;
         let image = Rgba { width: frame.width, height: frame.height, data: frame.rgba };
         draw::over(out, &image, x.round() as i64, y.round() as i64);
         Ok(())

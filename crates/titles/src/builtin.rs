@@ -24,13 +24,40 @@ pub const STACK: &str = "banner-stack";
 /// Every built-in design id.
 pub const BUILTINS: [&str; 2] = [LASER_TRACE, STACK];
 
-/// A built-in design by id.
+/// A built-in design by id, in its own banner box.
 pub fn builtin(id: &str) -> Option<Result<Design, DesignError>> {
+    builtin_in(id, Banner::DEFAULT)
+}
+
+/// A built-in design by id, built in banner `b` (L4c): its plate, border, beams, wipe and
+/// Stack's grid follow the box, its words the sizes.
+pub fn builtin_in(id: &str, b: Banner) -> Option<Result<Design, DesignError>> {
     match id {
-        LASER_TRACE => Some(laser_trace()),
-        STACK => Some(stack()),
+        LASER_TRACE => Some(laser_trace_in(&b)),
+        STACK => Some(stack_in(&b)),
         _ => None,
     }
+}
+
+/// [`builtin_in`], kept: the last few boxes built stay, shared by every render thread (a build
+/// takes 0.5–3 ms; a design's render caches and rest bounds go with it).
+pub fn builtin_kept(id: &str, b: Banner) -> Option<Result<std::sync::Arc<Design>, DesignError>> {
+    type Kept = Vec<((String, [i64; 6]), std::sync::Arc<Design>)>;
+    static KEPT: std::sync::Mutex<Kept> = std::sync::Mutex::new(Vec::new());
+    let key = (id.to_owned(), b.key());
+    if let Some(d) = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find(|(k, _)| *k == key) {
+        return Some(Ok(std::sync::Arc::clone(&d.1)));
+    }
+    let d = match builtin_in(id, b)? {
+        Ok(d) => std::sync::Arc::new(d),
+        Err(e) => return Some(Err(e)),
+    };
+    let mut kept = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if kept.len() >= 24 {
+        kept.remove(0);
+    }
+    kept.push((key, std::sync::Arc::clone(&d)));
+    Some(Ok(d))
 }
 
 // ---- the stage (the mock's 960 × 540, doubled) ----------------------------------------------
@@ -48,6 +75,99 @@ const BY: f64 = H - BH - 128.0;
 const BW: f64 = 1100.0;
 const BAR: f64 = 12.0;
 const PAD: f64 = 60.0;
+
+/// A built-in banner's box in its 1920 × 1080 comp and its words' sizes (L4c): the box a
+/// title's area gives it, the sizes fitted to the clip's words ([`Banner::fit`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Banner {
+    /// Left, in comp pixels.
+    pub x: f64,
+    /// Top.
+    pub y: f64,
+    /// Width.
+    pub w: f64,
+    /// Height.
+    pub h: f64,
+    /// The headline's size, in pixels.
+    pub title_size: f64,
+    /// The caption's size.
+    pub detail_size: f64,
+}
+
+impl Banner {
+    /// The mock's: 1100 × 236 at the lower left, a 92 px headline over a 30 px caption.
+    pub const DEFAULT: Banner = Banner { x: BX, y: BY, w: BW, h: BH, title_size: 92.0, detail_size: 30.0 };
+    /// The comp's size.
+    pub const COMP: (f64, f64) = (W, H);
+
+    /// The banner in box `[x, y, w, h]` (comp pixels, kept inside the comp, at least 120 × 40),
+    /// its words at the size its height gives (the mock's at 236 px) or smaller, so that
+    /// `headline` and `caption` fit between the accent bar and the right edge.
+    pub fn fit(rect: [f64; 4], headline: &str, caption: &str) -> Banner {
+        let w = rect[2].clamp(120.0, W);
+        let h = rect[3].clamp(40.0, H);
+        let x = rect[0].clamp(0.0, W - w);
+        let y = rect[1].clamp(0.0, H - h);
+        let k = h / BH;
+        let mut b = Banner { x, y, w, h, title_size: 92.0 * k, detail_size: 30.0 * k };
+        let room = (b.w - b.bar() - 2.0 * b.pad()).max(10.0);
+        // 3 % to spare: a pack's headline font may run a little wider than Inter.
+        let fit = |doc: TextDoc| {
+            let wide = text_width(&doc);
+            if wide > room * 0.97 { doc.size * room * 0.97 / wide } else { doc.size }
+        };
+        b.title_size = fit(title_doc(&b, headline)).max(8.0);
+        b.detail_size = fit(detail_doc(&b, caption)).max(6.0);
+        b
+    }
+
+    /// Its key in [`builtin_kept`]: tenths of a pixel.
+    fn key(&self) -> [i64; 6] {
+        [self.x, self.y, self.w, self.h, self.title_size, self.detail_size].map(|v| (v * 10.0).round() as i64)
+    }
+
+    /// How tall it is against the mock's.
+    fn k(&self) -> f64 {
+        self.h / BH
+    }
+
+    /// The accent bar's width.
+    fn bar(&self) -> f64 {
+        (BAR * self.k()).clamp(4.0, 24.0)
+    }
+
+    /// The words' left padding after the bar.
+    fn pad(&self) -> f64 {
+        PAD * self.k()
+    }
+
+    /// Where the words start.
+    fn text_x(&self) -> f64 {
+        self.x + self.bar() + self.pad()
+    }
+
+    /// The headline's and the caption's baselines.
+    fn title_base(&self) -> f64 {
+        self.y + 132.0 * self.k()
+    }
+    fn detail_base(&self) -> f64 {
+        self.y + 188.0 * self.k()
+    }
+
+    /// The words' rows (y spans, generous): Stack's pieces outside them carry no text copy.
+    fn title_span(&self) -> (f64, f64) {
+        (self.title_base() - 76.0 * self.k(), self.title_base() + 24.0 * self.k())
+    }
+    fn detail_span(&self) -> (f64, f64) {
+        (self.detail_base() - 28.0 * self.k(), self.detail_base() + 10.0 * self.k())
+    }
+}
+
+/// How wide `doc` lays out, in pixels.
+fn text_width(doc: &TextDoc) -> f64 {
+    let b = effectcraft_text::layout_doc(doc).bounds;
+    (b[2] - b[0]).max(0.0)
+}
 
 const GOLD: [f64; 4] = [0.910, 0.722, 0.290, 1.0];
 const PLATE: [f64; 4] = [0.047, 0.055, 0.075, 0.9];
@@ -173,8 +293,8 @@ struct Edge {
     l2: f64,
 }
 
-fn edges() -> Vec<Edge> {
-    let (tl, tr, br, bl) = ([BX, BY], [BX + BW, BY], [BX + BW, BY + BH], [BX, BY + BH]);
+fn edges(g: &Banner) -> Vec<Edge> {
+    let (tl, tr, br, bl) = ([g.x, g.y], [g.x + g.w, g.y], [g.x + g.w, g.y + g.h], [g.x, g.y + g.h]);
     let mut r = Rng(77);
     [(tl, tr), (br, bl), (bl, tl), (tr, br)]
         .into_iter()
@@ -224,17 +344,23 @@ fn beam_strokes(ids: &mut Ids, core: f64, accent_uids: &mut Vec<Uid>) -> Vec<Pro
 /// border), the fill wipes in, the words decode letter by letter; out, the words scramble away,
 /// the fill wipes back and the border folds to the banner's centre.
 pub fn laser_trace() -> Result<Design, DesignError> {
+    laser_trace_in(&Banner::DEFAULT)
+}
+
+/// [`laser_trace`] in banner `g` (L4c).
+pub fn laser_trace_in(g: &Banner) -> Result<Design, DesignError> {
     let (mut p, cid, comp) = stage("Banner · Laser Trace");
-    let es = edges();
+    let es = edges(g);
+    let (bx, by, bw, bh, bar) = (g.x, g.y, g.w, g.h, g.bar());
     let traced = es.iter().map(|e| e.start + FLING + TRACE).fold(0.0, f64::max);
     let (fill0, fill1) = (traced + 0.05, traced + 0.5);
-    let centre = [BX + BW / 2.0, BY + BH / 2.0];
+    let centre = [bx + bw / 2.0, by + bh / 2.0];
     let (fold0, fold1) = (OUT + 0.45, OUT + 0.8);
     let fill_w = move |t: f64| {
         if t < OUT + 0.15 {
-            BW * ease_out3(clamp01((t - fill0) / (fill1 - fill0)))
+            bw * ease_out3(clamp01((t - fill0) / (fill1 - fill0)))
         } else {
-            BW * (1.0 - ease_in2(clamp01((t - (OUT + 0.15)) / 0.3)))
+            bw * (1.0 - ease_in2(clamp01((t - (OUT + 0.15)) / 0.3)))
         }
     };
     let mut accent: Vec<(LayerId, Uid)> = Vec::new();
@@ -248,25 +374,25 @@ pub fn laser_trace() -> Result<Design, DesignError> {
     let size_keys = |w_of: &dyn Fn(f64) -> f64| {
         wipe_spans
             .iter()
-            .flat_map(|&(t0, t1)| sampled(t0, t1, |t| Value::Vec2([w_of(t).max(0.0), BH])))
+            .flat_map(|&(t0, t1)| sampled(t0, t1, |t| Value::Vec2([w_of(t).max(0.0), bh])))
             .collect::<Vec<_>>()
     };
     let pos_keys = |w_of: &dyn Fn(f64) -> f64, left: f64| {
         wipe_spans
             .iter()
-            .flat_map(|&(t0, t1)| sampled(t0, t1, |t| Value::Vec2(local(left + w_of(t).max(0.0) / 2.0, BY + BH / 2.0))))
+            .flat_map(|&(t0, t1)| sampled(t0, t1, |t| Value::Vec2(local(left + w_of(t).max(0.0) / 2.0, by + bh / 2.0))))
             .collect::<Vec<_>>()
     };
-    let mut plate_rect = build::shape_rect(&mut ids, [0.0, BH], local(BX, BY + BH / 2.0), 0.0);
+    let mut plate_rect = build::shape_rect(&mut ids, [0.0, bh], local(bx, by + bh / 2.0), 0.0);
     set_keys(&mut plate_rect, "size", size_keys(&fill_w));
-    set_keys(&mut plate_rect, "position", pos_keys(&fill_w, BX));
+    set_keys(&mut plate_rect, "position", pos_keys(&fill_w, bx));
     let plate_fill = build::shape_fill(&mut ids, PLATE);
     let surface_uid = uid(&plate_fill, "color");
     let plate_group = build::shape_group(&mut ids, "Plate", vec![plate_rect, plate_fill]);
-    let bar_w = move |t: f64| fill_w(t).min(BAR);
-    let mut bar_rect = build::shape_rect(&mut ids, [0.0, BH], local(BX, BY + BH / 2.0), 0.0);
+    let bar_w = move |t: f64| fill_w(t).min(bar);
+    let mut bar_rect = build::shape_rect(&mut ids, [0.0, bh], local(bx, by + bh / 2.0), 0.0);
     set_keys(&mut bar_rect, "size", size_keys(&bar_w));
-    set_keys(&mut bar_rect, "position", pos_keys(&bar_w, BX));
+    set_keys(&mut bar_rect, "position", pos_keys(&bar_w, bx));
     let bar_fill = build::shape_fill(&mut ids, GOLD);
     let bar_uid = uid(&bar_fill, "color");
     let bar_group = build::shape_group(&mut ids, "Accent Bar", vec![bar_rect, bar_fill]);
@@ -320,7 +446,7 @@ pub fn laser_trace() -> Result<Design, DesignError> {
         groups.push(build::shape_group(&mut ids, &format!("Edge {}", i + 1), items));
     }
     // The wipe's leading edge: a vertical beam riding the fill's edge while it moves.
-    let line = ShapePath::polygon(&[local(BX, BY), local(BX, BY + BH)], false);
+    let line = ShapePath::polygon(&[local(bx, by), local(bx, by + bh)], false);
     let shape = build::shape_path(&mut ids, line);
     let mut items = vec![shape];
     items.extend(beam_strokes(&mut ids, 3.0, &mut accent_uids));
@@ -331,7 +457,7 @@ pub fn laser_trace() -> Result<Design, DesignError> {
     set_keys(&mut wipe, "transform/position", k);
     let visible = |t: f64| {
         let w = fill_w(t);
-        if w > 0.5 && w < BW - 0.5 { 80.0 } else { 0.0 }
+        if w > 0.5 && w < bw - 0.5 { 80.0 } else { 0.0 }
     };
     let mut k = sampled(fill0 - 1.0 / FPS, fill1 + 1.0 / FPS, |t| Value::Scalar(visible(t)));
     k.extend(sampled(OUT + 0.15 - 1.0 / FPS, OUT + 0.45 + 1.0 / FPS, |t| Value::Scalar(visible(t))));
@@ -366,29 +492,11 @@ pub fn laser_trace() -> Result<Design, DesignError> {
     accent.extend(accent_uids.into_iter().map(|u| (beams.id, u)));
 
     // Words: the headline and the detail line, decoded letter by letter.
-    let title_doc = TextDoc {
-        text: "LOCATION".into(),
-        font: "Inter".into(),
-        style: "Bold".into(),
-        size: 92.0,
-        fill: [0.965, 0.973, 0.98, 1.0],
-        tracking: 160.0,
-        justify: Justify::Left,
-        ..Default::default()
-    };
-    let detail_doc = TextDoc {
-        text: "DETAIL · 00:00 HRS".into(),
-        font: "Inter".into(),
-        style: "SemiBold".into(),
-        size: 30.0,
-        fill: [0.965, 0.973, 0.98, 1.0],
-        tracking: 220.0,
-        justify: Justify::Left,
-        ..Default::default()
-    };
-    let text_x = BX + BAR + PAD;
-    let mut title = words(&mut p, &comp, "Headline", title_doc, [text_x, BY + 132.0]);
-    let mut detail = words(&mut p, &comp, "Caption", detail_doc, [text_x, BY + 188.0]);
+    let title_doc = title_doc(g, "LOCATION");
+    let detail_doc = detail_doc(g, "DETAIL · 00:00 HRS");
+    let text_x = g.text_x();
+    let mut title = words(&mut p, &comp, "Headline", title_doc, [text_x, g.title_base()]);
+    let mut detail = words(&mut p, &comp, "Caption", detail_doc, [text_x, g.detail_base()]);
     let mut rng = Rng(2026);
     let mut decode = |p: &mut Project, l: &mut Layer, t0: f64, step: f64, chars: f64| {
         let mut next = p.next_id;
@@ -480,9 +588,6 @@ const ROWS: usize = 4;
 const SPREAD: f64 = 1.0;
 const DROP: f64 = 0.42;
 const BOUNCE: f64 = 10.0;
-/// The words' rows (y spans in comp pixels, generous): pieces outside them carry no text copy.
-const TITLE_SPAN: (f64, f64) = (BY + 132.0 - 76.0, BY + 132.0 + 24.0);
-const DETAIL_SPAN: (f64, f64) = (BY + 188.0 - 28.0, BY + 188.0 + 10.0);
 
 struct Piece {
     cells: Vec<(usize, usize)>,
@@ -543,9 +648,9 @@ fn pieces() -> Vec<Piece> {
     out
 }
 
-fn cell_rect(c: usize, r: usize) -> [f64; 4] {
-    let (cw, ch) = (BW / COLS as f64, BH / ROWS as f64);
-    [BX + c as f64 * cw, BY + r as f64 * ch, cw, ch]
+fn cell_rect(g: &Banner, c: usize, r: usize) -> [f64; 4] {
+    let (cw, ch) = (g.w / COLS as f64, g.h / ROWS as f64);
+    [g.x + c as f64 * cw, g.y + r as f64 * ch, cw, ch]
 }
 
 /// A closed rectangle path, moved into a layer's space (`origin` = where its (0, 0) sits in the comp).
@@ -563,12 +668,13 @@ struct Uids {
     surface: Vec<(LayerId, Uid)>,
 }
 
-fn title_doc() -> TextDoc {
+/// The headline's text: `text` at `g`'s headline size.
+fn title_doc(g: &Banner, text: &str) -> TextDoc {
     TextDoc {
-        text: "LOCATION".into(),
+        text: text.into(),
         font: "Inter".into(),
         style: "Bold".into(),
-        size: 92.0,
+        size: g.title_size,
         fill: [0.965, 0.973, 0.98, 1.0],
         tracking: 160.0,
         justify: Justify::Left,
@@ -576,12 +682,13 @@ fn title_doc() -> TextDoc {
     }
 }
 
-fn detail_doc() -> TextDoc {
+/// The caption's text: `text` at `g`'s caption size.
+fn detail_doc(g: &Banner, text: &str) -> TextDoc {
     TextDoc {
-        text: "DETAIL · 00:00 HRS".into(),
+        text: text.into(),
         font: "Inter".into(),
         style: "SemiBold".into(),
-        size: 30.0,
+        size: g.detail_size,
         fill: [0.965, 0.973, 0.98, 1.0],
         tracking: 220.0,
         justify: Justify::Left,
@@ -595,6 +702,7 @@ fn detail_doc() -> TextDoc {
 fn banner_copy(
     p: &mut Project,
     comp: &Comp,
+    g: &Banner,
     tag: &str,
     rects: &[[f64; 4]],
     parent: LayerId,
@@ -609,9 +717,9 @@ fn banner_copy(
     let mut plate = build::layer(p, comp, &format!("Plate {tag}"), LayerSource::Shape, (comp.width, comp.height), None);
     let mut next = p.next_id;
     let mut ids = Ids(&mut next);
-    let plate_rect = build::shape_rect(&mut ids, [BW, BH], local(BX + BW / 2.0, BY + BH / 2.0), 0.0);
+    let plate_rect = build::shape_rect(&mut ids, [g.w, g.h], local(g.x + g.w / 2.0, g.y + g.h / 2.0), 0.0);
     let plate_fill = build::shape_fill(&mut ids, PLATE);
-    let bar_rect = build::shape_rect(&mut ids, [BAR, BH], local(BX + BAR / 2.0, BY + BH / 2.0), 0.0);
+    let bar_rect = build::shape_rect(&mut ids, [g.bar(), g.h], local(g.x + g.bar() / 2.0, g.y + g.h / 2.0), 0.0);
     let bar_fill = build::shape_fill(&mut ids, GOLD);
     uids.surface.extend(uid(&plate_fill, "color").map(|u| (plate.id, u)));
     uids.accent.extend(uid(&bar_fill, "color").map(|u| (plate.id, u)));
@@ -624,16 +732,16 @@ fn banner_copy(
     }
     layers.push((plate, [W / 2.0, H / 2.0]));
 
-    let text_x = BX + BAR + PAD;
-    if touches(TITLE_SPAN) {
-        let at = [text_x, BY + 132.0];
-        let title = words(p, comp, &format!("Headline {tag}"), title_doc(), at);
+    let text_x = g.text_x();
+    if touches(g.title_span()) {
+        let at = [text_x, g.title_base()];
+        let title = words(p, comp, &format!("Headline {tag}"), title_doc(g, "LOCATION"), at);
         uids.headline.extend(title.props.prop("text/sourceText").map(|pr| (title.id, pr.uid)));
         layers.push((title, at));
     }
-    if touches(DETAIL_SPAN) {
-        let at = [text_x, BY + 188.0];
-        let mut detail = words(p, comp, &format!("Caption {tag}"), detail_doc(), at);
+    if touches(g.detail_span()) {
+        let at = [text_x, g.detail_base()];
+        let mut detail = words(p, comp, &format!("Caption {tag}"), detail_doc(g, "DETAIL · 00:00 HRS"), at);
         let mut next = p.next_id;
         let mut ids = Ids(&mut next);
         let props = build::text_anim_props(&mut ids, "fillColor", false);
@@ -729,11 +837,16 @@ fn mover(p: &mut Project, comp: &Comp, name: &str, anchor: [f64; 2]) -> Layer {
 /// row first, each landing with a small bounce and flash; the seams close after the last one.
 /// Out is a line clear: rows flash and collapse bottom to top, the rows above dropping into place.
 pub fn stack() -> Result<Design, DesignError> {
+    stack_in(&Banner::DEFAULT)
+}
+
+/// [`stack`] in banner `g` (L4c).
+pub fn stack_in(g: &Banner) -> Result<Design, DesignError> {
     let (mut p, cid, comp) = stage("Banner · Stack");
     let ps = pieces();
-    let (cw, ch) = (BW / COLS as f64, BH / ROWS as f64);
+    let (cw, ch) = (g.w / COLS as f64, g.h / ROWS as f64);
     let lock_all = 0.2 + SPREAD + DROP + 0.16;
-    let drop_dist = BY + BH + 80.0;
+    let drop_dist = g.y + g.h + 80.0;
     let settled = lock_all + 0.3 + 1.0 / FPS;
     let seam_of = move |t: f64| if t < lock_all { 1.0 } else { 1.0 - clamp01((t - lock_all) / 0.3) };
     // Mask expansion: −1 px while the seams show; +0.5 px once closed, so neighbouring cells'
@@ -746,7 +859,7 @@ pub fn stack() -> Result<Design, DesignError> {
     let mut groups: Vec<Vec<Layer>> = Vec::new();
 
     for (i, pc) in ps.iter().enumerate() {
-        let rects: Vec<[f64; 4]> = pc.cells.iter().map(|&(c, r)| cell_rect(c, r)).collect();
+        let rects: Vec<[f64; 4]> = pc.cells.iter().map(|&(c, r)| cell_rect(g, c, r)).collect();
         let mut null = mover(&mut p, &comp, &format!("Piece {}", i + 1), [0.0, 0.0]);
         let (start, shift) = (pc.start, pc.shift);
         let offset = move |t: f64| {
@@ -777,6 +890,7 @@ pub fn stack() -> Result<Design, DesignError> {
         let copies = banner_copy(
             &mut p,
             &comp,
+            g,
             &format!("{}", i + 1),
             &rects,
             null.id,
@@ -790,19 +904,19 @@ pub fn stack() -> Result<Design, DesignError> {
 
     // The hold: the whole banner, still, from the moment the seams have closed until the clear.
     let still = mover(&mut p, &comp, "Banner", [0.0, 0.0]);
-    let whole = [BX, BY, BW, BH];
+    let whole = [g.x, g.y, g.w, g.h];
     let closed = [Keyframe::new(tick(0.0), Value::Scalar(0.5))];
-    let copies = banner_copy(&mut p, &comp, "hold", &[whole], still.id, (settled, OUT), Some(&closed), &mut uids);
+    let copies = banner_copy(&mut p, &comp, g, "hold", &[whole], still.id, (settled, OUT), Some(&closed), &mut uids);
     groups.push(copies.into_iter().rev().chain(std::iter::once(still)).collect());
 
     // Line clear: one band per row, bottom first; each squashes to the bottom of what's below it.
     let row_start = |r: usize| OUT + (ROWS - 1 - r) as f64 * 0.16;
     let height = move |r: usize, t: f64| ch * (1.0 - ease_in2(clamp01((t - (row_start(r) + 0.07)) / 0.14)));
-    let bottom_of = move |r: usize, t: f64| BY + BH - ((r + 1)..ROWS).map(|below| height(below, t)).sum::<f64>();
+    let bottom_of = move |r: usize, t: f64| g.y + g.h - ((r + 1)..ROWS).map(|below| height(below, t)).sum::<f64>();
     let end = row_start(0) + 0.21 + 1.0 / FPS;
     for r in 0..ROWS {
-        let rect = [BX, BY + r as f64 * ch, BW, ch];
-        let row_bottom = BY + (r + 1) as f64 * ch;
+        let rect = [g.x, g.y + r as f64 * ch, g.w, ch];
+        let row_bottom = g.y + (r + 1) as f64 * ch;
         let mut null = mover(&mut p, &comp, &format!("Row {}", r + 1), [0.0, row_bottom]);
         set_keys(
             &mut null.props,
@@ -834,6 +948,7 @@ pub fn stack() -> Result<Design, DesignError> {
         let copies = banner_copy(
             &mut p,
             &comp,
+            g,
             &format!("row {}", r + 1),
             &[rect],
             null.id,

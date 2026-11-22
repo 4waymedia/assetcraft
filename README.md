@@ -211,8 +211,10 @@ works with any Style › Preset, so the timing and the look are chosen apart.
   to that side of the title-safe area, **Width**, **Height** and **Vertical** size and place it
   (the Viewer follows the slider as you drag), **Dead center** puts it in the middle and **Reset**
   lets it fall where it does by itself. The words wrap to the width and get smaller if they
-  don't fit; an overlay's plate fills the area; a design (Laser Trace, Stack, a pack's own) is
-  scaled whole into it and keeps its shape; a design that fills the frame keeps its frame.
+  don't fit; an overlay's plate fills the area; Laser Trace and Stack are built in the area —
+  plate, border and beams take its width and height, and the words get smaller to stay on the
+  plate (with or without an area); a pack's own design is scaled whole into the area and keeps
+  its shape; a design that fills the frame keeps its frame.
   Command: `storyboard.text.area {clip, align?, width?, height?, y?, center?, reset?}` (percent of
   the frame); `storyboard.title {clip}` shows a title's layers.
 - **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,

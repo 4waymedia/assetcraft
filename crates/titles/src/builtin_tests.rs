@@ -234,3 +234,36 @@ fn a_built_in_banner_covers_its_box_at_rest() {
         assert_eq!(d.visible_bounds(), Some([x, y, w, h]), "kept");
     }
 }
+
+/// L4c: a built-in banner built in a box of its own: its words at the size its height gives,
+/// smaller when they don't fit, and what it draws at rest is that box.
+#[test]
+fn a_built_in_banner_is_built_in_its_box_with_its_words_fitted() {
+    use builtin::Banner;
+    let d = Banner::DEFAULT;
+    let own = [d.x, d.y, d.w, d.h];
+    assert_eq!(Banner::fit(own, "LOCATION", "DETAIL · 00:00 HRS"), d, "the mock's words fit the mock's box");
+    // A long headline: smaller, and it fits between the bar and the right edge.
+    let long = Banner::fit(own, "How to <do the thing> and a lot more besides", "");
+    assert!(long.title_size < d.title_size * 0.8, "{}", long.title_size);
+    assert_eq!(long.detail_size, d.detail_size);
+    // A taller box: bigger words; a box past the comp's edge is kept inside it.
+    let tall = Banner::fit([100.0, 300.0, 1700.0, 472.0], "LOCATION", "");
+    assert!((tall.title_size - 184.0).abs() < 0.5, "{}", tall.title_size);
+    let off = Banner::fit([1800.0, 1000.0, 800.0, 300.0], "A", "");
+    assert!(off.x + off.w <= Banner::COMP.0 && off.y + off.h <= Banner::COMP.1, "{off:?}");
+    // Built in a wide, short box at the top: at rest it covers that box (its glow aside).
+    let b = Banner::fit([300.0, 120.0, 1320.0, 180.0], "How to <do the thing> and a lot more besides", "Step one");
+    for id in BUILTINS {
+        let design = builtin::builtin_in(id, b).expect("listed").expect("builds");
+        let [x, y, w, h] = design.visible_bounds().expect("draws at rest");
+        let (cw, ch) = Banner::COMP;
+        let near = |a: f64, want: f64, tol: f64| (a - want).abs() <= tol;
+        assert!(near(f64::from(x) * cw, 300.0, 24.0) && near(f64::from(w) * cw, 1320.0, 48.0), "{id}: x {x} w {w}");
+        assert!(near(f64::from(y) * ch, 120.0, 24.0) && near(f64::from(h) * ch, 180.0, 48.0), "{id}: y {y} h {h}");
+        // Kept: the same box is built once.
+        let a = builtin::builtin_kept(id, b).expect("listed").expect("builds");
+        let again = builtin::builtin_kept(id, b).expect("listed").expect("builds");
+        assert!(std::sync::Arc::ptr_eq(&a, &again));
+    }
+}
