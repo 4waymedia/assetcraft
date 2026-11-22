@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 effectcraft-project = { workspace = true }
 effectcraft-render = { workspace = true }
+effectcraft-effects = { workspace = true }
 effectcraft-keyframe = { workspace = true }
 effectcraft-time = { workspace = true }
 effectcraft-lottie = { workspace = true }

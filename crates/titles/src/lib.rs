@@ -20,6 +20,7 @@ use effectcraft_render::{RenderOpts, Renderer};
 use effectcraft_time::Tick;
 
 pub use fonts::{FontFace, has_family, register_font};
+pub use gaps::{Gap, GapKind};
 pub use picture::{Fit, Movie, MovieFrames, Picture};
 
 /// Largest template file read (templates can embed footage; packs keep theirs small).
@@ -724,6 +725,7 @@ impl Design {
 pub mod builtin;
 pub mod fonts;
 pub mod frames;
+pub mod gaps;
 pub mod picture;
 
 #[cfg(test)]
@@ -732,6 +734,8 @@ mod builtin_tests;
 mod fonts_tests;
 #[cfg(test)]
 mod frames_tests;
+#[cfg(test)]
+mod gaps_tests;
 #[cfg(test)]
 mod picture_tests;
 #[cfg(test)]

@@ -462,6 +462,7 @@ name = "assetcraft-titles"
 version = "0.0.1"
 dependencies = [
  "effectcraft-color",
+ "effectcraft-effects",
  "effectcraft-keyframe",
  "effectcraft-lottie",
  "effectcraft-project",

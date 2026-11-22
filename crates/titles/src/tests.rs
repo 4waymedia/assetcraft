@@ -34,7 +34,7 @@ fn control(p: &mut Project, name: &str, layer: &Layer, prop: Uid, as_type: Optio
 /// exposed as `Headline` (and as `Headline Font`), a blue bar exposed as `Brand Blue` (not a
 /// slot: it keeps its colour), the plate's opacity exposed as `Text` (a slider: the wrong kind
 /// for that slot) and a 1 s fade on the words.
-fn sample() -> (Project, ItemId) {
+pub(crate) fn sample() -> (Project, ItemId) {
     let mut p = Project::default();
     let comp = Comp::new(W, H, FrameRate::FPS_30, Tick::from_seconds_f64(2.0));
     let cid = p.add_item("Card", Label::Sandstone, None, ItemKind::Comp(comp.clone().into()));

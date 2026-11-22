@@ -339,7 +339,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Render Titles",
         "File",
         None,
-        "{dryRun?: bool, overwrite?: bool} → {folder, width, height, fps, titles: [{clip, index, kind: card|overlay, renderer, frames, seconds, hash, path, reuse}], problems: [{clip, index, what: design|theme|media, why}], ready, render, reuse, message} (D-SF7: every title as a finished .mp4 in <name>.media/titles/, an overlay merged with its shot; a problem stops the send; SF1b-1a: `dryRun` only)",
+        "{dryRun?: bool, overwrite?: bool} → {folder, width, height, fps, titles: [{clip, index, kind: card|overlay, renderer, frames, seconds, hash, path, reuse}], problems: [{clip, index, what: design|theme|media|effect|font, why}], ready, render, reuse, message} (D-SF7: every title as a finished .mp4 in <name>.media/titles/, an overlay merged with its shot; a problem stops the send; SF1b-1a: `dryRun` only)",
         crate::title_render::sb_render_titles
     ),
     cmd!(

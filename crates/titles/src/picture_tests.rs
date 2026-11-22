@@ -29,7 +29,7 @@ fn footage(p: &mut Project, name: &str, w: u32, h: u32) -> ItemId {
 
 /// A card with a dark backdrop, a full-frame `Background Image` placeholder and a 100 × 100
 /// `Logo` placeholder in the middle, each exposed as a Media control.
-fn card() -> Design {
+pub(crate) fn card() -> Design {
     card_with("Background Image")
 }
 
@@ -63,7 +63,7 @@ fn card_with(background: &str) -> Design {
 }
 
 /// A `w × h` picture whose columns run through `colors` in equal bands.
-fn bands(id: u64, w: u32, h: u32, colors: &[[u8; 3]]) -> Picture {
+pub(crate) fn bands(id: u64, w: u32, h: u32, colors: &[[u8; 3]]) -> Picture {
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for _ in 0..h {
         for x in 0..w {

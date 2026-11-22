@@ -11,10 +11,11 @@
 //!   the send stops with the list. Rendering lands in SF1b-1c; until then the call needs
 //!   `dryRun: true`.
 //!
-//! Checks in this step: a design the clip asks for didn't load (a built-in pick, or its pack's
-//! design for the role), a theme the clip names isn't loaded, a picture or video the title shows
-//! is missing. SF1b-1b adds the checks inside a design (every effect one the renderer knows,
-//! every font resolving, every media slot filled). Nothing is written.
+//! Checks: a design the clip asks for didn't load (a built-in pick, or its pack's design for the
+//! role), a theme the clip names isn't loaded, a picture or video the title shows is missing
+//! (SF1b-1a); and inside the design as it will be filled (SF1b-1b, `assetcraft_titles::Design::
+//! gaps`): an effect the renderer doesn't know, a font that isn't there, footage the renderer
+//! isn't given (an unfilled Media field, or a file of the designer's). Nothing is written.
 
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_storyboard::{BuiltEffect, Clip, EffectKind, Renderer, TICKS_PER_SECOND, TextKind, Ticks};
@@ -58,7 +59,7 @@ pub struct TitleProblem {
     pub clip: u32,
     /// Its place in the Cut, from 0.
     pub index: usize,
-    /// `design`, `theme` or `media`.
+    /// `design`, `theme`, `media`, `effect` or `font`.
     pub what: &'static str,
     /// What to tell the user.
     pub why: String,
@@ -250,6 +251,13 @@ fn check(s: &Session, clip: &Clip, index: usize) -> Vec<TitleProblem> {
             }
         }
         _ => {}
+    }
+    // Inside the design that draws it, as it will be filled (SF1b-1b): effects, fonts, media.
+    if let Some(d) = assetcraft_animatic::find_design(&designs, clip) {
+        let fill = assetcraft_animatic::design_fill_with(&d, clip.text().unwrap_or_default(), &clip.design_fields);
+        for gap in d.design.gaps(&fill) {
+            problem(gap.kind.name(), format!("{}: {gap}", d.design.name()));
+        }
     }
     for asset in shown_assets(clip) {
         let ok = s.services.entry(Path::new(asset)).is_ok_and(|e| e.size > 0);

@@ -25,7 +25,11 @@ fn library(rel: &str) -> String {
 
 /// A saved board in `dir`: a title card, a shot, the shot again with an overlay.
 fn saved(dir: &Path) -> Session {
-    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    saved_with(dir, Prefs::default())
+}
+
+fn saved_with(dir: &Path, prefs: Prefs) -> Session {
+    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), prefs);
     run(&mut s, "storyboard.new", json!({ "name": "Hollow Saint" }));
     let board = s.boards.board.as_mut().unwrap();
     board.scenes.push(assetcraft_storyboard::Scene::new(SceneId(1), None));
@@ -154,4 +158,49 @@ fn needs_a_saved_board_and_for_now_a_dry_run() {
         matches!(s.execute("storyboard.renderTitles", &json!({})), Err(CmdError::Unavailable(m)) if m.contains("dryRun")),
         "rendering is SF1b-1c"
     );
+}
+
+/// A pack theme in `<dir>/Themes/<id>/` whose banner is Laser Trace (or `banner` bytes), its
+/// display font `font`.
+fn pack(dir: &Path, id: &str, font: &str, banner: Option<&[u8]>) {
+    let folder = dir.join("Themes").join(id);
+    std::fs::create_dir_all(folder.join("designs")).unwrap();
+    let laser = assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap();
+    let bytes = banner.map_or_else(|| laser.to_template(), <[u8]>::to_vec);
+    std::fs::write(folder.join("designs").join("banner.ectemplate"), bytes).unwrap();
+    let mut t = assetcraft_storyboard::Theme::builtin(assetcraft_storyboard::TextTheme::Bold);
+    t.id = id.into();
+    t.name = format!("Pack {id}");
+    t.type_.display.family = font.into();
+    t.designs = [("banner".to_string(), "designs/banner.ectemplate".to_string())].into_iter().collect();
+    std::fs::write(folder.join("theme.json"), t.to_json()).unwrap();
+}
+
+#[test]
+fn inside_a_design_a_missing_font_stops_it_and_so_does_a_design_that_did_not_open() {
+    let dir = temp("packs");
+    pack(&dir, "acme", "No Such Family 9", None);
+    pack(&dir, "fine", "Inter", None);
+    pack(&dir, "broken", "Inter", Some(b"PK not really"));
+    let prefs = Prefs { working_folder: Some(dir.clone()), ..Prefs::default() };
+    let mut s = saved_with(&dir, prefs);
+    run(&mut s, "storyboard.themes", json!({ "reload": true }));
+    let theme = |id: &str| ThemeId::new(id);
+    s.boards.board.as_mut().unwrap().clips[2].text_style.theme_id = theme("fine");
+    let p = plan(&mut s);
+    assert_eq!(p["ready"], json!(true), "a pack whose design draws as designed: {p}");
+    assert_eq!(p["titles"][1]["renderer"], json!("effectCraft"));
+
+    s.boards.board.as_mut().unwrap().clips[2].text_style.theme_id = theme("acme");
+    let p = plan(&mut s);
+    let problems = p["problems"].as_array().unwrap();
+    assert_eq!(problems.len(), 1, "{p}");
+    assert_eq!((problems[0]["clip"].clone(), problems[0]["what"].clone()), (json!(3), json!("font")));
+    assert!(problems[0]["why"].as_str().unwrap().contains("No Such Family 9"), "{p}");
+
+    s.boards.board.as_mut().unwrap().clips[2].text_style.theme_id = theme("broken");
+    let p = plan(&mut s);
+    let what: Vec<Value> = p["problems"].as_array().unwrap().iter().map(|x| x["what"].clone()).collect();
+    assert_eq!(what, [json!("design")], "the banner didn't open: {p}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
