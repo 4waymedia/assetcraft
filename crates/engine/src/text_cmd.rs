@@ -201,6 +201,49 @@ pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
     }))
 }
 
+/// `storyboard.text.designField {clip, control, text?, reset?}` (R-T18): the clip's words for
+/// one of its design's own text fields (a banner's Caption, a pack design's "Date"), or `reset`
+/// to give it back to the design. The field must be one the clip's design has. One undo step.
+pub(crate) fn sb_text_design_field(s: &mut Session, p: &Value) -> CmdResult {
+    let id = clip_id(p.get("clip").unwrap_or(&Value::Null))?;
+    let control = p
+        .get("control")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CmdError::BadParams("`control` names the design's field".into()))?;
+    let reset = match p.get("reset") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| CmdError::BadParams("`reset` must be true or false".into()))?,
+    };
+    let text = match p.get("text") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().ok_or_else(|| CmdError::BadParams("`text` must be words".into()))?),
+    };
+    let words = match (text, reset) {
+        (Some(_), true) => return Err(CmdError::BadParams("give `text` or `reset`, not both".into())),
+        (None, false) => return Err(CmdError::BadParams("give `text`, or `reset: true`".into())),
+        (t, _) => t,
+    };
+    let mut board = s.boards.board.clone().ok_or_else(no_board)?;
+    let clip = board.clip(id).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", id.0)))?;
+    let fields = s.design_fields(clip);
+    let Some((name, _, _)) = fields.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(control.trim())) else {
+        let known: Vec<&str> = fields.iter().map(|(n, _, _)| n.as_str()).collect();
+        return Err(CmdError::BadParams(if known.is_empty() {
+            format!("clip #{} isn't drawn through a design with fields of its own", id.0)
+        } else {
+            format!("its design has no field “{control}” (it has: {})", known.join(", "))
+        }));
+    };
+    let name = name.clone();
+    let changed = assetcraft_storyboard::set_design_field(&mut board, id, &name, words)
+        .map_err(|e| CmdError::BadParams(e.to_string()))?;
+    if changed {
+        s.boards.checkpoint();
+        s.boards.board = Some(board);
+    }
+    Ok(json!({ "clip": id.0, "control": name, "changed": changed, "text": words }))
+}
+
 /// `storyboard.title {clip}` (L1): the clip's title as layers — area, background, plate, text,
 /// effects — and who draws it. Read only.
 pub(crate) fn sb_title(s: &mut Session, p: &Value) -> CmdResult {
@@ -215,6 +258,13 @@ pub(crate) fn sb_title(s: &mut Session, p: &Value) -> CmdResult {
         o.insert("clip".into(), json!(id.0));
         o.insert("renderer".into(), json!(title.renderer()));
         o.insert("area".into(), title.area.map_or(Value::Null, area_json));
+        o.insert(
+            "designFields".into(),
+            s.design_fields(clip)
+                .into_iter()
+                .map(|(name, designer, own)| json!({ "control": name, "designer": designer, "text": own }))
+                .collect(),
+        );
     }
     Ok(out)
 }

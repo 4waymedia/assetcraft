@@ -977,6 +977,8 @@ pub enum TextError {
     NoClip(ClipId),
     /// The clip has no text to switch or style.
     NoText(ClipId),
+    /// A design field that can't be set, and why (R-T18).
+    Field(String),
 }
 
 impl std::fmt::Display for TextError {
@@ -984,6 +986,7 @@ impl std::fmt::Display for TextError {
         match self {
             TextError::NoClip(id) => write!(f, "no clip #{}", id.0),
             TextError::NoText(id) => write!(f, "clip #{} has no text (only title cards and overlays do)", id.0),
+            TextError::Field(why) => f.write_str(why),
         }
     }
 }
@@ -1222,6 +1225,50 @@ impl TextBox {
         let lo = Self::SAFE + half;
         let hi = (1000 - Self::SAFE).saturating_sub(half).max(lo);
         TextBox { align: self.align, width, height, y: self.y.clamp(lo, hi) }
+    }
+}
+
+/// Clip `id`'s design field `control` (any case): `Some(words)` fills it, `None` gives it back to
+/// the design (R-T18). The name is trimmed; a blank one, more than
+/// [`MAX_DESIGN_FIELDS`](crate::model::MAX_DESIGN_FIELDS) fields, or words or a name too long
+/// are refused. Returns whether anything changed.
+pub fn set_design_field(
+    board: &mut Storyboard,
+    id: ClipId,
+    control: &str,
+    words: Option<&str>,
+) -> Result<bool, TextError> {
+    use crate::model::{DesignField, MAX_DESIGN_FIELDS, MAX_FIELD_NAME, MAX_FIELD_TEXT};
+    let clip = board.clips.iter_mut().find(|c| c.id == id).ok_or(TextError::NoClip(id))?;
+    if clip.text_kind().is_none() {
+        return Err(TextError::NoText(id));
+    }
+    let control = control.trim();
+    if control.is_empty() || control.chars().count() > MAX_FIELD_NAME {
+        return Err(TextError::Field(format!("a field name is 1–{MAX_FIELD_NAME} characters")));
+    }
+    let at = clip.design_fields.iter().position(|f| f.control.eq_ignore_ascii_case(control));
+    match (words, at) {
+        (None, None) => Ok(false),
+        (None, Some(i)) => {
+            clip.design_fields.remove(i);
+            Ok(true)
+        }
+        (Some(w), _) if w.chars().count() > MAX_FIELD_TEXT => {
+            Err(TextError::Field(format!("a field's words are at most {MAX_FIELD_TEXT} characters")))
+        }
+        (Some(w), Some(i)) => {
+            let changed = clip.design_fields[i].text != w;
+            clip.design_fields[i].text = w.to_string();
+            Ok(changed)
+        }
+        (Some(_), None) if clip.design_fields.len() >= MAX_DESIGN_FIELDS => {
+            Err(TextError::Field(format!("a clip fills at most {MAX_DESIGN_FIELDS} design fields")))
+        }
+        (Some(w), None) => {
+            clip.design_fields.push(DesignField { control: control.to_string(), text: w.to_string() });
+            Ok(true)
+        }
     }
 }
 

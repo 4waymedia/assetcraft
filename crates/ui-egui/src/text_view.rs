@@ -250,6 +250,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     let id = clip.id.0;
     let mut style_edit: Option<serde_json::Value> = None;
     let mut edit_design: Option<(&str, serde_json::Value)> = None;
+    // R-T18: the design's own text fields (a banner's Caption), when a design draws the clip.
+    let fields = nav.session.design_fields(clip);
+    let mut field_edit: Option<serde_json::Value> = None;
     // The user's loaded themes (TP2a-2): picked by id, listed after the built-ins.
     let looks = nav.session.user_looks().clone();
     let yours: Vec<(String, String, Look)> = nav
@@ -404,6 +407,27 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             });
             ui.end_row();
         }
+        for (name, designer, own) in &fields {
+            ui.label(name.as_str())
+                .on_hover_text("One of the design's own text fields; the clip's words fill the headline");
+            // Kept to the value column: a full-width field widens the Inspector (R-T17).
+            ui.scope(|ui| {
+                ui.set_max_width(note_w);
+                ui.horizontal(|ui| {
+                    let hint = if designer.trim().is_empty() { "(empty)".to_owned() } else { designer.clone() };
+                    let reset =
+                        own.is_some() && ui.small_button("↺").on_hover_text("Back to the design's words").clicked();
+                    let current = own.clone().unwrap_or_default();
+                    let key = egui::Id::new(("sb-design-field", id, name.as_str()));
+                    if reset {
+                        field_edit = Some(json!({ "clip": id, "control": name, "reset": true }));
+                    } else if let Some(words) = crate::inset_view::commit_field(ui, key, &current, false, &hint) {
+                        field_edit = Some(json!({ "clip": id, "control": name, "text": words }));
+                    }
+                });
+            });
+            ui.end_row();
+        }
         let theme_moves = style.look_with(&looks).motion;
         let rest = "The design brings its own; pick the theme's own design (or None) to set this";
         ui.label("In").on_hover_text("How the text arrives");
@@ -481,6 +505,9 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             nav.run("storyboard.text.area", p);
         }
         None => nav.state.storyboard.area_drag = area_ui.drag.map(|b| (id, b)),
+    }
+    if let Some(p) = field_edit {
+        nav.run("storyboard.text.designField", p);
     }
     if let Some((command, p)) = edit_design {
         nav.run(command, p);

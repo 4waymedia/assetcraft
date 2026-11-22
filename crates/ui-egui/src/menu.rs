@@ -63,6 +63,8 @@ pub const NOT_IN_MENUS: &[&str] = &[
     "storyboard.text.style",
     // The Inspector's area controls (R-T19).
     "storyboard.text.area",
+    // The Inspector's design fields (R-T18).
+    "storyboard.text.designField",
     // The title as layers (L1), for the CLI and automation; the Inspector reads it in L5.
     "storyboard.title",
     // The Inspector's Design row: "Edit in EffectCraft…" (TP4c-1) and "Save into Template" (TP4c-2).

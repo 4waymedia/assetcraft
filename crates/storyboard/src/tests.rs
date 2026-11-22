@@ -2008,3 +2008,47 @@ fn a_text_clips_title_resolves_into_layers() {
     assert_eq!(json["effects"][0]["kind"]["kind"], "design");
     assert!(json.get("look").is_none());
 }
+
+/// R-T18: a clip's own words for its design's fields: set, changed, given back; limits; a
+/// board with bad fields is refused.
+#[test]
+fn a_clip_fills_its_designs_own_fields() {
+    use crate::{MAX_DESIGN_FIELDS, set_design_field};
+    let mut board = crate::sample::sample();
+    let id = board.clips.iter().find(|c| c.text_kind().is_some()).map(|c| c.id).expect("a text clip");
+    assert!(set_design_field(&mut board, id, " Caption ", Some("Step one")).unwrap());
+    assert!(!set_design_field(&mut board, id, "caption", Some("Step one")).unwrap(), "any case, no change");
+    assert!(set_design_field(&mut board, id, "CAPTION", Some("")).unwrap(), "blank is words too");
+    let c = board.clip(id).unwrap();
+    assert_eq!(
+        (c.design_fields.len(), c.design_fields[0].control.as_str(), c.design_fields[0].text.as_str()),
+        (1, "Caption", "")
+    );
+    let json = serde_json::to_string(c).unwrap();
+    assert!(json.contains(r#""designFields":[{"control":"Caption","text":""}]"#), "{json}");
+    assert_eq!(serde_json::from_str::<crate::Clip>(&json).unwrap(), *c);
+    assert!(set_design_field(&mut board, id, "Caption", None).unwrap());
+    assert!(!set_design_field(&mut board, id, "Caption", None).unwrap());
+    assert!(!serde_json::to_string(board.clip(id).unwrap()).unwrap().contains("designFields"));
+    assert!(set_design_field(&mut board, id, "  ", Some("x")).is_err());
+    assert!(set_design_field(&mut board, id, "Caption", Some(&"x".repeat(501))).is_err());
+    for i in 0..MAX_DESIGN_FIELDS {
+        set_design_field(&mut board, id, &format!("F{i}"), Some("x")).unwrap();
+    }
+    assert!(set_design_field(&mut board, id, "One more", Some("x")).is_err());
+    let shot = board.clips.iter().find(|c| c.text_kind().is_none()).map(|c| c.id).unwrap();
+    assert!(set_design_field(&mut board, shot, "Caption", Some("x")).is_err(), "only text clips");
+    // From disk: too many fields, or a blank name, are refused.
+    board
+        .clips
+        .iter_mut()
+        .find(|c| c.id == id)
+        .unwrap()
+        .design_fields
+        .push(crate::DesignField { control: "F99".into(), text: "x".into() });
+    assert!(board.validate(&crate::Limits::default()).is_err());
+    let c = board.clips.iter_mut().find(|c| c.id == id).unwrap();
+    c.design_fields.truncate(1);
+    c.design_fields[0].control = " ".into();
+    assert!(board.validate(&crate::Limits::default()).is_err());
+}

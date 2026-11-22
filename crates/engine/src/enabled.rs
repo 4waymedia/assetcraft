@@ -43,6 +43,7 @@ impl Session {
             | "storyboard.text.kind"
             | "storyboard.text.style"
             | "storyboard.text.area"
+            | "storyboard.text.designField"
             | "storyboard.motion"
             | "storyboard.resize"
             | "storyboard.roll"

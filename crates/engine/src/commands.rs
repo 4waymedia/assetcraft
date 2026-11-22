@@ -533,6 +533,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::text_cmd::sb_text_area
     ),
     cmd!(
+        EDIT,
+        "storyboard.text.designField",
+        "Text Clip Design Field",
+        "Storyboard",
+        None,
+        "{clip: number, control: a text field of the clip's design (any case; `storyboard.title` lists them as designFields), text?: string (≤ 500 characters; \"\" shows nothing), reset?: true (back to the design's)} → {clip, control, changed, text} (R-T18: the clip's own words for its design's fields — a banner's Caption, a pack design's \"Date\" — while its words still fill the Headline; a built-in banner shows no caption unless the clip gives one; one undo step)",
+        crate::text_cmd::sb_text_design_field
+    ),
+    cmd!(
         READ,
         "storyboard.title",
         "Text Clip Title",

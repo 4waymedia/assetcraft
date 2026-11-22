@@ -185,6 +185,15 @@ impl Storyboard {
             if let Some(o) = &c.overlay {
                 text("overlay", o, l)?;
             }
+            count("design fields", c.design_fields.len(), crate::model::MAX_DESIGN_FIELDS)?;
+            for f in &c.design_fields {
+                if f.control.trim().is_empty() || f.control.chars().count() > crate::model::MAX_FIELD_NAME {
+                    return Err(BoardError::Invalid(format!("clip #{} names a design field badly", c.id.0)));
+                }
+                if f.text.chars().count() > crate::model::MAX_FIELD_TEXT {
+                    return Err(BoardError::Limit(format!("clip #{}'s design field is too long", c.id.0)));
+                }
+            }
             if c.duration > l.max_duration {
                 return Err(BoardError::Limit(format!("clip #{} is longer than the limit", c.id.0)));
             }

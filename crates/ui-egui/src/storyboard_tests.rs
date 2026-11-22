@@ -2555,6 +2555,15 @@ fn a_card_picks_a_built_in_banner_design() {
             frame(&ctx, &mut nav, Vec::new(), t);
             t += 0.02;
         }
+        // R-T18: with the banner's Caption field filled.
+        nav.run(
+            "storyboard.text.designField",
+            json!({ "clip": card, "control": "Caption", "text": "A caption long enough to fill the field and then some more words" }),
+        );
+        for _ in 0..2 {
+            frame(&ctx, &mut nav, Vec::new(), t);
+            t += 0.02;
+        }
         let panel =
             egui::containers::panel::PanelState::load(&ctx, egui::Id::new("sb-inspector")).expect("the Inspector");
         let r = panel.outer_rect;

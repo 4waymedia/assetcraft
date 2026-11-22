@@ -217,6 +217,12 @@ works with any Style › Preset, so the timing and the look are chosen apart.
   its shape; a design that fills the frame keeps its frame.
   Command: `storyboard.text.area {clip, align?, width?, height?, y?, center?, reset?}` (percent of
   the frame); `storyboard.title {clip}` shows a title's layers.
+- **A design's own fields:** under Design, the Inspector lists the design's own text fields —
+  Laser Trace's and Stack's **Caption**, a pack design's "Date" or "Location" — each a box for
+  the clip's words (empty shows the designer's words greyed; ↺ gives the field back). The
+  clip's text still fills the headline; a built-in banner shows no caption unless you give it
+  one (or a second line of text). Command: `storyboard.text.designField {clip, control, text? |
+  reset?}`.
 - **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,
   effect?, exit?, position?}`; `"theme"` for a move follows the theme again). To see every theme
   with its colours, moves and any load problems:

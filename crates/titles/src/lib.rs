@@ -204,6 +204,8 @@ pub enum FillValue {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Fill {
     values: Vec<(Slot, FillValue)>,
+    /// Words for Text controls by name (R-T18: a clip's own design fields), over any slot's.
+    named: Vec<(String, String)>,
 }
 
 impl Fill {
@@ -213,6 +215,18 @@ impl Fill {
         self.values.push((slot, value));
         self
     }
+    /// The Text control named `control` (any case) takes `text` (R-T18), over its slot's words.
+    pub fn named(mut self, control: &str, text: &str) -> Self {
+        self.named.retain(|(c, _)| !c.eq_ignore_ascii_case(control));
+        self.named.push((control.to_string(), text.to_string()));
+        self
+    }
+
+    /// The words given the Text control named `control`, if any.
+    pub fn named_text(&self, control: &str) -> Option<&str> {
+        self.named.iter().find(|(c, _)| c.eq_ignore_ascii_case(control)).map(|(_, t)| t.as_str())
+    }
+
     /// `slot` takes words.
     pub fn text(self, slot: Slot, text: &str) -> Self {
         self.set(slot, FillValue::Text(text.to_string()))
@@ -535,10 +549,36 @@ impl Design {
         c.layer(layer)?.props.find(prop).map(|p| &p.value)
     }
 
+    /// Its own text fields a clip can fill (R-T18): every Text control but the Headline (the
+    /// clip's words fill that), by name, with the words the designer gave it.
+    pub fn text_fields(&self) -> Vec<(String, String)> {
+        self.controls()
+            .into_iter()
+            .filter(|c| c.kind == ControlKind::Text && c.slot != Some(Slot::Headline))
+            .map(|c| {
+                let words = match self.value_of(c.id) {
+                    Some(Value::Text(doc)) => doc.text.clone(),
+                    _ => String::new(),
+                };
+                (c.name, words)
+            })
+            .collect()
+    }
+
     /// The overrides `fill` gives this design: one per control whose slot has a value.
     pub fn overrides(&self, fill: &Fill) -> Vec<Override> {
         let mut out = Vec::new();
         for control in self.controls() {
+            // A clip's own words for this field (R-T18) come first.
+            if control.kind == ControlKind::Text
+                && let Some(words) = fill.named_text(&control.name)
+                && let Some(Value::Text(doc)) = self.value_of(control.id)
+            {
+                let mut doc = doc.clone();
+                doc.text = words.to_string();
+                out.push(Override { control: control.id, value: Value::Text(doc) });
+                continue;
+            }
             let (Some(slot), Some(value)) = (control.slot, control.slot.and_then(|s| fill.get(s))) else { continue };
             let value = match (slot.kind(), value) {
                 (ControlKind::Text, FillValue::Text(words)) => match self.value_of(control.id) {

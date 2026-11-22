@@ -407,6 +407,13 @@ fn screenshot() {
         ] {
             nav.run("storyboard.text.style", json!({ "clip": card, "design": design }));
             nav.run("storyboard.text.area", area);
+            // R-T18: the banner's own Caption.
+            if design != "theme" {
+                nav.run(
+                    "storyboard.text.designField",
+                    json!({ "clip": card, "control": "Caption", "text": "A Hollow Saint teaser" }),
+                );
+            }
             let mut shot = None;
             for _ in 0..40 {
                 t += 0.05;

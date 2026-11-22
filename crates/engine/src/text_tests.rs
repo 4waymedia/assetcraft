@@ -376,3 +376,36 @@ fn the_viewers_title_frame_is_the_exports_title() {
     let shot = s.storyboard().unwrap().clips.iter().find(|c| c.text_kind().is_none()).cloned().unwrap();
     assert!(s.title_frame(&shot, 1.0, 320).is_none());
 }
+
+/// R-T18: `storyboard.text.designField` fills a design's own field (one undo step), refuses a
+/// field the design hasn't and a clip no design draws; `storyboard.title` lists the fields.
+#[test]
+fn a_clip_fills_its_designs_caption() {
+    let mut s = session();
+    assert!(
+        s.execute("storyboard.text.designField", &json!({"clip": 1, "control": "Caption", "text": "x"})).is_err(),
+        "no design yet"
+    );
+    run(&mut s, "storyboard.text.style", json!({"clip": 1, "design": "banner-laser-trace"}));
+    let r = run(&mut s, "storyboard.title", json!({"clip": 1}));
+    assert_eq!(r["designFields"], json!([{"control": "Caption", "designer": "DETAIL · 00:00 HRS", "text": null}]));
+    let r = run(&mut s, "storyboard.text.designField", json!({"clip": 1, "control": "caption", "text": "Step one"}));
+    assert_eq!((r["control"].as_str(), r["changed"].as_bool()), (Some("Caption"), Some(true)));
+    assert_eq!(run(&mut s, "storyboard.title", json!({"clip": 1}))["designFields"][0]["text"], "Step one");
+    assert_eq!(
+        run(&mut s, "storyboard.text.designField", json!({"clip": 1, "control": "Caption", "text": "Step one"}))["changed"],
+        false
+    );
+    for bad in [
+        json!({"clip": 1, "control": "Date", "text": "x"}),
+        json!({"clip": 1, "control": "Caption"}),
+        json!({"clip": 1, "control": "Caption", "text": "x", "reset": true}),
+        json!({"clip": 1, "text": "x"}),
+    ] {
+        assert!(s.execute("storyboard.text.designField", &bad).is_err(), "{bad}");
+    }
+    run(&mut s, "storyboard.text.designField", json!({"clip": 1, "control": "Caption", "reset": true}));
+    assert!(first(&s).design_fields.is_empty());
+    run(&mut s, "storyboard.undo", json!({}));
+    assert_eq!(first(&s).design_fields.len(), 1, "one undo step");
+}

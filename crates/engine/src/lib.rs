@@ -615,6 +615,23 @@ impl Session {
         assetcraft_animatic::find_design(&designs, clip).map(|d| (d.design.name().to_string(), d.role.clone()))
     }
 
+    /// The text fields of the design `clip` draws through that a clip can fill (R-T18): each
+    /// field's name, the designer's words and the clip's own, if it fills it. Empty when no
+    /// design draws it.
+    pub fn design_fields(&self, clip: &assetcraft_storyboard::Clip) -> Vec<(String, String, Option<String>)> {
+        let designs = self.theme_designs();
+        let Some(d) = assetcraft_animatic::find_design(&designs, clip) else { return Vec::new() };
+        d.design
+            .text_fields()
+            .into_iter()
+            .map(|(name, designer)| {
+                let own =
+                    clip.design_fields.iter().find(|f| f.control.eq_ignore_ascii_case(&name)).map(|f| f.text.clone());
+                (name, designer, own)
+            })
+            .collect()
+    }
+
     /// The Viewer's render job for `clip`'s design (its key names the design and the fill).
     fn design_job(
         &self,
@@ -623,7 +640,7 @@ impl Session {
         use std::hash::{Hash, Hasher};
         let designs = self.theme_designs();
         let d = assetcraft_animatic::find_design(&designs, clip)?;
-        let fill = assetcraft_animatic::design_fill(&d, clip.text().unwrap_or_default());
+        let fill = assetcraft_animatic::design_fill_with(&d, clip.text().unwrap_or_default(), &clip.design_fields);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (&d.path, &d.role, d.stamp, format!("{fill:?}")).hash(&mut h);
         let job = std::sync::Arc::new(assetcraft_titles::frames::DesignJob {
@@ -667,6 +684,7 @@ impl Session {
         (
             clip.text(),
             serde_json::to_string(&clip.text_style).unwrap_or_default(),
+            serde_json::to_string(&clip.design_fields).unwrap_or_default(),
             clip.duration,
             clip.shot_type,
             clip.background().is_some(),

@@ -990,3 +990,38 @@ fn a_titles_area_places_and_sizes_it() {
     let right = (128.0 + 1100.0) / 1920.0 * w as f32;
     assert!((b[2] as f32) <= right + 8.0, "the words stay on the plate: {b:?} vs {right}");
 }
+
+/// R-T18: a design's words: the clip's first line fills the Headline; its own Caption field, else
+/// its other lines, fills the Caption; a built-in shows no caption unless given one; other
+/// fields go by name.
+#[test]
+fn a_designs_fill_takes_the_clips_own_fields() {
+    use assetcraft_storyboard::DesignField;
+    use assetcraft_titles::{FillValue, Slot};
+    let laser =
+        Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap());
+    let built = crate::ThemeDesign {
+        theme: assetcraft_storyboard::ThemeId::new("bold").unwrap(),
+        role: "banner".into(),
+        path: "built-in design banner-laser-trace".into(),
+        design: Arc::clone(&laser),
+        fill: assetcraft_titles::Fill::default(),
+        stamp: 0,
+    };
+    let pack = crate::ThemeDesign { path: "Themes/acme/designs/banner.ectemplate".into(), ..built.clone() };
+    let caption = |f: &assetcraft_titles::Fill| match f.get(Slot::Caption) {
+        Some(FillValue::Text(t)) => Some(t.clone()),
+        _ => None,
+    };
+    assert_eq!(caption(&crate::design_fill_with(&built, "ISTANBUL", &[])), Some(String::new()), "no mock caption");
+    assert_eq!(caption(&crate::design_fill_with(&pack, "ISTANBUL", &[])), None, "a pack keeps its designer's");
+    assert_eq!(caption(&crate::design_fill_with(&built, "ISTANBUL\nTurkey", &[])).as_deref(), Some("Turkey"));
+    let own = [
+        DesignField { control: "caption".into(), text: "Step one".into() },
+        DesignField { control: "Date".into(), text: "2026".into() },
+    ];
+    let f = crate::design_fill_with(&pack, "ISTANBUL\nTurkey", &own);
+    assert_eq!(caption(&f).as_deref(), Some("Step one"), "its own field over its second line");
+    assert_eq!(f.named_text("date"), Some("2026"));
+    assert_eq!(crate::design_words("A\nB", &own), ("A".to_owned(), "Step one".to_owned()));
+}

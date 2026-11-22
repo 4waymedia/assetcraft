@@ -181,7 +181,29 @@ pub struct Clip {
     /// The region of a split stage it plays in (F5, L1); none is A. Left out of the file unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<crate::Region>,
+    /// Words for its design's own text fields, by field (R-T18: a banner's Caption, a pack
+    /// design's "Date"); the clip's words still fill the Headline. Left out of the file empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub design_fields: Vec<DesignField>,
 }
+
+/// A design text field a clip fills (R-T18): the field's name in the design (its Essential
+/// Graphics control, any case) and the words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesignField {
+    /// The field's name.
+    pub control: String,
+    /// Its words (may be empty: the field shows nothing).
+    pub text: String,
+}
+
+/// The most design fields a clip fills, the longest field name and the longest words.
+pub const MAX_DESIGN_FIELDS: usize = 16;
+/// See [`MAX_DESIGN_FIELDS`].
+pub const MAX_FIELD_NAME: usize = 64;
+/// See [`MAX_DESIGN_FIELDS`].
+pub const MAX_FIELD_TEXT: usize = 500;
 
 impl Clip {
     /// A new clip with defaults.
@@ -203,6 +225,7 @@ impl Clip {
             motion: None,
             source_in: Ticks::ZERO,
             region: None,
+            design_fields: Vec::new(),
         }
     }
 

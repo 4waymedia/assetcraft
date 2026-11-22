@@ -267,3 +267,20 @@ fn a_built_in_banner_is_built_in_its_box_with_its_words_fitted() {
         assert!(std::sync::Arc::ptr_eq(&a, &again));
     }
 }
+
+/// R-T18: a built-in's own text fields (its Caption, not the Headline) and a fill by name.
+#[test]
+fn a_designs_own_fields_fill_by_name() {
+    for d in [laser(), stack()] {
+        assert_eq!(d.text_fields(), [("Caption".to_owned(), "DETAIL · 00:00 HRS".to_owned())]);
+        let base = crate::Fill::default().text(crate::Slot::Headline, "ISTANBUL");
+        let mock = d.render(&base, 3.0, 0.25).expect("renders");
+        let named = d.render(&base.clone().named("caption", ""), 3.0, 0.25).expect("renders");
+        let slot = d.render(&base.clone().text(crate::Slot::Caption, ""), 3.0, 0.25).expect("renders");
+        assert_ne!(mock.rgba, named.rgba, "{}: the field by name, any case", d.name());
+        assert_eq!(named.rgba, slot.rgba, "{}: the same as its slot", d.name());
+        // By name over the slot.
+        let both = base.text(crate::Slot::Caption, "FROM THE SLOT").named("Caption", "");
+        assert_eq!(d.render(&both, 3.0, 0.25).expect("renders").rgba, slot.rgba);
+    }
+}

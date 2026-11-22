@@ -131,8 +131,13 @@ fn builtin_id(d: &ThemeDesign) -> Option<&'static str> {
 
 /// A built-in banner's box for a title (L4c): its area (`[x, y, w, h]` in frame pixels) moved
 /// into the comp placed at `placed`, else the banner's own box, with the words' sizes fitted
-/// to `words` (the first line the headline, the rest the caption).
-fn builtin_banner(words: &str, area: Option<[f32; 4]>, placed: [f32; 4]) -> assetcraft_titles::builtin::Banner {
+/// to its `headline` and `caption`.
+fn builtin_banner(
+    headline: &str,
+    caption: &str,
+    area: Option<[f32; 4]>,
+    placed: [f32; 4],
+) -> assetcraft_titles::builtin::Banner {
     use assetcraft_titles::builtin::Banner;
     let (cw, ch) = Banner::COMP;
     let rect = match area {
@@ -146,10 +151,7 @@ fn builtin_banner(words: &str, area: Option<[f32; 4]>, placed: [f32; 4]) -> asse
             [d.x, d.y, d.w, d.h]
         }
     };
-    let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
-    let headline = lines.next().unwrap_or_default();
-    let caption = lines.collect::<Vec<_>>().join(" ");
-    Banner::fit(rect, headline, &caption)
+    Banner::fit(rect, headline, caption)
 }
 
 /// Where a design goes for a title's area (L4): the whole design scaled evenly so what it covers
@@ -310,12 +312,34 @@ pub fn find_design(set: &DesignSet, clip: &Clip) -> Option<ThemeDesign> {
 
 /// `d`'s fill with the clip's words: the first line is the Headline, the rest the Caption.
 pub fn design_fill(d: &ThemeDesign, words: &str) -> assetcraft_titles::Fill {
+    design_fill_with(d, words, &[])
+}
+
+/// A title's headline and caption for a design: the first line of its words, and its own
+/// Caption field if it fills one (R-T18), else the rest of its lines.
+pub fn design_words(words: &str, fields: &[assetcraft_storyboard::DesignField]) -> (String, String) {
     let mut lines = words.lines().map(str::trim).filter(|l| !l.is_empty());
     let headline = lines.next().unwrap_or_default().to_string();
-    let caption = lines.collect::<Vec<_>>().join(" ");
+    let rest = lines.collect::<Vec<_>>().join(" ");
+    let caption = fields.iter().find(|f| f.control.eq_ignore_ascii_case("caption")).map_or(rest, |f| f.text.clone());
+    (headline, caption)
+}
+
+/// [`design_fill`] with the clip's own design fields (R-T18): each fills the Text control of its
+/// name. A built-in banner's Caption is the clip's or nothing — never the mock's "DETAIL · 00:00
+/// HRS" (Paul, 2026-11-20); a pack's design keeps its designer's words where the clip gives none.
+pub fn design_fill_with(
+    d: &ThemeDesign,
+    words: &str,
+    fields: &[assetcraft_storyboard::DesignField],
+) -> assetcraft_titles::Fill {
+    let (headline, caption) = design_words(words, fields);
     let mut fill = d.fill.clone().text(assetcraft_titles::Slot::Headline, &headline);
-    if !caption.is_empty() {
+    if !caption.is_empty() || builtin_id(d).is_some() {
         fill = fill.text(assetcraft_titles::Slot::Caption, &caption);
+    }
+    for f in fields.iter().filter(|f| !f.control.eq_ignore_ascii_case("caption")) {
+        fill = fill.named(&f.control, &f.text);
     }
     fill
 }
@@ -664,7 +688,7 @@ impl Compositor {
             // A built-in banner or a pack design takes the words (TP2a-3, TP2b-2).
             let Some(d) = find_design(&self.designs, clip) else { return };
             let shown = clip.text_style.shown_secs(clip.duration.as_secs_f64());
-            match self.draw_design(out, &d, words, elapsed, shown, title.area) {
+            match self.draw_design(out, &d, (words, &clip.design_fields), elapsed, shown, title.area) {
                 Ok(()) => return,
                 Err(e) => {
                     self.failed.insert(d.path.clone(), e);
@@ -842,12 +866,12 @@ impl Compositor {
         &self,
         out: &mut Rgba,
         d: &ThemeDesign,
-        words: &str,
+        (words, fields): (&str, &[assetcraft_storyboard::DesignField]),
         elapsed: f64,
         shown: f64,
         area: Option<assetcraft_storyboard::TextBox>,
     ) -> Result<(), String> {
-        let fill = design_fill(d, words);
+        let fill = design_fill_with(d, words, fields);
         let (dw, dh) = d.design.size();
         let (fw, fh) = (self.width as f32, self.height as f32);
         let [x, y, w, h] = match &self.crop {
@@ -861,7 +885,8 @@ impl Compositor {
         // design is scaled whole into the area, keeping its shape (L4).
         let (design, [x, y, w]) = match builtin_id(d) {
             Some(id) => {
-                let banner = builtin_banner(words, area.map(|a| a.rect(fw, fh)), [x, y, w, h]);
+                let (headline, caption) = design_words(words, fields);
+                let banner = builtin_banner(&headline, &caption, area.map(|a| a.rect(fw, fh)), [x, y, w, h]);
                 let design = if banner == assetcraft_titles::builtin::Banner::DEFAULT {
                     std::sync::Arc::clone(&d.design)
                 } else {

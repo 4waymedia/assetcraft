@@ -61,9 +61,9 @@ pub use generate::{
 pub use inset::{Corner, DEFAULT_MUSIC_DB, Inset, InsetKind, InsetSize, MUSIC_DB_RANGE, VOICE_DB_RANGE};
 pub use layout::{BAND_MAX, Layout, POST_TEXT_MAX, Region, RegionShot, SPLIT_GUTTER, SPLIT_SHARES};
 pub use model::{
-    AssetId, Clip, ClipId, MAX_VOLUME_POINTS, Scene, SceneId, ScenePart, ShotType, SongSection, Story, Storyboard,
-    TITLE_DB_DEFAULT, TITLE_DB_RANGE, TITLE_MIN_SECS, TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition,
-    VOLUME_DB_RANGE, Voiceover, VolumePoint,
+    AssetId, Clip, ClipId, DesignField, MAX_DESIGN_FIELDS, MAX_FIELD_NAME, MAX_FIELD_TEXT, MAX_VOLUME_POINTS, Scene,
+    SceneId, ScenePart, ShotType, SongSection, Story, Storyboard, TITLE_DB_DEFAULT, TITLE_DB_RANGE, TITLE_MIN_SECS,
+    TRACK_DB_RANGE, TextClip, Track, TrackEdit, TrackHit, Transition, VOLUME_DB_RANGE, Voiceover, VolumePoint,
 };
 pub use motion::{
     Camera, Ease, MAX_PITCH, Motion, MotionEdit, MotionError, MotionKind, MotionPreset, STILL_PAN_TRAVEL,
@@ -83,7 +83,8 @@ pub use template::{
 pub use text::{
     AnimFrame, Backdrop, BoxAlign, DesignPick, KindChange, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox,
     TextEffect, TextError, TextExit, TextKind, TextPosition, TextStyle, TextTheme, ThemeChoice, ThemeId, Timing,
-    UserLooks, accent_bar, set_text_area, set_text_design, set_text_kind, set_text_style, set_text_timing,
+    UserLooks, accent_bar, set_design_field, set_text_area, set_text_design, set_text_kind, set_text_style,
+    set_text_timing,
 };
 pub use theme::{
     ASSET_LICENSES, ASSET_ROLES, BUNDLED_FONTS, Background, BackgroundKind, DESIGN_ROLES, DESIGN_SUFFIX, DESIGNS_DIR,
