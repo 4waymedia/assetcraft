@@ -34,6 +34,7 @@ pub mod storyboard;
 pub mod template_cmd;
 mod text_cmd;
 pub mod theme_cmd;
+pub mod title_render;
 mod track_cmd;
 mod watching;
 mod waveform;
@@ -62,6 +63,7 @@ pub use resize_cmd::MIN_CLIP_SECS;
 pub use select::{ClickMode, Selection};
 pub use sort::SortKey;
 pub use storyboard::{BoardView, MAX_AUTOFILL_ASSETS, MAX_UNDO, Mode, Transport};
+pub use title_render::{RenderPlan, TitlePlan, TitleProblem};
 pub use watching::{MAX_INCREMENTAL, WatchStatus};
 
 use assetcraft_fs::{Entry, EntryKind, FsError, KnownFolder, ListOptions, Services, Volume};
@@ -919,6 +921,8 @@ mod tests;
 mod text_tests;
 #[cfg(test)]
 mod theme_tests;
+#[cfg(test)]
+mod title_render_tests;
 #[cfg(test)]
 mod track_tests;
 #[cfg(test)]

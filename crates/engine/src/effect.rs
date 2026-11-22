@@ -183,7 +183,8 @@ mod tests {
                 "storyboard.saveDesign",
                 "storyboard.saveAs",
                 "storyboard.saveTemplate",
-                "storyboard.exportVideo"
+                "storyboard.exportVideo",
+                "storyboard.renderTitles"
             ])
         );
         assert_eq!(
@@ -223,7 +224,8 @@ mod tests {
                 "storyboard.saveDesign",
                 "storyboard.saveAs",
                 "storyboard.saveTemplate",
-                "storyboard.exportVideo"
+                "storyboard.exportVideo",
+                "storyboard.renderTitles"
             ])
         );
         assert!(ids(|e| e.classes.contains(&EffectClass::ExternalNetwork)).is_empty(), "no network before Stage 5");

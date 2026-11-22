@@ -74,6 +74,13 @@ impl Session {
                 }
                 Ok(())
             }
+            "storyboard.renderTitles" => {
+                self.board()?;
+                if self.document().is_none() {
+                    return Err("save the storyboard first: its titles go in a folder beside it".into());
+                }
+                Ok(())
+            }
             "storyboard.exportCancel" => {
                 if self.exporter_running() {
                     Ok(())
