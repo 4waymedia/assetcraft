@@ -275,6 +275,8 @@ pub struct Design {
     frame_seconds: f64,
     /// Where the words come to rest and where they leave, from the comp's markers (R-T16).
     phases: (Option<f64>, Option<f64>),
+    /// What it covers at rest, worked out once ([`Design::visible_bounds`], L4).
+    bounds: std::sync::Arc<std::sync::OnceLock<Option<[f32; 4]>>>,
 }
 
 /// The comp markers that time a design (R-T16; matched by comment, case-insensitive):
@@ -438,7 +440,7 @@ impl Design {
             .unwrap_or_default();
         let (width, height) = (c.width, c.height);
         let phases = phases_of(&c.markers, seconds);
-        Ok(Design { project, comp, name, width, height, seconds, frame_seconds, phases })
+        Ok(Design { project, comp, name, width, height, seconds, frame_seconds, phases, bounds: Default::default() })
     }
 
     /// The design's name (the manifest's, else its Essential Graphics name, else the comp's).
@@ -456,6 +458,34 @@ impl Design {
     /// marked outside the design, or a hold after the out).
     pub fn phases(&self) -> (Option<f64>, Option<f64>) {
         self.phases
+    }
+
+    /// What the design covers at rest, `[x, y, w, h]` as fractions of its comp: the box around
+    /// every pixel it draws in the middle of its hold (from its markers, R-T16; else its middle),
+    /// filled with nothing. Worked out once, at a quarter size or less. `None` when it draws
+    /// nothing there, or can't draw. A title's area places the design by it (L4).
+    pub fn visible_bounds(&self) -> Option<[f32; 4]> {
+        *self.bounds.get_or_init(|| {
+            let (hold, out) = self.phases;
+            let secs = match (hold, out) {
+                (Some(h), Some(o)) if o > h => (h + o) / 2.0,
+                _ => self.seconds / 2.0,
+            };
+            let scale = (480.0 / f64::from(self.width.max(1))).min(0.25);
+            let f = self.render(&Fill::default(), secs, scale).ok()?;
+            let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+            for (i, px) in f.rgba.as_chunks::<4>().0.iter().enumerate() {
+                if px[3] > 8 {
+                    let (x, y) = ((i as u32) % f.width.max(1), (i as u32) / f.width.max(1));
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+                }
+            }
+            if x1 <= x0 || y1 <= y0 {
+                return None;
+            }
+            let (fw, fh) = (f.width.max(1) as f32, f.height.max(1) as f32);
+            Some([x0 as f32 / fw, y0 as f32 / fh, (x1 - x0) as f32 / fw, (y1 - y0) as f32 / fh])
+        })
     }
 
     /// The design's length: its move. A longer clip holds the last frame.

@@ -274,11 +274,11 @@ fn a_text_area_moves_and_sizes_the_title() {
     let undo = s.boards.undo_len();
     let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "align": "right", "width": 40}));
     assert_eq!(r["changed"], true);
-    assert_eq!(r["area"], json!({"align": "right", "width": 40.0, "height": 21.9, "y": 77.2}), "from the design's own");
-    assert_eq!(r["from"], json!({"align": "left", "width": 57.3, "height": 21.9, "y": 77.2}));
+    assert_eq!(r["area"], json!({"align": "right", "width": 40.0, "height": 40.0, "y": 50.0}), "from where it falls");
+    assert_eq!(r["from"], json!({"align": "center", "width": 80.0, "height": 40.0, "y": 50.0}), "a card: the middle");
     assert_eq!(s.boards.undo_len(), undo + 1);
     let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "center": true}));
-    assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 21.9, "y": 50.0}), "keeps its size");
+    assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 40.0, "y": 50.0}), "keeps its size");
     // Too tall and too low: clamped inside the title-safe area.
     let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "height": 90, "y": 100}));
     assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 60.0, "y": 65.0}));

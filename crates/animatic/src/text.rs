@@ -105,6 +105,25 @@ impl Fonts {
         rgb: [u8; 3],
         alpha: f32,
     ) {
+        self.draw_aligned(out, text, height, tracking, wrap, left, top, rgb, alpha, 0);
+    }
+
+    /// [`draw`](Self::draw) with each line aligned in the block: `-1` left, `0` centred, `1`
+    /// right (a title's area, L4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_aligned(
+        &self,
+        out: &mut Rgba,
+        text: &str,
+        height: f32,
+        tracking: f32,
+        wrap: f32,
+        left: f32,
+        top: f32,
+        rgb: [u8; 3],
+        alpha: f32,
+        align: i8,
+    ) {
         if alpha <= 0.0 {
             return;
         }
@@ -113,7 +132,12 @@ impl Fonts {
         let font = self.scaled(height);
         let ascent = font.ascent();
         for (i, line) in lines.iter().enumerate() {
-            let line_left = left + (block_w - line.width) / 2.0;
+            let line_left = left
+                + match align {
+                    ..=-1 => 0.0,
+                    0 => (block_w - line.width) / 2.0,
+                    1.. => block_w - line.width,
+                };
             let baseline =
                 top + i as f32 * height * LINE + (height * LINE - (font.ascent() - font.descent())) / 2.0 + ascent;
             for (id, x) in &line.glyphs {

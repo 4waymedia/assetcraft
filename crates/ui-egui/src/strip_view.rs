@@ -262,6 +262,9 @@ pub(crate) struct SbUi {
     pub(crate) scrub_resume: bool,
     /// An Inspector amount slider mid-drag (SB-3D1), committed as one edit when it ends.
     pub(crate) motion_drag: Option<crate::motion_view::MotionDrag>,
+    /// A title's area while one of its sliders is held (L5): the clip and the box shown live in
+    /// the Viewer; committed as one undo step on release.
+    pub(crate) area_drag: Option<(u32, assetcraft_storyboard::TextBox)>,
     /// A clip's length mid-drag (SR1: a card's edge or the Inspector's Duration), committed as
     /// one `storyboard.resize` when the drag ends.
     pub(crate) resize_drag: Option<ResizeDrag>,
@@ -1122,6 +1125,13 @@ fn show_clip(
 /// typing or restyling never blinks; a clip without text draws nothing.
 fn show_title(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, elapsed: f64) {
     let width = (frame.width() * ui.ctx().pixels_per_point()).clamp(64.0, 1920.0) as u32;
+    // An area slider held (L5): the box as it is under the pointer, before it's committed.
+    let dragged = nav.state.storyboard.area_drag.filter(|(id, _)| *id == clip.id.0).map(|(_, area)| {
+        let mut c = clip.clone();
+        c.text_style.area = Some(area);
+        c
+    });
+    let clip = dragged.as_ref().unwrap_or(clip);
     let Some(lookup) = nav.session.title_frame(clip, elapsed, width) else { return };
     let key = clip.id.0;
     let shown = match lookup {

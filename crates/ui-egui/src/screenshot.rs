@@ -400,6 +400,23 @@ fn screenshot() {
                 save(&out.with_file_name(format!("{stem}-design-{design}.png")), shot);
             }
         }
+        // Its area (L4, L5): the words right and high, then the Stack banner dead centre.
+        for (name, design, area) in [
+            ("area-words", "theme", json!({ "clip": card, "align": "right", "width": 45, "height": 30, "y": 30 })),
+            ("area-stack", "banner-stack", json!({ "clip": card, "center": true, "width": 60 })),
+        ] {
+            nav.run("storyboard.text.style", json!({ "clip": card, "design": design }));
+            nav.run("storyboard.text.area", area);
+            let mut shot = None;
+            for _ in 0..40 {
+                t += 0.05;
+                shot = Some(shoot(&ctx, &mut nav, &mut textures, Vec::new(), t));
+                nav.wait_thumbs(Duration::from_millis(50));
+            }
+            if let Some(shot) = shot {
+                save(&out.with_file_name(format!("{stem}-{name}.png")), shot);
+            }
+        }
     }
     // Optional: the Start screen over a music folder (`AC_MUSIC=/abs/folder`).
     if let Some(music) = std::env::var_os("AC_MUSIC") {

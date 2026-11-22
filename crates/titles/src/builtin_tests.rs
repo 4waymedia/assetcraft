@@ -221,3 +221,16 @@ fn filmstrip_when_asked() {
         }
     }
 }
+
+/// L4: a built-in banner covers its banner box at rest (1100 × 236 at (128, 716) of 1920 ×
+/// 1080), give or take its glow; worked out once.
+#[test]
+fn a_built_in_banner_covers_its_box_at_rest() {
+    for d in [laser(), stack()] {
+        let [x, y, w, h] = d.visible_bounds().expect("it draws at rest");
+        let near = |a: f32, b: f32, tol: f32| (a - b).abs() <= tol;
+        assert!(near(x, 128.0 / 1920.0, 0.03) && near(w, 1100.0 / 1920.0, 0.06), "{:?}: x {x} w {w}", d.name());
+        assert!(near(y, 716.0 / 1080.0, 0.04) && near(h, 236.0 / 1080.0, 0.08), "{:?}: y {y} h {h}", d.name());
+        assert_eq!(d.visible_bounds(), Some([x, y, w, h]), "kept");
+    }
+}

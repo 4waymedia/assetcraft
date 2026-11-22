@@ -122,6 +122,54 @@ pub struct ThemeDesign {
     pub stamp: u64,
 }
 
+/// Where a design goes for a title's area (L4): the whole design scaled evenly so what it covers
+/// at rest ([`Design::visible_bounds`](assetcraft_titles::Design::visible_bounds)) fits inside
+/// `area` (`[x, y, w, h]` px), keeping its shape, aligned left, centred or right with it and in
+/// the middle of its height; anything it draws outside that (a beam, a glow) moves with it.
+/// `placed` is where the design sits without an area. Returns the design's new `[x, y, w]`;
+/// `None` when it covers (nearly) the whole frame — a full-frame card keeps its frame — or
+/// draws nothing at rest.
+fn design_in_area(
+    design: &assetcraft_titles::Design,
+    placed: [f32; 4],
+    area: [f32; 4],
+    align: assetcraft_storyboard::BoxAlign,
+) -> Option<[f32; 3]> {
+    let [bx, by, bw, bh] = design.visible_bounds()?;
+    if bw * bh >= 0.9 || bw <= 0.0 || bh <= 0.0 {
+        return None;
+    }
+    let [px, py, pw, ph] = placed;
+    // What it covers, in the frame, as placed.
+    let (nx, ny, nw, nh) = (px + bx * pw, py + by * ph, bw * pw, bh * ph);
+    let s = (area[2] / nw).min(area[3] / nh);
+    if !s.is_finite() || s <= 0.0 {
+        return None;
+    }
+    let (cw, ch) = (nw * s, nh * s);
+    let cx = match align {
+        assetcraft_storyboard::BoxAlign::Left => area[0],
+        assetcraft_storyboard::BoxAlign::Center => area[0] + (area[2] - cw) / 2.0,
+        assetcraft_storyboard::BoxAlign::Right => area[0] + area[2] - cw,
+    };
+    let cy = area[1] + (area[3] - ch) / 2.0;
+    // The design's origin follows: the covered box's offset inside it, scaled.
+    Some([cx - (nx - px) * s, cy - (ny - py) * s, pw * s])
+}
+
+/// How a title's words are laid out (L4): their height and spacing, the wrap width, the block's
+/// box `[x, y, w, h]`, the plate's box, the lines' alignment and the colour.
+#[derive(Debug, Clone, Copy)]
+struct Words {
+    height: f32,
+    tracking: f32,
+    wrap: f32,
+    at: [f32; 4],
+    plate: [f32; 4],
+    align: i8,
+    color: [u8; 3],
+}
+
 /// A card's background layer: the theme's backdrop and card decor, or the theme's colour as a
 /// scrim over the clip's own picture.
 fn draw_background(out: &mut Rgba, look: &assetcraft_storyboard::Look, bg: BackgroundLayer) {
@@ -586,7 +634,7 @@ impl Compositor {
             // A built-in banner or a pack design takes the words (TP2a-3, TP2b-2).
             let Some(d) = find_design(&self.designs, clip) else { return };
             let shown = clip.text_style.shown_secs(clip.duration.as_secs_f64());
-            match self.draw_design(out, &d, words, elapsed, shown) {
+            match self.draw_design(out, &d, words, elapsed, shown, title.area) {
                 Ok(()) => return,
                 Err(e) => {
                     self.failed.insert(d.path.clone(), e);
@@ -606,11 +654,20 @@ impl Compositor {
     /// The title's plate (overlays), the words' decor and finish, and the words, as `anim`
     /// moves them.
     fn draw_words(&self, out: &mut Rgba, t: &Title, words: &str, anim: &AnimFrame, fonts: &text::Fonts) {
-        let (kind, look) = (t.kind, &t.look);
         // Past its duration (and its out) the words are gone; a Card keeps its background.
         if words.trim().is_empty() || anim.is_hidden() {
             return;
         }
+        match t.area {
+            Some(area) => self.draw_words_in(out, t, area, words, anim, fonts),
+            None => self.draw_words_placed(out, t, words, anim, fonts),
+        }
+    }
+
+    /// The words where they fall by themselves: the theme's size, a card centred, an overlay at
+    /// its position, the plate around them.
+    fn draw_words_placed(&self, out: &mut Rgba, t: &Title, words: &str, anim: &AnimFrame, fonts: &text::Fonts) {
+        let (kind, look) = (t.kind, &t.look);
         let (w, h) = (self.width as f32, self.height as f32);
         let size = t.text.size;
         let height = (h * size * anim.scale).clamp(6.0, h);
@@ -629,25 +686,80 @@ impl Compositor {
             _ => anchor_x - block[0] / 2.0,
         };
         let top = h * ay - block[1] / 2.0 + anim.offset_y * h;
-        if kind == TextKind::Overlay {
+        let pad = [height * 0.45, height * 0.25];
+        let plate = [left - pad[0], top - pad[1], block[0] + 2.0 * pad[0], block[1] + 2.0 * pad[1]];
+        let at = [left, top, block[0], block[1]];
+        self.paint_words(out, t, &shown, anim, fonts, Words { height, tracking, wrap, at, plate, align: 0, color });
+    }
+
+    /// The words in the title's area (L4): wrapped to its width less the padding, at the
+    /// theme's size or smaller so they fit it, aligned left, centred or right with it, in the
+    /// middle of its height; an overlay's plate fills the area.
+    fn draw_words_in(
+        &self,
+        out: &mut Rgba,
+        t: &Title,
+        area: assetcraft_storyboard::TextBox,
+        words: &str,
+        anim: &AnimFrame,
+        fonts: &text::Fonts,
+    ) {
+        let look = &t.look;
+        let (w, h) = (self.width as f32, self.height as f32);
+        let [ax, ay, aw, ah] = area.rect(w, h);
+        let shown = shown_text(words, t.text.uppercase, anim);
+        let full = shown_text(words, t.text.uppercase, &AnimFrame::REST);
+        // The theme's size, stepped down until the finished words fit inside the padding.
+        let mut base = (h * t.text.size).clamp(6.0, h);
+        let fit = |height: f32| {
             let pad = [height * 0.45, height * 0.25];
+            let inner = [(aw - 2.0 * pad[0]).max(1.0), (ah - 2.0 * pad[1]).max(1.0)];
+            let block = fonts.measure(&full, height, look.tracking * height, inner[0]);
+            (block[0] <= inner[0] + 0.5 && block[1] <= inner[1] + 0.5, pad, inner)
+        };
+        for _ in 0..24 {
+            if fit(base).0 || base <= 6.0 {
+                break;
+            }
+            base = (base * 0.92).max(6.0);
+        }
+        let (_, pad, inner) = fit(base);
+        let height = (base * anim.scale).clamp(6.0, h);
+        let tracking = look.tracking * height;
+        let block = fonts.measure(&full, height, tracking, inner[0]);
+        let align = match area.align {
+            assetcraft_storyboard::BoxAlign::Left => -1,
+            assetcraft_storyboard::BoxAlign::Center => 0,
+            assetcraft_storyboard::BoxAlign::Right => 1,
+        };
+        let left = match align {
+            -1 => ax + pad[0],
+            1 => ax + aw - pad[0] - block[0],
+            _ => ax + (aw - block[0]) / 2.0,
+        };
+        let top = ay + (ah - block[1]) / 2.0 + anim.offset_y * h;
+        let plate = [ax, ay + anim.offset_y * h, aw, ah];
+        let at = [left, top, block[0], block[1]];
+        let words = Words { height, tracking, wrap: inner[0], at, plate, align, color: rgb(look.text) };
+        self.paint_words(out, t, &shown, anim, fonts, words);
+    }
+
+    /// The plate (an overlay's, else the words' drop shadow), the words' decor, the finish
+    /// passes and the words, laid out as `l` says.
+    fn paint_words(&self, out: &mut Rgba, t: &Title, shown: &str, anim: &AnimFrame, fonts: &text::Fonts, l: Words) {
+        let (kind, look) = (t.kind, &t.look);
+        let h = self.height as f32;
+        let Words { height, tracking, wrap, at: [left, top, bw, bh], plate, align, color } = l;
+        if kind == TextKind::Overlay {
             match t.plate {
                 Some(PlateLayer { color: fill, alpha }) => {
                     let a = (f32::from(alpha) / 255.0 * anim.alpha).clamp(0.0, 1.0);
-                    draw::rect(
-                        out,
-                        left - pad[0],
-                        top - pad[1],
-                        block[0] + 2.0 * pad[0],
-                        block[1] + 2.0 * pad[1],
-                        rgb(fill),
-                        a,
-                    );
+                    draw::rect(out, plate[0], plate[1], plate[2], plate[3], rgb(fill), a);
                 }
                 None => {
-                    fonts.draw(
+                    fonts.draw_aligned(
                         out,
-                        &shown,
+                        shown,
                         height,
                         tracking,
                         wrap,
@@ -655,20 +767,21 @@ impl Compositor {
                         top + 1.5,
                         [0, 0, 0],
                         0.63 * anim.alpha,
+                        align,
                     );
                 }
             }
         }
         let pad = [height * 0.45, height * 0.25];
-        for r in assetcraft_storyboard::text_decor(look, kind, [left, top, block[0], block[1]], h, pad) {
+        for r in assetcraft_storyboard::text_decor(look, kind, [left, top, bw, bh], h, pad) {
             draw::rect(out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha * anim.alpha);
         }
         // Shadow, outline or glow: the same words, under them (themes 1f).
         for p in assetcraft_storyboard::finish_passes(look, height) {
             let a = p.alpha * anim.alpha;
-            fonts.draw(out, &shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a);
+            fonts.draw_aligned(out, shown, height, tracking, wrap, left + p.dx, top + p.dy, rgb(p.color), a, align);
         }
-        fonts.draw(out, &shown, height, tracking, wrap, left, top, color, anim.alpha);
+        fonts.draw_aligned(out, shown, height, tracking, wrap, left, top, color, anim.alpha, align);
     }
 
     /// Draw text that names a user theme with that theme's look (TP2a-2).
@@ -702,16 +815,21 @@ impl Compositor {
         words: &str,
         elapsed: f64,
         shown: f64,
+        area: Option<assetcraft_storyboard::TextBox>,
     ) -> Result<(), String> {
         let fill = design_fill(d, words);
         let (dw, dh) = d.design.size();
         let (fw, fh) = (self.width as f32, self.height as f32);
-        let [x, y, w, _] = match &self.crop {
+        let [x, y, w, h] = match &self.crop {
             Some(f) => {
                 let [x, y, w, h] = f.place(dw as f32, dh as f32);
                 [x * fw, y * fh, w * fw, h * fh]
             }
             None => draw::contain_rect(self.width, self.height, (dw, dh)),
+        };
+        let [x, y, w] = match area.and_then(|a| design_in_area(&d.design, [x, y, w, h], a.rect(fw, fh), a.align)) {
+            Some(placed) => placed,
+            None => [x, y, w],
         };
         let scale = f64::from(w) / f64::from(dw.max(1));
         let frame = d.design.render(&fill, design_secs(d, elapsed, shown), scale).map_err(|e| e.to_string())?;

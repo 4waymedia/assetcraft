@@ -529,7 +529,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Text Clip Area",
         "Storyboard",
         None,
-        "{clip: number, align?: left|center|right (in the title-safe area), width?: percent of the frame's width (15–90), height?: percent of its height (8–60), y?: where its middle is, percent of the height from the top, center?: true (dead centre: align center, y 50), reset?: true (alone: the title falls where it does by itself)} → {clip, changed, area: {align, width, height, y} | null, from: {align, width, height, y}} (R-T19: where the clip's title sits and its size; starts from its area or `from`, the built-in banners' box; values are clamped so it stays inside the title-safe area; stored now, drawn from step L4 of the title layers; one undo step)",
+        "{clip: number, align?: left|center|right (in the title-safe area), width?: percent of the frame's width (15–90), height?: percent of its height (8–60), y?: where its middle is, percent of the height from the top, center?: true (dead centre: align center, y 50), reset?: true (alone: the title falls where it does by itself)} → {clip, changed, area: {align, width, height, y} | null, from: {align, width, height, y}} (R-T19, L4: where the clip's title sits and its size — the words wrap to its width and shrink to fit, an overlay's plate fills it, a design is scaled whole into it keeping its shape, a full-frame design keeps its frame; starts from its area or `from`, about where the title falls by itself; values are clamped so it stays inside the title-safe area; one undo step)",
         crate::text_cmd::sb_text_area
     ),
     cmd!(

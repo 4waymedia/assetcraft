@@ -1793,6 +1793,18 @@ fn a_clip_places_and_sizes_its_title_area_inside_the_title_safe_area() {
     assert!(!serde_json::to_string(&board.clip(id).unwrap().text_style).unwrap().contains("area"));
     let shot = board.clips.iter().find(|c| c.text_kind().is_none()).map(|c| c.id).expect("a shot");
     assert!(set_text_area(&mut board, shot, Some(d)).is_err(), "only text clips");
+    // Where an area starts (L5), and where it lands in a frame (L4).
+    use crate::{TextKind, TextPosition};
+    assert_eq!(TextBox::natural(TextKind::Overlay, TextPosition::LowerThirdLeft, false), TextBox::BANNER);
+    assert_eq!(TextBox::natural(TextKind::Card, TextPosition::LowerThirdLeft, true), TextBox::BANNER);
+    assert_eq!(TextBox::natural(TextKind::Overlay, TextPosition::LowerThirdRight, false).align, BoxAlign::Right);
+    let card = TextBox::natural(TextKind::Card, TextPosition::Top, false);
+    assert_eq!((card.align, card.width, card.y), (BoxAlign::Center, 800, 500));
+    assert_eq!(TextBox::BANNER.rect(1920.0, 1080.0).map(f32::round), [96.0, 716.0, 1100.0, 237.0]);
+    let r = TextBox { align: BoxAlign::Right, ..TextBox::BANNER }.rect(1920.0, 1080.0);
+    assert!((r[0] + r[2] - (1920.0 - 96.0)).abs() < 0.5, "right against the safe edge: {r:?}");
+    let c = TextBox::BANNER.centered().rect(1920.0, 1080.0);
+    assert!(((c[0] + c[2] / 2.0) - 960.0).abs() < 0.5 && ((c[1] + c[3] / 2.0) - 540.0).abs() < 0.5);
 }
 
 #[test]

@@ -171,11 +171,13 @@ pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
         ));
     }
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
-    let current = board.clip(id).and_then(|c| c.text_style.area);
+    let clip = board.clip(id).ok_or_else(|| CmdError::BadParams(format!("no clip #{}", id.0)))?;
+    let current = clip.text_style.area;
+    let from = natural_area(s, clip);
     let area = if reset {
         None
     } else {
-        let mut b = current.unwrap_or(TextBox::BANNER);
+        let mut b = current.unwrap_or(from);
         if center {
             b = b.centered();
         }
@@ -195,7 +197,7 @@ pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
         "clip": id.0,
         "changed": changed,
         "area": area.map(area_json),
-        "from": area_json(TextBox::BANNER),
+        "from": area_json(from),
     }))
 }
 
@@ -215,6 +217,14 @@ pub(crate) fn sb_title(s: &mut Session, p: &Value) -> CmdResult {
         o.insert("area".into(), title.area.map_or(Value::Null, area_json));
     }
     Ok(out)
+}
+
+/// Where `clip`'s area starts before it has one: about where its title falls by itself
+/// (`TextBox::natural`; a built-in or pack design: the banner box).
+pub(crate) fn natural_area(s: &Session, clip: &assetcraft_storyboard::Clip) -> TextBox {
+    let kind = clip.text_kind().unwrap_or(assetcraft_storyboard::TextKind::Overlay);
+    let designed = s.clip_design(clip).is_some();
+    TextBox::natural(kind, clip.text_style.position, designed)
 }
 
 /// An area in percent of the frame, as the command takes it.

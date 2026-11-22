@@ -207,6 +207,14 @@ works with any Style › Preset, so the timing and the look are chosen apart.
   (**Laser Trace** or **Stack**, filled with the clip's theme, so they work with any theme), or
   none (the theme's words). In, Duration, Effect and Out start as "Theme (…)": they follow the
   theme until you choose your own, and choosing "Theme" again goes back.
+- **Area:** where the title sits and its size, for every title. **Left / Center / Right** keep it
+  to that side of the title-safe area, **Width**, **Height** and **Vertical** size and place it
+  (the Viewer follows the slider as you drag), **Dead center** puts it in the middle and **Reset**
+  lets it fall where it does by itself. The words wrap to the width and get smaller if they
+  don't fit; an overlay's plate fills the area; a design (Laser Trace, Stack, a pack's own) is
+  scaled whole into it and keeps its shape; a design that fills the frame keeps its frame.
+  Command: `storyboard.text.area {clip, align?, width?, height?, y?, center?, reset?}` (percent of
+  the frame); `storyboard.title {clip}` shows a title's layers.
 - **Commands:** the Inspector runs `storyboard.text.style` (`{clip, theme?, animation?, duration?,
   effect?, exit?, position?}`; `"theme"` for a move follows the theme again). To see every theme
   with its colours, moves and any load problems:

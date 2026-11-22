@@ -8,8 +8,8 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Backdrop, Clip, DecorRect, DesignPick, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextEffect,
-    TextExit, TextKind, TextPosition, TextTheme, Timing, UserLooks,
+    AnimFrame, Backdrop, BoxAlign, Clip, DecorRect, DesignPick, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox,
+    TextEffect, TextExit, TextKind, TextPosition, TextTheme, Timing, UserLooks,
 };
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -280,6 +280,10 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     // The notes wrap inside the value column; unwrapped, a long one widened the Inspector past
     // the window and it vanished (Paul, 2026-11-20).
     let note_w = (ui.available_width() - NOTE_INDENT).max(80.0);
+    // The title's area (L5): where it starts before it has one, and a slider held right now.
+    let natural = TextBox::natural(kind, style.position, drawn_by.is_some());
+    let mut area_ui =
+        AreaUi { drag: nav.state.storyboard.area_drag.filter(|(c, _)| *c == id).map(|(_, b)| b), commit: None };
     egui::Grid::new(("sb-text-style", id)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Theme");
         egui::ComboBox::from_id_salt(("sb-theme", id)).selected_text(selected).show_ui(ui, |ui| {
@@ -448,7 +452,7 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         }
         ui.end_row();
         ui.label("Position");
-        ui.add_enabled_ui(kind == TextKind::Overlay, |ui| {
+        ui.add_enabled_ui(kind == TextKind::Overlay && style.area.is_none(), |ui| {
             egui::ComboBox::from_id_salt(("sb-pos", id))
                 .selected_text(style.position.name())
                 .show_ui(ui, |ui| {
@@ -459,12 +463,24 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
                     }
                 })
                 .response
-                .on_disabled_hover_text("Cards centre their text; switch to Overlay to place it");
+                .on_disabled_hover_text(if style.area.is_some() {
+                    "Placed by its area below; Reset the area to use Position"
+                } else {
+                    "Cards centre their text; switch to Overlay to place it"
+                });
         });
         ui.end_row();
+        area_rows(ui, &mut area_ui, id, style.area, natural);
     });
     if let Some(p) = style_edit {
         nav.run("storyboard.text.style", p);
+    }
+    match area_ui.commit.take() {
+        Some(p) => {
+            nav.state.storyboard.area_drag = None;
+            nav.run("storyboard.text.area", p);
+        }
+        None => nav.state.storyboard.area_drag = area_ui.drag.map(|b| (id, b)),
     }
     if let Some((command, p)) = edit_design {
         nav.run(command, p);
@@ -518,6 +534,95 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         format!("Up for the whole clip ({clip_secs:.1} s)")
     };
     ui.weak(caption);
+}
+
+/// An area slider: its label, its key, its value, its range and its hint.
+type AreaRow = (&'static str, &'static str, f32, (f32, f32), &'static str);
+
+/// The area rows' state for one pass: a slider held (the box shown live) and what to commit.
+struct AreaUi {
+    drag: Option<TextBox>,
+    commit: Option<serde_json::Value>,
+}
+
+/// The title's area (L5; Paul, 2026-11-20: "alignment left|right|center, width, height,
+/// vertical placement … and there should be a button for dead center"): Left / Center / Right,
+/// **Dead center** and **Reset** (a row of their own), then Width, Height and Vertical sliders in percent of
+/// the frame. A slider shows its box live in the Viewer while held and commits once on release
+/// (one undo step); clicks commit at once. Before the title has an area, the sliders start from
+/// where it falls by itself (`natural`).
+fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, area: Option<TextBox>, natural: TextBox) {
+    let shown = a.drag.or(area).unwrap_or(natural).clamped();
+    ui.label("Area").on_hover_text("Where the title sits and its size, inside the title-safe area");
+    ui.horizontal(|ui| {
+        for al in BoxAlign::ALL {
+            let on = area.is_some_and(|b| b.align == al);
+            if ui.selectable_label(on, al.name()).on_hover_text("Keep to this side of the title-safe area").clicked()
+                && !on
+            {
+                a.commit = Some(json!({ "clip": id, "align": al.id() }));
+            }
+        }
+    });
+    ui.end_row();
+    // On a row of their own: beside the three sides they widened the Inspector past its width.
+    ui.label("");
+    ui.horizontal(|ui| {
+        if ui.button("Dead center").on_hover_text("The middle of the frame, at the same size").clicked() {
+            a.commit = Some(json!({ "clip": id, "center": true }));
+        }
+        if ui
+            .add_enabled(area.is_some(), egui::Button::new("Reset"))
+            .on_hover_text("Back to where the title falls by itself")
+            .on_disabled_hover_text("The title falls where it does by itself")
+            .clicked()
+        {
+            a.commit = Some(json!({ "clip": id, "reset": true }));
+        }
+    });
+    ui.end_row();
+    let pct = |v: u16| f32::from(v) / 10.0;
+    let rows: [AreaRow; 3] = [
+        ("Width", "width", pct(shown.width), (pct(TextBox::WIDTH.0), pct(TextBox::WIDTH.1)), "Of the frame's width"),
+        (
+            "Height",
+            "height",
+            pct(shown.height),
+            (pct(TextBox::HEIGHT.0), pct(TextBox::HEIGHT.1)),
+            "Of the frame's height",
+        ),
+        ("Vertical", "y", pct(shown.y), (0.0, 100.0), "Where its middle is, from the top"),
+    ];
+    for (label, key, value, (lo, hi), tip) in rows {
+        ui.label(label).on_hover_text(tip);
+        let mut v = value;
+        let r = ui.add(egui::Slider::new(&mut v, lo..=hi).suffix(" %").max_decimals(1));
+        // Only the user's hand moves it: a slider can nudge a value onto its own grid on the
+        // first frame and call that a change, which would commit an area nobody asked for.
+        let by_hand = r.dragged() || r.drag_stopped() || r.has_focus() || r.clicked();
+        let moved = r.changed() && by_hand && (v - value).abs() >= 0.05;
+        if moved {
+            let pm = (v * 10.0).round().clamp(0.0, 1000.0) as u16;
+            let mut b = shown;
+            match key {
+                "width" => b.width = pm,
+                "height" => b.height = pm,
+                _ => b.y = pm,
+            }
+            a.drag = Some(b.clamped());
+        }
+        if r.drag_stopped() || (moved && !r.dragged()) {
+            let b = a.drag.unwrap_or(shown);
+            a.commit = Some(json!({
+                "clip": id,
+                "align": b.align.id(),
+                "width": f64::from(b.width) / 10.0,
+                "height": f64::from(b.height) / 10.0,
+                "y": f64::from(b.y) / 10.0,
+            }));
+        }
+        ui.end_row();
+    }
 }
 
 /// The width of the Inspector's label column and the gap after it: what a note in the value

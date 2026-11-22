@@ -1176,9 +1176,40 @@ impl TextBox {
     /// The built-in banners' own (Laser Trace, Stack): left, 1100 × 236 of 1920 × 1080, its
     /// middle 834 px down. Where a new area starts until each title kind has its own (L4).
     pub const BANNER: TextBox = TextBox { align: BoxAlign::Left, width: 573, height: 219, y: 772 };
+    /// Where a title's area starts before it has one (L5): about where it falls by itself — a
+    /// card's words in the middle, an overlay at its position, a built-in banner in its box.
+    pub fn natural(kind: TextKind, position: TextPosition, banner: bool) -> TextBox {
+        let banner_box = TextBox::BANNER;
+        match (kind, banner) {
+            (_, true) => banner_box,
+            (TextKind::Card, false) => TextBox { align: BoxAlign::Center, width: 800, height: 400, y: 500 },
+            (TextKind::Overlay, false) => match position {
+                TextPosition::LowerThirdLeft => banner_box,
+                TextPosition::LowerThirdRight => TextBox { align: BoxAlign::Right, ..banner_box },
+                TextPosition::Center => TextBox { align: BoxAlign::Center, y: 500, ..banner_box },
+                TextPosition::Top => TextBox { align: BoxAlign::Center, y: 160, ..banner_box },
+                TextPosition::Bottom => TextBox { align: BoxAlign::Center, y: 840, ..banner_box },
+            },
+        }
+    }
+
     /// Dead centre, at the same size.
     pub fn centered(self) -> TextBox {
         TextBox { align: BoxAlign::Center, y: 500, ..self }
+    }
+
+    /// The area in a `width × height` frame, `[x, y, w, h]` in pixels, clamped first: left,
+    /// centred or right inside the title-safe area, its middle at `y`.
+    pub fn rect(self, width: f32, height: f32) -> [f32; 4] {
+        let b = self.clamped();
+        let (w, h) = (width * f32::from(b.width) / 1000.0, height * f32::from(b.height) / 1000.0);
+        let safe = width * f32::from(Self::SAFE) / 1000.0;
+        let x = match b.align {
+            BoxAlign::Left => safe,
+            BoxAlign::Center => (width - w) / 2.0,
+            BoxAlign::Right => width - safe - w,
+        };
+        [x, height * f32::from(b.y) / 1000.0 - h / 2.0, w, h]
     }
 
     /// The box with each value in range: sizes within [`WIDTH`](Self::WIDTH) and

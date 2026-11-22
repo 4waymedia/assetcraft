@@ -2757,3 +2757,76 @@ fn the_viewer_shows_titles_as_the_export_draws_them() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
+
+/// L5: the Inspector's area rows; a held slider's box shows live in the Viewer without an undo
+/// step, and a command's area (Center) lands as one.
+#[test]
+fn a_titles_area_previews_live_and_commits_once() {
+    let ctx = Context::default();
+    let mut nav = nav();
+    nav.run("storyboard.new", json!({ "sample": true }));
+    nav.run("storyboard.view", json!({ "view": "strip" }));
+    let (card, at) = {
+        let b = nav.session().storyboard().unwrap();
+        let i = b.clips.iter().position(|c| c.text_kind() == Some(assetcraft_storyboard::TextKind::Card)).unwrap();
+        (b.clips[i].id.0, b.starts()[i].as_secs_f64() + 0.5)
+    };
+    nav.run("storyboard.select", json!({ "clip": card }));
+    nav.run("storyboard.seek", json!({ "seconds": at }));
+    let mut t = 0.0;
+    let settle = |nav: &mut Navigator, t: &mut f64| {
+        let before = nav.state.storyboard.title_tex.0.get(&card).map(|(i, _)| *i);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            frame(&ctx, nav, Vec::new(), *t);
+            *t += 0.02;
+            let now = nav.state.storyboard.title_tex.0.get(&card).map(|(i, _)| *i);
+            if now.is_some() && now != before {
+                return;
+            }
+            assert!(std::time::Instant::now() < until, "the Viewer never changed");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    settle(&mut nav, &mut t);
+    // A slider held: the Viewer shows the box, nothing is committed (the board keeps no area).
+    let held = assetcraft_storyboard::TextBox {
+        align: assetcraft_storyboard::BoxAlign::Left,
+        width: 400,
+        height: 200,
+        y: 300,
+    };
+    nav.state.storyboard.area_drag = Some((card, held));
+    settle(&mut nav, &mut t);
+    assert!(
+        nav.session()
+            .storyboard()
+            .unwrap()
+            .clip(assetcraft_storyboard::ClipId(card))
+            .unwrap()
+            .text_style
+            .area
+            .is_none()
+    );
+    nav.state.storyboard.area_drag = None;
+    // Dead centre: one undo step, and the Viewer follows.
+    nav.run("storyboard.text.area", json!({ "clip": card, "center": true, "width": 40 })).expect("centred");
+    settle(&mut nav, &mut t);
+    let area = |nav: &Navigator| {
+        nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().text_style.area
+    };
+    assert_eq!(area(&nav).map(|b| (b.align, b.width, b.y)), Some((assetcraft_storyboard::BoxAlign::Center, 400, 500)));
+    nav.run("storyboard.undo", json!({}));
+    assert!(area(&nav).is_none(), "one undo step");
+    // Looking is not touching: an overlay's sliders start at 57.3 % and the like, and showing
+    // them for a while commits nothing (found 2026-11-21: a slider's own rounding did).
+    let shot = nav.session().storyboard().unwrap().clips.iter().find(|c| c.text_kind().is_none()).unwrap().id.0;
+    nav.run("storyboard.text.set", json!({ "clip": shot, "text": "Over" }));
+    nav.run("storyboard.select", json!({ "clip": shot }));
+    for _ in 0..5 {
+        t += 0.05;
+        frame(&ctx, &mut nav, Vec::new(), t);
+    }
+    let over = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(shot)).unwrap().clone();
+    assert!(over.text_style.area.is_none(), "{:?}", over.text_style.area);
+}

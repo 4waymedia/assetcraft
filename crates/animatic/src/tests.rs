@@ -882,3 +882,96 @@ fn a_title_alone_over_its_shot_is_the_export_frame() {
     assert!(c.title_frame(&shot, 1.0).is_none(), "a shot has no title");
     eprintln!("worst difference: {worst}");
 }
+
+/// Where a title draws: the box around every pixel of its title frame that isn't clear.
+fn inked(f: &Rgba) -> Option<[u32; 4]> {
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    for y in 0..f.height {
+        for x in 0..f.width {
+            if f.get(x, y)[3] > 8 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    (x1 > x0).then_some([x0, y0, x1, y1])
+}
+
+/// L4: a title's area places it: an overlay's plate fills the area and its words fit inside,
+/// aligned with it; long words get smaller to fit; a card's words go in the area over its
+/// full-frame background; a built-in banner is scaled whole into it, keeping its shape.
+#[test]
+fn a_titles_area_places_and_sizes_it() {
+    use assetcraft_storyboard::{BoxAlign, DesignPick, TextBox, TextTheme};
+    let laser =
+        Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::LASER_TRACE).unwrap().unwrap());
+    let set = Arc::new(crate::DesignSet {
+        builtins: vec![("banner-laser-trace".into(), laser)],
+        ..crate::DesignSet::default()
+    });
+    let (w, h) = (640u32, 360u32);
+    let mut c = compositor(w, h).with_designs(set);
+    let area = TextBox { align: BoxAlign::Center, width: 500, height: 200, y: 500 };
+    let [ax, ay, aw, ah] = area.rect(w as f32, h as f32);
+    let inside = |b: [u32; 4], slack: f32| {
+        b[0] as f32 >= ax - slack
+            && b[1] as f32 >= ay - slack
+            && b[2] as f32 <= ax + aw + slack
+            && b[3] as f32 <= ay + ah + slack
+    };
+    // An overlay on Bold (a plate): the plate is the area.
+    let mut over = clip(5, ShotType::Ws, 4);
+    over.overlay = Some("Over the shot".into());
+    over.text_style.theme = TextTheme::Bold;
+    over.text_style.area = Some(area);
+    let f = c.title_frame(&over, f64::INFINITY).unwrap();
+    let b = inked(&f).expect("it draws");
+    assert!(inside(b, 1.0), "{b:?} in {:?}", [ax, ay, aw, ah]);
+    assert!(b[2] - b[0] + 2 >= aw as u32 && b[3] - b[1] + 2 >= ah as u32, "the plate fills it: {b:?}");
+    // Long words fit, smaller; left and right aligned they keep to their side.
+    over.overlay = Some("How to do the thing that takes a very long title indeed".into());
+    let f = c.title_frame(&over, f64::INFINITY).unwrap();
+    assert!(inside(inked(&f).unwrap(), 1.0));
+    // Without a plate (Minimal): only the words ink, left- or right-aligned in the area.
+    over.text_style.theme = TextTheme::Minimal;
+    over.overlay = Some("Short".into());
+    for (align, side) in [(BoxAlign::Left, -1), (BoxAlign::Right, 1)] {
+        over.text_style.area = Some(TextBox { align, ..area });
+        let [a2x, _, a2w, _] = TextBox { align, ..area }.rect(w as f32, h as f32);
+        let b = inked(&c.title_frame(&over, f64::INFINITY).unwrap()).unwrap();
+        let (l, r) = (b[0] as f32 - a2x, a2x + a2w - b[2] as f32);
+        if side < 0 { assert!(l < r, "left: {l} vs {r}") } else { assert!(r < l, "right: {l} vs {r}") }
+    }
+    // A card: the background fills the frame, the words go in the area.
+    let mut card = clip(6, ShotType::Ttl, 4);
+    card.description = "Card words".into();
+    card.text_style.area = Some(TextBox { y: 200, ..area });
+    let plain = {
+        let mut p = card.clone();
+        p.description.clear();
+        c.title_frame(&p, f64::INFINITY).unwrap()
+    };
+    let words = c.title_frame(&card, f64::INFINITY).unwrap();
+    let mut diff = Rgba::clear(w, h);
+    for (i, (a, b)) in words.data.as_chunks::<4>().0.iter().zip(plain.data.as_chunks::<4>().0).enumerate() {
+        if a != b {
+            diff.data[i * 4 + 3] = 255;
+        }
+    }
+    let [cx, cy, cw, ch] = TextBox { y: 200, ..area }.rect(w as f32, h as f32);
+    let b = inked(&diff).expect("words");
+    assert!(
+        b[0] as f32 >= cx && b[2] as f32 <= cx + cw && b[1] as f32 >= cy - 1.0 && b[3] as f32 <= cy + ch + 1.0,
+        "{b:?}"
+    );
+    // A built-in banner, scaled whole into the area, centred.
+    let mut banner = clip(7, ShotType::Ws, 6);
+    banner.overlay = Some("ISTANBUL".into());
+    banner.text_style.design = Some(DesignPick::LaserTrace);
+    let natural = inked(&c.title_frame(&banner, f64::INFINITY).unwrap()).unwrap();
+    banner.text_style.area = Some(area);
+    let b = inked(&c.title_frame(&banner, f64::INFINITY).unwrap()).unwrap();
+    assert_ne!(b, natural, "it moved");
+    let mid = (b[0] + b[2]) as f32 / 2.0;
+    assert!((mid - w as f32 / 2.0).abs() < 8.0, "centred: {b:?}");
+    assert!(inside(b, 12.0), "within the area, give or take its glow: {b:?}");
+}
