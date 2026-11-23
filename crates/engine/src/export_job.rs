@@ -80,6 +80,11 @@ pub struct ExportProgress {
     pub elapsed_secs: f64,
     /// Assets that would not decode (`path: reason`), reported once done.
     pub problems: Vec<String>,
+    /// Rendering titles (`storyboard.renderTitles`, SF1b-1c): files finished so far / in all.
+    /// Both 0 for a Cut export.
+    pub files_done: usize,
+    /// Files to render.
+    pub files_total: usize,
     /// What to tell the user (an error, or "Exported …").
     pub message: String,
 }
@@ -94,6 +99,8 @@ impl Default for ExportProgress {
             bytes: None,
             elapsed_secs: 0.0,
             problems: Vec::new(),
+            files_done: 0,
+            files_total: 0,
             message: String::new(),
         }
     }
@@ -122,24 +129,24 @@ impl ExportProgress {
 /// The background exporter: one job at a time.
 #[derive(Debug, Default)]
 pub(crate) struct Exporter {
-    progress: Arc<Mutex<ExportProgress>>,
-    cancel: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    pub(crate) progress: Arc<Mutex<ExportProgress>>,
+    pub(crate) cancel: Arc<AtomicBool>,
+    pub(crate) thread: Option<std::thread::JoinHandle<()>>,
     /// Video bytes per second of 1080p24-equivalent at QP 24, measured on the last export that
     /// finished, so the next estimate reflects this user's pictures.
     rate: Arc<Mutex<Option<f64>>>,
 }
 
-fn lock(p: &Mutex<ExportProgress>) -> std::sync::MutexGuard<'_, ExportProgress> {
+pub(crate) fn lock(p: &Mutex<ExportProgress>) -> std::sync::MutexGuard<'_, ExportProgress> {
     p.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Exporter {
-    fn progress(&self) -> ExportProgress {
+    pub(crate) fn progress(&self) -> ExportProgress {
         lock(&self.progress).clone()
     }
 
-    fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         lock(&self.progress).running()
     }
 
@@ -590,7 +597,7 @@ impl Job {
 }
 
 /// Write through `fill` to `.<name>.<pid>.tmp` beside `path`, flush, rename over `path`.
-fn write_atomic(
+pub(crate) fn write_atomic(
     path: &Path,
     fill: impl FnOnce(&mut dyn Write) -> Result<u64, assetcraft_video::VideoError>,
 ) -> Result<u64, String> {

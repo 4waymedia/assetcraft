@@ -145,19 +145,92 @@ fn a_built_in_pick_that_loaded_is_not_a_problem() {
 }
 
 #[test]
-fn needs_a_saved_board_and_for_now_a_dry_run() {
+fn needs_a_saved_board() {
     let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
     assert!(s.enabled("storyboard.renderTitles").is_err(), "no board");
     run(&mut s, "storyboard.new", json!({ "name": "Unsaved" }));
     assert!(s.enabled("storyboard.renderTitles").is_err(), "never saved");
     assert!(matches!(s.execute("storyboard.renderTitles", &json!({ "dryRun": true })), Err(CmdError::Unavailable(_))));
     let dir = temp("gate");
-    let mut s = saved(&dir);
+    let s = saved(&dir);
     assert!(s.enabled("storyboard.renderTitles").is_ok());
-    assert!(
-        matches!(s.execute("storyboard.renderTitles", &json!({})), Err(CmdError::Unavailable(m)) if m.contains("dryRun")),
-        "rendering is SF1b-1c"
-    );
+}
+
+/// The board shrunk to 160 × 96 at 24 fps, so rendering is quick.
+fn small(s: &mut Session) {
+    let board = s.boards.board.as_mut().unwrap();
+    board.frame = Some(assetcraft_storyboard::FrameSpec {
+        width: 160,
+        height: 96,
+        fps: 24,
+        ..assetcraft_storyboard::FrameSpec::default()
+    });
+}
+
+fn leftovers(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .map(|r| {
+            r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn renders_the_missing_titles_as_mp4s_then_reuses_them() {
+    let dir = temp("render");
+    let mut s = saved(&dir);
+    small(&mut s);
+    let out = run(&mut s, "storyboard.renderTitles", json!({ "wait": true }));
+    assert_eq!(out["started"], json!(true));
+    let status = &out["status"];
+    assert_eq!(status["stage"], json!("done"), "{out}");
+    assert_eq!((status["filesDone"].clone(), status["filesTotal"].clone()), (json!(2), json!(2)));
+    assert_eq!(status["framesDone"], json!(3 * 24 + 2 * 24), "the card's 3 s and the overlay's 2 s");
+    assert!(out["message"].as_str().unwrap().starts_with("Rendered 2 title(s)"), "{out}");
+    let folder = dir.join("Hollow Saint.media").join("titles");
+    assert!(leftovers(&folder).is_empty());
+    for t in out["titles"].as_array().unwrap() {
+        let path = PathBuf::from(t["path"].as_str().unwrap());
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[4..8], b"ftyp", "{}", path.display());
+        assert!(bytes.windows(4).any(|w| w == b"avc1") && !bytes.windows(4).any(|w| w == b"mp4a"), "video only");
+        let back = assetcraft_media::VideoReader::open(&path).unwrap();
+        assert_eq!(back.size(), (160, 96));
+    }
+    // The overlay is merged with its shot: the picture is under the words.
+    let overlay = PathBuf::from(out["titles"][1]["path"].as_str().unwrap());
+    let mut back = assetcraft_media::VideoReader::open(&overlay).unwrap();
+    let frame = back.frame(1.0, 160).unwrap();
+    let lit = frame.rgba.as_chunks::<4>().0.iter().filter(|p| p[..3].iter().any(|c| *c > 16)).count();
+    assert!(lit > 160 * 96 / 2, "the shot, not black: {lit}");
+
+    // Everything is there now: the plan reuses both, and a render renders nothing.
+    let plan = plan(&mut s);
+    assert_eq!((plan["render"].clone(), plan["reuse"].clone()), (json!(0), json!(2)), "{plan}");
+    let again = run(&mut s, "storyboard.renderTitles", json!({ "wait": true }));
+    assert_eq!(again["status"]["filesTotal"], json!(0), "{again}");
+    // `overwrite` renders them all again; a changed title renders only itself.
+    let all = run(&mut s, "storyboard.renderTitles", json!({ "wait": true, "overwrite": true }));
+    assert_eq!(all["status"]["filesDone"], json!(2), "{all}");
+    s.boards.board.as_mut().unwrap().clips[0].description = "Some saints were saved".into();
+    let one = run(&mut s, "storyboard.renderTitles", json!({ "wait": true }));
+    assert_eq!(one["status"]["filesDone"], json!(1), "{one}");
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 3, "the old card's file stays (SF1b-3 tidies)");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_problem_stops_the_render_and_nothing_is_written() {
+    let dir = temp("stop");
+    let mut s = saved(&dir);
+    small(&mut s);
+    s.boards.board.as_mut().unwrap().clips[2].asset_ids =
+        vec![AssetId(dir.join("gone.jpg").to_string_lossy().into_owned())];
+    let err = s.execute("storyboard.renderTitles", &json!({ "wait": true })).unwrap_err().to_string();
+    assert!(err.contains("stop the render") && err.contains("(media)") && err.contains("gone.jpg"), "{err}");
+    assert!(!dir.join("Hollow Saint.media").exists(), "nothing written");
+    assert_eq!(run(&mut s, "storyboard.exportStatus", json!({}))["stage"], json!("idle"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A pack theme in `<dir>/Themes/<id>/` whose banner is Laser Trace (or `banner` bytes), its
