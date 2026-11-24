@@ -1,0 +1,72 @@
+# Manual test pass: storyboard titles, frames and the road to FilmCraft
+
+_2026-11-24 · SF1b (titles to FilmCraft) · in use; first run found TF-1 to TF-4_
+
+- **Scope:** what to try by hand in the app after each storyboard or title step: the frame
+  (film and social shapes), title cards and overlays (themes, designs, area, fields), the
+  Viewer and the Inspector preview, export, and the title render for FilmCraft.
+- **Project goal it serves:** a storyboard that looks the same in the Viewer, the exported
+  video and FilmCraft, on any frame shape, with nothing designed going missing.
+- **Immediate area of improvement:** titles on vertical and portrait frames (TF-1 to TF-4 below).
+
+How to use it: run a section after the step that touches it, and the whole list before a
+release. Each check names what to do and what you should see. Write a failure up as a finding
+(ID, what you did, what you saw, a screenshot), the way TF-1 is below.
+
+## Findings from this pass
+
+| ID   | What Paul saw (2026-11-24)                                                                                   | Cause (confirmed with a probe render)                                                                                                                                                                                                                                                                                       | Fix                                                                                                                                                                                                                            | Owner  | Status |
+|------|--------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|--------|
+| TF-1 | On a vertical / 4:5 board a Stack card's **Vertical** slider barely moves it: at 0 it still sits 20–30 % down | The built-in banners (Laser Trace, Stack) are 1920 × 1080 comps placed by the frame's **picture crop**. With *Fill horizontal* that comp is a 16:9 band across the middle of a tall frame, and `Banner::fit` keeps the banner inside the comp (`crates/titles/src/builtin.rs:106-110`), so every Vertical value lands in the band. With *Fill vertical* it moves, but the comp is wider than the frame | Build the banner in a comp the frame's own shape (`Banner` gets the comp size; `builtin_kept` keys on it) and place a title's design by the frame, not by the picture crop (`crates/animatic/src/lib.rs` `draw_design`)        | Claude | open   |
+| TF-2 | The area's box ignores the social safe square: a 90 % wide area runs under LIKE · COMMENT · SHARE            | `TextBox` clamps to a 5 % title-safe margin on every frame (`crates/storyboard/src/text.rs` `TextBox::SAFE`, `rect`, `clamped`); the vertical guide (`VERTICAL_SAFE`, 15 / 25 / 10 / 15 %, `frame.rs:177`) only draws the overlay lines                                                                                       | `rect` / `clamped` take the frame's `safe_area()`, so 0 % and 100 % Vertical meet the safe square's top and bottom on a social frame                                                                                          | Claude | open   |
+| TF-3 | Changing an existing board to a social frame: titles don't refit                                             | Same as TF-1 (areas are ‰ of the frame, so they follow; the banner's comp doesn't)                                                                                                                                                                                                                                         | Comes with TF-1; check T-F4 after                                                                                                                                                                                              | Claude | open   |
+| TF-4 | The Inspector's preview of a Stack card is 16:9-ish and shows the plain theme words, not the banner          | The preview still paints with the old painter, not the title service (R-T20 remainder)                                                                                                                                                                                                                                       | Draw the preview from `Session::title_frame` in the board's shape                                                                                                                                                              | Claude | open   |
+
+## 1. Frame (F-checks)
+
+| ID   | Do                                                                                        | Expect                                                                                              |
+|------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| T-F1 | New storyboard on each preset: 16:9, 4:5, 9:16 vertical, 1:1                               | The Viewer takes the shape; the safe-zone overlay shows on vertical only                            |
+| T-F2 | On a vertical board switch *Fill vertical* ↔ *Fill horizontal*, and Snap Top / Center / Bottom | Shots re-crop; **titles stay where their area puts them** (TF-1)                                    |
+| T-F3 | Change 24 → 30 fps on a board with titles                                                  | Lengths hold in seconds; the timeline's frame ticks change                                          |
+| T-F4 | Make a 16:9 board with titles, then switch it to 9:16                                     | Every title refits in the new frame, nothing clipped at the sides (TF-3)                            |
+| T-F5 | Undo a frame change                                                                        | The old frame and every title's look come back                                                      |
+
+## 2. Title cards and overlays (T-T)
+
+| ID    | Do                                                                                                  | Expect                                                                                                  |
+|-------|-----------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| T-T1  | Card ↔ Overlay on a clip                                                                            | The card takes the frame; the overlay sits over the shot                                                |
+| T-T2  | Each built-in theme on a card and on an overlay                                                     | The look changes; words stay inside the area                                                            |
+| T-T3  | Design → Laser Trace, Stack, then back to the theme's own                                           | Each draws; the other controls stay usable; going back works                                            |
+| T-T4  | Area: Left / Center / Right, **Dead center**, **Reset**                                             | It moves to that side / the exact middle / where it started                                            |
+| T-T5  | Width and Height from min to max                                                                    | The plate or banner grows and shrinks; long words wrap or shrink, never spill                           |
+| T-T6  | **Vertical 0 % and 100 %**, on 16:9 and on 9:16 and 4:5                                             | It meets the top and bottom of the safe area (title-safe on film, the social safe square on vertical) — TF-1, TF-2 |
+| T-T7  | A very long title (two sentences)                                                                   | Smaller words, still on the plate                                                                       |
+| T-T8  | Caption field on Laser Trace / Stack; clear it with ↺                                               | The caption shows; cleared, the banner shows none                                                       |
+| T-T9  | A pack theme with its own design: fill each of its fields                                           | Each field changes its text in the design                                                               |
+| T-T10 | Move the slider without letting go, then press Undo                                                | One undo step per drag; nothing commits from just opening the clip                                      |
+| T-T11 | Inspector preview for each of the above                                                              | It matches the Viewer, in the board's shape (TF-4)                                                      |
+
+## 3. Viewer, playback and export (T-X)
+
+| ID   | Do                                                                    | Expect                                                                                    |
+|------|-----------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| T-X1 | Play across every title                                               | In, hold and out animate; no flash of the plain theme before a design loads               |
+| T-X2 | File › Export video, default settings                                  | The file plays; titles look as in the Viewer                                              |
+| T-X3 | Export a vertical board                                               | A tall file at the board's size; titles placed as in the Viewer                           |
+| T-X4 | Cancel an export half way                                             | No file and no `.tmp` left beside it                                                      |
+
+## 4. Titles for FilmCraft (T-S; CLI until SF1b-3)
+
+Run from the repo with the app's CLI against a saved storyboard.
+
+| ID   | Do                                                                    | Expect                                                                                         |
+|------|-----------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
+| T-S1 | `storyboard.renderTitles {"dryRun": true}`                            | Every title listed, card or overlay, with its `c<clip>-<hash>.mp4` path; `ready: true`         |
+| T-S2 | Point a clip at a missing picture, dry run again                       | `ready: false` and a `media` problem naming the file                                           |
+| T-S3 | `storyboard.renderTitles {"wait": true}`                              | The `.mp4` files appear in `<name>.media\titles\`, play, and match the Viewer                  |
+| T-S4 | Run it again                                                          | Nothing rendered (`filesTotal: 0`)                                                              |
+| T-S5 | Change one title's words, run again                                   | Only that title renders                                                                         |
+| T-S6 | A vertical board                                                      | Tall title files, titles where the Viewer puts them (after TF-1)                               |
+| T-S7 | `filmcraft-cli import` of `docs\sibling-apis\filmcraft-otio-fixture.otio` | Imports with the media offline (OT-6)                                                      |
