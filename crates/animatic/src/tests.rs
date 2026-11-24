@@ -1047,7 +1047,7 @@ fn a_built_in_banner_follows_its_area_on_a_tall_frame() {
                 over.text_style.design = Some(DesignPick::Stack);
                 over.text_style.area = Some(area);
                 let b = inked(&c.title_frame(&over, f64::INFINITY).unwrap()).expect("it draws");
-                let [ax, ay, aw, ah] = area.rect(fw as f32, fh as f32);
+                let [ax, ay, aw, ah] = area.rect_in(fw as f32, fh as f32, spec.safe_area());
                 let slack = 3.0;
                 assert!(
                     b[0] as f32 >= ax - slack
@@ -1065,6 +1065,52 @@ fn a_built_in_banner_follows_its_area_on_a_tall_frame() {
                 tops.push(b[1]);
             }
             assert!(tops[0] < tops[1] && tops[1] < tops[2], "{fw}×{fh} {fill:?}: it moves with Vertical: {tops:?}");
+        }
+    }
+}
+
+/// TF-2: on a vertical frame a title's area keeps inside the social safe area (clear of the
+/// username, the caption and the like / comment / share column), whatever its numbers say: a
+/// 100 % wide area is the safe area's width, Vertical's ends meet its top and bottom.
+#[test]
+fn a_vertical_titles_area_keeps_inside_the_social_safe_area() {
+    use assetcraft_storyboard::{BoxAlign, DesignPick, FrameSpec, TextBox, TextTheme};
+    let stack = Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::STACK).unwrap().unwrap());
+    let set =
+        Arc::new(crate::DesignSet { builtins: vec![("banner-stack".into(), stack)], ..crate::DesignSet::default() });
+    let (fw, fh) = (216u32, 384u32);
+    let spec = FrameSpec { width: fw, height: fh, fps: 24, ..FrameSpec::default() };
+    let [sx, sy, sw, sh] = spec.safe_area().map(|v| v);
+    let (left, top, right, bottom) = (sx * fw as f32, sy * fh as f32, (sx + sw) * fw as f32, (sy + sh) * fh as f32);
+    let mut c = compositor(fw, fh).with_crop(Some(&spec)).with_designs(set);
+    for design in [None, Some(DesignPick::Stack)] {
+        for (y, at_top) in [(0u16, true), (1000, false)] {
+            let mut over = clip(5, ShotType::Ws, 4);
+            over.overlay = Some("Chorus title".into());
+            over.text_style.theme = TextTheme::Bold;
+            over.text_style.design = design;
+            over.text_style.area = Some(TextBox { align: BoxAlign::Center, width: 1000, height: 140, y });
+            let b = inked(&c.title_frame(&over, f64::INFINITY).unwrap()).expect("it draws");
+            let slack = 3.0;
+            assert!(
+                b[0] as f32 >= left - slack && b[2] as f32 <= right + slack,
+                "{design:?} y={y}: {b:?} across {left}..{right}"
+            );
+            assert!(
+                b[1] as f32 >= top - slack && b[3] as f32 <= bottom + slack,
+                "{design:?} y={y}: {b:?} in {top}..{bottom}"
+            );
+            if at_top {
+                assert!(
+                    (b[1] as f32 - top).abs() <= fh as f32 * 0.03,
+                    "{design:?}: Vertical 0 meets the safe top: {b:?} vs {top}"
+                );
+            } else {
+                assert!(
+                    (b[3] as f32 - bottom).abs() <= fh as f32 * 0.03,
+                    "{design:?}: Vertical 100 meets the safe bottom: {b:?} vs {bottom}"
+                );
+            }
         }
     }
 }

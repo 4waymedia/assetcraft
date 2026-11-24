@@ -2547,6 +2547,21 @@ fn a_card_picks_a_built_in_banner_design() {
         t += 0.02;
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    // TF-4: the Inspector's preview draws it too, through the same title service, in a texture
+    // of its own, as small as the preview.
+    let clip = nav.session().storyboard().unwrap().clip(assetcraft_storyboard::ClipId(card)).unwrap().clone();
+    let slot = crate::strip_view::preview_slot(&clip);
+    while !nav.state.storyboard.title_tex.0.contains_key(&slot) {
+        assert!(std::time::Instant::now() < until, "the Inspector's preview never showed the design");
+        frame(&ctx, &mut nav, Vec::new(), t);
+        t += 0.02;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let size = |key: u32| nav.state.storyboard.title_tex.0.get(&key).map(|(_, tex)| tex.size()).unwrap();
+    let (viewer, preview) = (size(card), size(slot));
+    assert!(preview[0] < viewer[0], "the preview's frames are its own size: {preview:?} vs {viewer:?}");
+    let ratio = |s: [usize; 2]| s[0] as f32 / s[1] as f32;
+    assert!((ratio(preview) - ratio(viewer)).abs() < 0.05, "the board's shape: {preview:?} vs {viewer:?}");
     // The Inspector stays its width and on screen with the design's note in it (Paul,
     // 2026-11-20: picking Laser Trace or Stack pushed it off the window).
     for design in ["banner-laser-trace", "banner-stack"] {
@@ -2575,9 +2590,9 @@ fn a_card_picks_a_built_in_banner_design() {
     assert!(nav.session().clip_design(&clip).is_none());
 }
 
-/// TP4b-2: a pack theme's display font reaches egui when themes load, and the Inspector's
-/// preview sets that theme's words in it (the Viewer draws titles through the compositor since
-/// L3, in the export's fonts); a built-in theme stays Inter.
+/// TP4b-2: a pack theme's display font reaches egui when themes load (titles themselves are
+/// drawn by the compositor in the export's fonts, in the Viewer since L3 and in the Inspector's
+/// preview since TF-4).
 #[test]
 fn the_viewer_sets_a_pack_themes_words_in_its_font() {
     let dir = std::env::temp_dir().join(format!("assetcraft-ui-font-{}", std::process::id()));
@@ -2608,19 +2623,6 @@ fn the_viewer_sets_a_pack_themes_words_in_its_font() {
         frame(&ctx, &mut nav, Vec::new(), f64::from(i) * 0.02);
     }
     assert!(ctx.fonts(|f| f.families().contains(&family)), "egui has the pack's face");
-    let looks = nav.session().user_looks().clone();
-    let painter = ctx.layer_painter(egui::LayerId::background());
-    let style = |id: Option<&str>| assetcraft_storyboard::TextStyle {
-        theme_id: id.and_then(assetcraft_storyboard::ThemeId::new),
-        ..Default::default()
-    };
-    assert_eq!(crate::text_view::family_for(&painter, &style(Some("acme-type")), &looks), family);
-    assert_eq!(crate::text_view::family_for(&painter, &style(None), &looks), egui::FontFamily::Proportional);
-    // Not loaded: Inter (the clip draws its built-in theme).
-    assert_eq!(
-        crate::text_view::family_for(&painter, &style(Some("elsewhere")), &looks),
-        egui::FontFamily::Proportional
-    );
     // The face is the pack's: monospaced, so "iiii" is as wide as "MMMM" (Inter's isn't).
     let width = |family: &egui::FontFamily, text: &str| {
         ctx.fonts_mut(|f| {

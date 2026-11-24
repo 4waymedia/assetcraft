@@ -1124,6 +1124,18 @@ fn show_clip(
 /// card without one is drawn whole). While a frame renders, the clip's last one stays up, so
 /// typing or restyling never blinks; a clip without text draws nothing.
 fn show_title(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, elapsed: f64) {
+    show_title_as(nav, ui, frame, clip, elapsed, clip.id.0);
+}
+
+/// The texture slot of a clip's title in the Inspector's preview (TF-4): its own, so the
+/// preview's smaller frames don't take turns with the Viewer's in one texture.
+pub(crate) fn preview_slot(clip: &Clip) -> u32 {
+    clip.id.0 | 0x8000_0000
+}
+
+/// [`show_title`] into texture slot `key` (the clip's id in the Viewer, [`preview_slot`] in the
+/// Inspector).
+pub(crate) fn show_title_as(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, elapsed: f64, key: u32) {
     let width = (frame.width() * ui.ctx().pixels_per_point()).clamp(64.0, 1920.0) as u32;
     // An area slider held (L5): the box as it is under the pointer, before it's committed.
     let dragged = nav.state.storyboard.area_drag.filter(|(id, _)| *id == clip.id.0).map(|(_, area)| {
@@ -1133,7 +1145,6 @@ fn show_title(nav: &mut Navigator, ui: &mut Ui, frame: Rect, clip: &Clip, elapse
     });
     let clip = dragged.as_ref().unwrap_or(clip);
     let Some(lookup) = nav.session.title_frame(clip, elapsed, width) else { return };
-    let key = clip.id.0;
     let shown = match lookup {
         assetcraft_engine::DesignLookup::Ready(f) => Some(f),
         assetcraft_engine::DesignLookup::Pending(near) => {

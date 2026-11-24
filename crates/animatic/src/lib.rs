@@ -761,7 +761,7 @@ impl Compositor {
     ) {
         let look = &t.look;
         let (w, h) = (self.width as f32, self.height as f32);
-        let [ax, ay, aw, ah] = area.rect(w, h);
+        let [ax, ay, aw, ah] = area.rect_in(w, h, self.safe_area());
         let shown = shown_text(words, t.text.uppercase, anim);
         let full = shown_text(words, t.text.uppercase, &AnimFrame::REST);
         // The theme's size, stepped down until the finished words fit inside the padding.
@@ -889,7 +889,8 @@ impl Compositor {
                 // Built in the frame's shape and laid over the whole frame, not placed by the
                 // picture crop (TF-1: on a tall board the crop held it in a 16:9 band).
                 let (headline, caption) = design_words(words, fields);
-                let banner = builtin_banner(&headline, &caption, area.map(|a| a.rect(fw, fh)), (fw, fh));
+                let banner =
+                    builtin_banner(&headline, &caption, area.map(|a| a.rect_in(fw, fh, self.safe_area())), (fw, fh));
                 let design = if banner == assetcraft_titles::builtin::Banner::DEFAULT {
                     std::sync::Arc::clone(&d.design)
                 } else {
@@ -902,7 +903,9 @@ impl Compositor {
                 (design, [0.0, 0.0, fw])
             }
             None => {
-                let placed = area.and_then(|a| design_in_area(&d.design, [x, y, w, h], a.rect(fw, fh), a.align));
+                let placed = area.and_then(|a| {
+                    design_in_area(&d.design, [x, y, w, h], a.rect_in(fw, fh, self.safe_area()), a.align)
+                });
                 (std::sync::Arc::clone(&d.design), placed.unwrap_or([x, y, w]))
             }
         };
@@ -911,6 +914,12 @@ impl Compositor {
         let image = Rgba { width: frame.width, height: frame.height, data: frame.rgba };
         draw::over(out, &image, x.round() as i64, y.round() as i64);
         Ok(())
+    }
+
+    /// Where a title's area may go (TF-2): the board's safe area — the social guide on a vertical
+    /// frame, title-safe otherwise — or title-safe with no frame.
+    fn safe_area(&self) -> [f32; 4] {
+        self.crop.as_ref().map_or(assetcraft_storyboard::TextBox::FILM_SAFE, |f| f.safe_area())
     }
 
     /// A shot's picture into the frame by the crop (`FrameSpec::place`, the Viewer's rule).

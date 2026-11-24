@@ -2052,3 +2052,33 @@ fn a_clip_fills_its_designs_own_fields() {
     c.design_fields[0].control = " ".into();
     assert!(board.validate(&crate::Limits::default()).is_err());
 }
+
+/// TF-2: an area is kept inside the frame's own safe area. The film one gives what `clamped` /
+/// `rect` always gave; a vertical frame's social guide narrows it, moves a centred box in from
+/// the wider right margin, and sets where Vertical's ends are.
+#[test]
+fn an_area_keeps_inside_the_frames_safe_area() {
+    use crate::{BoxAlign, FrameSpec, TextBox};
+    let film = FrameSpec::default().safe_area();
+    for b in [
+        TextBox::BANNER,
+        TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0 },
+        TextBox { align: BoxAlign::Center, width: 600, height: 600, y: 1000 },
+    ] {
+        assert_eq!(b.clamped_in(film), b.clamped(), "{b:?}");
+        assert_eq!(b.rect_in(1920.0, 1080.0, film), b.rect(1920.0, 1080.0), "{b:?}");
+    }
+    let vertical = FrameSpec { width: 1080, height: 1920, ..FrameSpec::default() }.safe_area();
+    let wide = TextBox { align: BoxAlign::Center, width: 1000, height: 1000, y: 0 }.clamped_in(vertical);
+    assert_eq!((wide.width, wide.height), (750, 600), "the guide's 75 % × 60 %");
+    let [x, y, w, h] = wide.rect_in(1080.0, 1920.0, vertical);
+    assert!((x - 108.0).abs() < 1.0 && (w - 810.0).abs() < 1.0, "moved in to the guide: {x} {w}");
+    assert!((y - 288.0).abs() < 1.0 && (h - 1152.0).abs() < 1.0, "{y} {h}");
+    let b = TextBox { align: BoxAlign::Center, width: 500, height: 140, y: 500 };
+    assert_eq!(b.y_range(vertical), (220, 680), "top 15 % + half, bottom 75 % − half");
+    assert_eq!(b.y_range(film), (120, 880));
+    let [_, top, _, _] = TextBox { y: 0, ..b }.rect_in(1080.0, 1920.0, vertical);
+    assert!((top - 288.0).abs() < 1.0, "Vertical 0 meets the guide's top: {top}");
+    // Nonsense in, the film area out.
+    assert_eq!(b.clamped_in([f32::NAN, 0.0, 2.0, -1.0]), b.clamped());
+}

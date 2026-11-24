@@ -1201,31 +1201,79 @@ impl TextBox {
         TextBox { align: BoxAlign::Center, y: 500, ..self }
     }
 
-    /// The area in a `width × height` frame, `[x, y, w, h]` in pixels, clamped first: left,
-    /// centred or right inside the title-safe area, its middle at `y`.
+    /// The film title-safe area, `[x, y, w, h]` fractions of the frame: [`SAFE`](Self::SAFE)
+    /// in from each side. A vertical frame's is its own (`FrameSpec::safe_area`, TF-2).
+    pub const FILM_SAFE: [f32; 4] = [0.05, 0.05, 0.90, 0.90];
+
+    /// The area in a `width × height` frame inside the film title-safe area ([`rect_in`](Self::rect_in)).
     pub fn rect(self, width: f32, height: f32) -> [f32; 4] {
-        let b = self.clamped();
+        self.rect_in(width, height, Self::FILM_SAFE)
+    }
+
+    /// The area in a `width × height` frame, `[x, y, w, h]` in pixels, clamped first
+    /// ([`clamped_in`](Self::clamped_in)): left or right against the safe area's side, centred
+    /// on the frame (moved in when that would cross the safe area, as on a vertical frame whose
+    /// right margin is wider), its middle at `y`.
+    pub fn rect_in(self, width: f32, height: f32, safe: [f32; 4]) -> [f32; 4] {
+        let safe = safe_permille(safe);
+        let b = self.clamped_in_permille(safe);
         let (w, h) = (width * f32::from(b.width) / 1000.0, height * f32::from(b.height) / 1000.0);
-        let safe = width * f32::from(Self::SAFE) / 1000.0;
+        let left = width * f32::from(safe[0]) / 1000.0;
+        let right = width * f32::from(safe[0] + safe[2]) / 1000.0;
         let x = match b.align {
-            BoxAlign::Left => safe,
-            BoxAlign::Center => (width - w) / 2.0,
-            BoxAlign::Right => width - safe - w,
+            BoxAlign::Left => left,
+            BoxAlign::Center => ((width - w) / 2.0).clamp(left, (right - w).max(left)),
+            BoxAlign::Right => (right - w).max(left),
         };
         [x, height * f32::from(b.y) / 1000.0 - h / 2.0, w, h]
     }
 
-    /// The box with each value in range: sizes within [`WIDTH`](Self::WIDTH) and
-    /// [`HEIGHT`](Self::HEIGHT), the middle so the whole area stays inside the title-safe
-    /// area.
+    /// The box in range for the film title-safe area ([`clamped_in`](Self::clamped_in)).
     pub fn clamped(self) -> TextBox {
-        let width = self.width.clamp(Self::WIDTH.0, Self::WIDTH.1);
-        let height = self.height.clamp(Self::HEIGHT.0, Self::HEIGHT.1);
+        self.clamped_in(Self::FILM_SAFE)
+    }
+
+    /// The box with each value in range for safe area `safe` (`[x, y, w, h]` fractions of the
+    /// frame): sizes within [`WIDTH`](Self::WIDTH) and [`HEIGHT`](Self::HEIGHT) and no bigger
+    /// than the safe area, the middle so the whole area stays inside it.
+    pub fn clamped_in(self, safe: [f32; 4]) -> TextBox {
+        self.clamped_in_permille(safe_permille(safe))
+    }
+
+    /// Where the area's middle can go in safe area `safe` at this height, `(top, bottom)` ‰ of
+    /// the frame: the Inspector's Vertical runs from one to the other (TF-2).
+    pub fn y_range(self, safe: [f32; 4]) -> (u16, u16) {
+        let safe = safe_permille(safe);
+        let b = self.clamped_in_permille(safe);
+        let half = b.height.div_ceil(2);
+        let lo = safe[1].saturating_add(half);
+        (lo, (safe[1] + safe[3]).saturating_sub(half).max(lo))
+    }
+
+    fn clamped_in_permille(self, safe: [u16; 4]) -> TextBox {
+        let width = self.width.clamp(Self::WIDTH.0, Self::WIDTH.1.min(safe[2]).max(Self::WIDTH.0));
+        let height = self.height.clamp(Self::HEIGHT.0, Self::HEIGHT.1.min(safe[3]).max(Self::HEIGHT.0));
         let half = height.div_ceil(2);
-        let lo = Self::SAFE + half;
-        let hi = (1000 - Self::SAFE).saturating_sub(half).max(lo);
+        let lo = safe[1].saturating_add(half);
+        let hi = (safe[1] + safe[3]).saturating_sub(half).max(lo);
         TextBox { align: self.align, width, height, y: self.y.clamp(lo, hi) }
     }
+}
+
+/// A safe area in ‰ of the frame, `[x, y, w, h]`, kept sane: inside the frame, at least a
+/// fifth of it each way (anything else falls back to the film title-safe area).
+fn safe_permille(safe: [f32; 4]) -> [u16; 4] {
+    let ok = safe.iter().all(|v| v.is_finite())
+        && safe[0] >= 0.0
+        && safe[1] >= 0.0
+        && safe[2] >= 0.2
+        && safe[3] >= 0.2
+        && safe[0] + safe[2] <= 1.0 + 1e-4
+        && safe[1] + safe[3] <= 1.0 + 1e-4;
+    let s = if ok { safe } else { TextBox::FILM_SAFE };
+    let pm = |v: f32| (v * 1000.0).round().clamp(0.0, 1000.0) as u16;
+    let (x, y) = (pm(s[0]), pm(s[1]));
+    [x, y, pm(s[2]).min(1000 - x), pm(s[3]).min(1000 - y)]
 }
 
 /// Clip `id`'s design field `control` (any case): `Some(words)` fills it, `None` gives it back to

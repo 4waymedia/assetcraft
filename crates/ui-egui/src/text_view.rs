@@ -1,5 +1,6 @@
-//! Text clips on screen: Cards and Overlays painted with their theme and intro animation, and
-//! the kind chip that switches a clip between them.
+//! Text clips on screen: the kind chip that switches a clip between Card and Overlay, and the
+//! Inspector's TEXT section. Titles themselves are drawn by the compositor through the title
+//! service, in the Viewer and in the Inspector's preview alike (L3, TF-4).
 //!
 //! Draws only. Looks and animation frames come from `assetcraft_storyboard::text`; a click on
 //! the chip (Shot map tile, Strip clip) or on the Inspector's Card | Overlay buttons runs
@@ -8,113 +9,15 @@
 use crate::Navigator;
 use crate::storyboard_view::rgb;
 use assetcraft_storyboard::{
-    AnimFrame, Backdrop, BoxAlign, Clip, DecorRect, DesignPick, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox,
-    TextEffect, TextExit, TextKind, TextPosition, TextTheme, Timing, UserLooks,
+    Backdrop, BoxAlign, Clip, DesignPick, Look, MAX_TEXT_MS, MIN_TEXT_MS, TextAnimation, TextBox, TextEffect, TextExit,
+    TextKind, TextPosition, TextTheme, UserLooks,
 };
-use egui::text::{LayoutJob, TextFormat};
-use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, FontId, Painter, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
 
 /// Kind chip size.
 const CHIP_W: f32 = 52.0;
 const CHIP_H: f32 = 14.0;
-
-/// Paint a clip's text into `frame` (16:9), `elapsed` seconds into the clip (`f64::INFINITY` =
-/// at rest). A Card fills the frame with its theme's background first; an Overlay paints only
-/// the text, over whatever is already there. Clips without text paint nothing.
-/// `looks` are the user's loaded themes, for a clip that names one (TP2a-2).
-pub(crate) fn paint_text(painter: &Painter, frame: Rect, clip: &Clip, elapsed: f64, looks: &UserLooks) {
-    let anim = clip.text_style.frame_at_with(looks, elapsed, clip.duration.as_secs_f64());
-    paint_text_frame(painter, frame, clip, anim, looks);
-}
-
-/// [`paint_text`] at a given animation frame (the Inspector's preview runs its own clock).
-fn paint_text_frame(painter: &Painter, frame: Rect, clip: &Clip, anim: AnimFrame, looks: &UserLooks) {
-    let (Some(kind), Some(words)) = (clip.text_kind(), clip.text()) else { return };
-    let style = clip.text_style;
-    let look = style.look_with(looks);
-    let painter = painter.with_clip_rect(frame.intersect(painter.clip_rect()));
-    if kind == TextKind::Card {
-        // Over a background asset the theme colour becomes a scrim, so the image shows through.
-        if clip.background().is_some() {
-            painter.rect_filled(frame, 0, rgb(look.background).gamma_multiply(0.35));
-        } else {
-            paint_backdrop(&painter, frame, &look.backdrop);
-            for r in assetcraft_storyboard::card_decor(&look, frame.width(), frame.height()) {
-                paint_decor(&painter, frame.min, &r, 1.0);
-            }
-        }
-    }
-    // Past its duration (and its out) the words are gone; a Card keeps its background.
-    if words.trim().is_empty() || anim.is_hidden() {
-        return;
-    }
-    let size = match kind {
-        TextKind::Card => look.card_size,
-        TextKind::Overlay => look.overlay_size,
-    };
-    let height = (frame.height() * size * anim.scale).clamp(6.0, 120.0);
-    let shown = shown_text(words, look.uppercase, &anim);
-    let color = rgb(look.text).gamma_multiply(anim.alpha);
-    let wrap = frame.width() * if kind == TextKind::Card { 0.8 } else { 0.6 };
-    let family = family_for(&painter, &style, looks);
-    let galley = painter.layout_job(job(&shown, &family, height, look.tracking * height, color, wrap));
-    let full = painter.layout_job(job(
-        &shown_text(words, look.uppercase, &AnimFrame::REST),
-        &family,
-        height,
-        look.tracking * height,
-        color,
-        wrap,
-    ));
-    // Place by the finished text's size so a typewriter doesn't drift as it types.
-    let block = full.size();
-    let (ax, ay, align) = match kind {
-        TextKind::Card => (0.5, 0.5, 0),
-        TextKind::Overlay => style.position.anchor(),
-    };
-    let anchor = pos2(frame.left() + frame.width() * ax, frame.top() + frame.height() * ay);
-    let left = match align {
-        -1 => anchor.x,
-        1 => anchor.x - block.x,
-        _ => anchor.x - block.x / 2.0,
-    };
-    let top = anchor.y - block.y / 2.0 + anim.offset_y * frame.height();
-    let at = pos2(left, top);
-    if kind == TextKind::Overlay {
-        let pad = vec2(height * 0.45, height * 0.25);
-        let plate = Rect::from_min_size(at, block).expand2(pad);
-        match look.plate {
-            Some((fill, alpha)) => {
-                let a = (f32::from(alpha) * anim.alpha).round().clamp(0.0, 255.0) as u8;
-                let c = rgb(fill);
-                painter.rect_filled(plate, 2, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a));
-            }
-            None => {
-                let shadow = Color32::from_black_alpha((160.0 * anim.alpha) as u8);
-                let g = painter.layout_job(job(&shown, &family, height, look.tracking * height, shadow, wrap));
-                painter.galley(at + vec2(1.0, 1.5), g, shadow);
-            }
-        }
-    }
-    let pad = [height * 0.45, height * 0.25];
-    for r in assetcraft_storyboard::text_decor(&look, kind, [left, top, block.x, block.y], frame.height(), pad) {
-        paint_decor(&painter, Pos2::ZERO, &r, anim.alpha);
-    }
-    // Shadow, outline or glow: the same words, under them (themes 1f).
-    for p in assetcraft_storyboard::finish_passes(&look, height) {
-        let tint = rgb(p.color).gamma_multiply((p.alpha * anim.alpha).clamp(0.0, 1.0));
-        painter.galley_with_override_text_color(at + vec2(p.dx, p.dy), galley.clone(), tint);
-    }
-    painter.galley(at, galley, color);
-}
-
-/// One decor shape, offset by `origin` (card decor is laid out from the frame's corner; text
-/// decor is already in screen space).
-fn paint_decor(painter: &Painter, origin: Pos2, r: &DecorRect, alpha: f32) {
-    let rect = Rect::from_min_size(origin + vec2(r.x, r.y), vec2(r.w, r.h));
-    painter.rect_filled(rect, 0, rgb(r.color).gamma_multiply((r.alpha * alpha).clamp(0.0, 1.0)));
-}
 
 /// A card's backdrop in the Viewer: a grid of vertex colours from the same
 /// [`Backdrop::color_at`] the export uses (gradient and vignette; grain is export-only — at
@@ -143,36 +46,6 @@ pub(crate) fn paint_backdrop(painter: &Painter, rect: Rect, b: &Backdrop) {
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-}
-
-fn shown_text(words: &str, uppercase: bool, anim: &AnimFrame) -> String {
-    let text = if uppercase { words.to_uppercase() } else { words.to_owned() };
-    let n = anim.visible_chars(text.chars().count());
-    text.chars().take(n).collect()
-}
-
-/// The family a clip's words are set in: its pack theme's display face (TP4b-2) when the theme
-/// is loaded and egui has the face (it arrives a pass after themes load), else Inter.
-pub(crate) fn family_for(
-    painter: &Painter,
-    style: &assetcraft_storyboard::TextStyle,
-    looks: &UserLooks,
-) -> egui::FontFamily {
-    let Some(id) = style.theme_id.filter(|id| looks.contains(*id)) else { return egui::FontFamily::Proportional };
-    let family = crate::theme::pack_family(id.as_str());
-    if painter.ctx().fonts(|f| f.families().contains(&family)) { family } else { egui::FontFamily::Proportional }
-}
-
-fn job(text: &str, family: &egui::FontFamily, height: f32, tracking: f32, color: Color32, wrap: f32) -> LayoutJob {
-    let format = TextFormat {
-        font_id: FontId::new(height, family.clone()),
-        color,
-        extra_letter_spacing: tracking,
-        ..TextFormat::default()
-    };
-    let mut job = LayoutJob::single_section(text.to_owned(), format);
-    job.wrap.max_width = wrap.max(10.0);
-    job
 }
 
 /// The kind chip in the top-right corner of `rect`: `CARD ⇄` or `OVERLAY ⇄`. Returns the kind
@@ -494,7 +367,8 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
                 });
         });
         ui.end_row();
-        area_rows(ui, &mut area_ui, id, style.area, natural);
+        let safe = nav.session.storyboard().map_or(TextBox::FILM_SAFE, |b| b.frame_spec().safe_area());
+        area_rows(ui, &mut area_ui, id, (style.area, natural), safe);
     });
     if let Some(p) = style_edit {
         nav.run("storyboard.text.style", p);
@@ -512,16 +386,16 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
     if let Some((command, p)) = edit_design {
         nav.run(command, p);
     }
-    // Preview: replays the intro, then holds for a second.
-    // In the board's frame (F2): a vertical post previews tall, held to a sensible height.
+    // Preview (TF-4): the title as the Viewer and the export draw it — the title service's
+    // frames, design and area included — in the board's frame (F2): a vertical post previews
+    // tall, held to a sensible height.
     let ratio = nav.session.storyboard().map_or(16.0 / 9.0, |b| b.frame_spec().ratio() as f32).clamp(0.1, 10.0);
     let w = ui.available_width().min(268.0);
     let h = (w / ratio).min(220.0);
     let (frame, _) = ui.allocate_exact_size(vec2(h * ratio, h), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(frame, 2, Color32::from_rgb(0x2b, 0x31, 0x3b));
+    ui.painter().rect_filled(frame, 2, Color32::from_rgb(0x2b, 0x31, 0x3b));
     if kind == TextKind::Overlay {
-        painter.text(
+        ui.painter().text(
             frame.center(),
             Align2::CENTER_CENTER,
             "shot",
@@ -529,16 +403,25 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             Color32::from_gray(0x6a),
         );
     }
+    // A slider held shows its box here too, as in the Viewer.
+    let held = nav.state.storyboard.area_drag.filter(|(at, _)| *at == id).map(|(_, area)| {
+        let mut c = clip.clone();
+        c.text_style.area = Some(area);
+        c
+    });
+    let shown_clip = held.as_ref().unwrap_or(clip);
     let clip_secs = clip.duration.as_secs_f64();
     let looks = nav.session.user_looks().clone();
     let timing = style.timing_with(&looks);
     let timed = timing.duration_ms.is_some() || timing.exit != TextExit::None || timing.effect != TextEffect::None;
+    let slot = crate::strip_view::preview_slot(clip);
     if !timed {
         // Replays the in, then holds for a second.
         let intro = timing.animation.seconds();
         let cycle = intro + 1.0;
         let elapsed = if intro > 0.0 { ui.input(|i| i.time) % cycle } else { f64::INFINITY };
-        paint_text(painter, frame, clip, elapsed, &looks);
+        let at = if elapsed < intro { elapsed } else { f64::INFINITY };
+        crate::strip_view::show_title_as(nav, ui, frame, shown_clip, at, slot);
         // Repaint every frame only during the in; during the hold, wake once for the next replay.
         if elapsed < intro {
             ui.ctx().request_repaint();
@@ -547,13 +430,20 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
         }
         return;
     }
-    // In, effect, out, a beat of nothing, again. A long duration is shortened to 5 s here so
-    // the out comes round; the caption says the real numbers.
+    // In, effect, out, a beat of nothing, again, on the clip's own clock. A title up longer than
+    // the preview's 5 s plays its first half, then skips to its last, so the out comes round;
+    // the caption says the real numbers.
     let shown = timing.shown_secs(clip_secs);
     let p = shown.clamp(0.5, PREVIEW_MAX_SECS);
-    let preview = Timing { duration_ms: Some((p * 1000.0) as u32), ..timing };
-    let elapsed = ui.input(|i| i.time) % (p + PREVIEW_GAP_SECS);
-    paint_text_frame(painter, frame, clip, preview.frame_at(elapsed, p), &looks);
+    let t = ui.input(|i| i.time) % (p + PREVIEW_GAP_SECS);
+    let at = if t >= p {
+        shown + 1.0
+    } else if shown <= p || t < p / 2.0 {
+        t
+    } else {
+        shown - (p - t)
+    };
+    crate::strip_view::show_title_as(nav, ui, frame, shown_clip, at, slot);
     ui.ctx().request_repaint();
     let caption = if timing.duration_ms.is_some() && shown < clip_secs {
         format!("Up {shown:.1} s of the clip's {clip_secs:.1} s, then gone")
@@ -577,10 +467,12 @@ struct AreaUi {
 /// **Dead center** and **Reset** (a row of their own), then Width, Height and Vertical sliders in percent of
 /// the frame. A slider shows its box live in the Viewer while held and commits once on release
 /// (one undo step); clicks commit at once. Before the title has an area, the sliders start from
-/// where it falls by itself (`natural`).
-fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, area: Option<TextBox>, natural: TextBox) {
-    let shown = a.drag.or(area).unwrap_or(natural).clamped();
-    ui.label("Area").on_hover_text("Where the title sits and its size, inside the title-safe area");
+/// where it falls by itself (`natural`). Everything keeps inside the board's safe area `safe`
+/// (TF-2: the social guide on a vertical frame): Width and Height stop at its size, and Vertical
+/// runs from its top (0 %) to its bottom (100 %).
+fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, (area, natural): (Option<TextBox>, TextBox), safe: [f32; 4]) {
+    let shown = a.drag.or(area).unwrap_or(natural).clamped_in(safe);
+    ui.label("Area").on_hover_text("Where the title sits and its size, inside the safe area");
     ui.horizontal(|ui| {
         for al in BoxAlign::ALL {
             let on = area.is_some_and(|b| b.align == al);
@@ -609,16 +501,21 @@ fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, area: Option<TextBox>, natura
     });
     ui.end_row();
     let pct = |v: u16| f32::from(v) / 10.0;
+    // The biggest the safe area allows, and Vertical as a share of where the middle can go.
+    let big = TextBox { width: u16::MAX, height: u16::MAX, ..shown }.clamped_in(safe);
+    let (top, bottom) = shown.y_range(safe);
+    let span = f32::from(bottom.saturating_sub(top)).max(1.0);
+    let vertical = if bottom > top { f32::from(shown.y.saturating_sub(top)) / span * 100.0 } else { 50.0 };
     let rows: [AreaRow; 3] = [
-        ("Width", "width", pct(shown.width), (pct(TextBox::WIDTH.0), pct(TextBox::WIDTH.1)), "Of the frame's width"),
+        ("Width", "width", pct(shown.width), (pct(TextBox::WIDTH.0), pct(big.width)), "Of the frame's width"),
+        ("Height", "height", pct(shown.height), (pct(TextBox::HEIGHT.0), pct(big.height)), "Of the frame's height"),
         (
-            "Height",
-            "height",
-            pct(shown.height),
-            (pct(TextBox::HEIGHT.0), pct(TextBox::HEIGHT.1)),
-            "Of the frame's height",
+            "Vertical",
+            "y",
+            vertical,
+            (0.0, 100.0),
+            "0 % puts its top on the safe area's top, 100 % its bottom on the safe area's bottom",
         ),
-        ("Vertical", "y", pct(shown.y), (0.0, 100.0), "Where its middle is, from the top"),
     ];
     for (label, key, value, (lo, hi), tip) in rows {
         ui.label(label).on_hover_text(tip);
@@ -634,9 +531,9 @@ fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, area: Option<TextBox>, natura
             match key {
                 "width" => b.width = pm,
                 "height" => b.height = pm,
-                _ => b.y = pm,
+                _ => b.y = top + (v.clamp(0.0, 100.0) / 100.0 * span).round() as u16,
             }
-            a.drag = Some(b.clamped());
+            a.drag = Some(b.clamped_in(safe));
         }
         if r.drag_stopped() || (moved && !r.dragged()) {
             let b = a.drag.unwrap_or(shown);
