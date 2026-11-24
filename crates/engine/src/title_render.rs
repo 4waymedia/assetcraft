@@ -12,7 +12,10 @@
 //! - Without `dryRun` (SF1b-1c), and with no problem, every title not already there (every one
 //!   with `overwrite`) is rendered on the export thread: its frames exactly as the Cut draws
 //!   them over the clip (less a section's inset, which FilmCraft gets as its own clip), no
-//!   sound (the song is A1), H.264 at [`TITLE_QP`] in an `.mp4`, each written atomically.
+//!   sound (the song is A1), H.264 at [`TITLE_QP`] in an `.mp4`, each written atomically —
+//!   and decoded back first (SF1b-1d), through FilmCraft's own readers: all its frames there,
+//!   and early in the in, the hold's middle and late in the out each matching the frame drawn
+//!   ([`MATCH`]); a file that doesn't is never given its name and the render fails saying so.
 //!   `storyboard.exportStatus` / `storyboard.exportCancel` follow and stop it; `wait` blocks.
 //!
 //! Checks: a design the clip asks for didn't load (a built-in pick, or its pack's design for the
@@ -21,7 +24,7 @@
 //! gaps`): an effect the renderer doesn't know, a font that isn't there, footage the renderer
 //! isn't given (an unfilled Media field, or a file of the designer's). A dry run writes nothing.
 
-use crate::export_job::{ExportProgress, ExportStage, lock, write_atomic};
+use crate::export_job::{ExportProgress, ExportStage, lock, write_atomic_checked};
 use crate::{CmdError, CmdResult, Session};
 use assetcraft_animatic::Compositor;
 use assetcraft_storyboard::{BuiltEffect, Clip, EffectKind, Renderer, Storyboard, TICKS_PER_SECOND, TextKind, Ticks};
@@ -442,7 +445,11 @@ impl TitleJob {
                 pr.bytes = Some(bytes);
                 pr.frames_done = pr.frames_total;
                 pr.files_done = pr.files_total;
-                pr.message = format!("Rendered {} title(s) ({:.1} MiB)", self.todo.len(), bytes as f64 / 1_048_576.0);
+                pr.message = format!(
+                    "Rendered {} title(s) ({:.1} MiB), each decoded back and matching what was drawn",
+                    self.todo.len(),
+                    bytes as f64 / 1_048_576.0
+                );
             }
             Err(None) => {
                 pr.stage = ExportStage::Cancelled;
@@ -478,6 +485,8 @@ impl TitleJob {
             let last = Ticks(start.0.saturating_add(clip.duration.0.saturating_sub(1)));
             lock(&self.progress).path = Some(title.path.clone());
             let mut encoder = VideoEncoder::new(s).map_err(|e| Some(e.to_string()))?;
+            let samples = sample_frames(title.frames);
+            let mut kept: Vec<(u64, assetcraft_animatic::Rgba)> = Vec::with_capacity(samples.len());
             for i in 0..title.frames {
                 if self.cancel.load(Ordering::SeqCst) {
                     return Err(None);
@@ -485,6 +494,9 @@ impl TitleJob {
                 let at = Ticks(start.0.saturating_add(tick.0.saturating_mul(i)).min(last.0));
                 let frame = compositor.frame(&self.board, at);
                 encoder.push_rgba(&frame.data).map_err(|e| Some(e.to_string()))?;
+                if samples.contains(&i) {
+                    kept.push((i, frame));
+                }
                 let mut pr = lock(&self.progress);
                 done = done.saturating_add(1);
                 pr.frames_done = done;
@@ -494,10 +506,101 @@ impl TitleJob {
             if self.cancel.load(Ordering::SeqCst) {
                 return Err(None);
             }
-            bytes += write_atomic(&title.path, |out| assetcraft_video::mux(&video, None, Container::Mp4, out))
-                .map_err(Some)?;
+            // Decoded back before it takes its name (SF1b-1d): every frame there, and the in,
+            // hold and out as drawn.
+            let check = |tmp: &Path| decode_back(tmp, title, s.fps, &kept);
+            bytes += write_atomic_checked(
+                &title.path,
+                |out| assetcraft_video::mux(&video, None, Container::Mp4, out),
+                check,
+            )
+            .map_err(Some)?;
             lock(&self.progress).files_done += 1;
         }
         Ok(bytes)
     }
+}
+
+/// The frames a rendered title is checked at (SF1b-1d): early in its in, the middle of its hold,
+/// late in its out — an eighth in from each end and the middle — each once.
+pub fn sample_frames(frames: u64) -> Vec<u64> {
+    if frames == 0 {
+        return Vec::new();
+    }
+    let last = frames - 1;
+    let mut out = vec![(frames / 8).min(last), frames / 2, last.saturating_sub(frames / 8)];
+    out.dedup();
+    out
+}
+
+/// How far a decoded frame may stray from the drawn one: the mean difference per channel, and
+/// the share of pixels off by more than [`OFF`]. Measured 2026-11-24 at 1920 × 1080 and
+/// 1080 × 1920 (Cinematic + Stack card, Laser Trace overlay on a photo, H.264 at `TITLE_QP`):
+/// mean 0.5–2.0, no pixel off. 0.1 % of a 1080p frame is about 2,000 pixels — a 4 px line across
+/// half the frame — so a missing plate, word or beam shows.
+pub const MATCH: (f64, f64) = (4.0, 0.001);
+/// A pixel this far off in any channel counts as off.
+pub const OFF: u8 = 64;
+
+/// How decoded frame `got` compares with drawn frame `want` (`want` sampled to `got`'s size):
+/// `(mean difference per channel, share of pixels off)`.
+pub fn compare(want: &assetcraft_animatic::Rgba, got: &assetcraft_media::Frame) -> (f64, f64) {
+    let (gw, gh) = (got.width as usize, got.height as usize);
+    let (ww, wh) = (want.width as usize, want.height as usize);
+    if gw == 0 || gh == 0 || ww == 0 || wh == 0 || got.rgba.len() < gw * gh * 4 || want.data.len() < ww * wh * 4 {
+        return (255.0, 1.0);
+    }
+    let (mut sum, mut off) = (0u64, 0u64);
+    for y in 0..gh {
+        let wy = (y * wh / gh).min(wh - 1);
+        for x in 0..gw {
+            let wx = (x * ww / gw).min(ww - 1);
+            let (g, w) = ((y * gw + x) * 4, (wy * ww + wx) * 4);
+            let mut worst = 0u8;
+            for c in 0..3 {
+                let d = got.rgba[g + c].abs_diff(want.data[w + c]);
+                sum += u64::from(d);
+                worst = worst.max(d);
+            }
+            if worst > OFF {
+                off += 1;
+            }
+        }
+    }
+    let px = (gw * gh) as f64;
+    (sum as f64 / (px * 3.0), off as f64 / px)
+}
+
+/// Decode `file` the way FilmCraft reads it and check it against the title: as many frames as
+/// planned, and each kept frame where it should be and as drawn ([`MATCH`]).
+pub(crate) fn decode_back(
+    file: &Path,
+    title: &TitlePlan,
+    fps: u32,
+    kept: &[(u64, assetcraft_animatic::Rgba)],
+) -> Result<(), String> {
+    let name = title.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let fail = |why: String| format!("{name} (clip {}) didn't decode back as drawn: {why}", title.clip);
+    let mut reader = assetcraft_media::VideoReader::open(file).map_err(fail)?;
+    let fps = f64::from(fps.max(1));
+    let side = kept.first().map_or(1920, |(_, f)| f.width.max(f.height));
+    let end = reader.frame(f64::MAX / 4.0, side).map_err(fail)?;
+    if end.index.saturating_add(1) != title.frames {
+        return Err(fail(format!("{} frames, not {}", end.index.saturating_add(1), title.frames)));
+    }
+    for (i, want) in kept {
+        let got = reader.frame((*i as f64 + 0.5) / fps, side).map_err(fail)?;
+        if got.index != *i {
+            return Err(fail(format!("frame {i} came back as frame {}", got.index)));
+        }
+        let (mean, off) = compare(want, &got);
+        if mean > MATCH.0 || off > MATCH.1 {
+            return Err(fail(format!(
+                "at {:.2} s it is {mean:.1} off on average with {:.1} % of the picture changed",
+                *i as f64 / fps,
+                off * 100.0
+            )));
+        }
+    }
+    Ok(())
 }

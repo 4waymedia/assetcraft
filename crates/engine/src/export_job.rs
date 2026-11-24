@@ -601,6 +601,16 @@ pub(crate) fn write_atomic(
     path: &Path,
     fill: impl FnOnce(&mut dyn Write) -> Result<u64, assetcraft_video::VideoError>,
 ) -> Result<u64, String> {
+    write_atomic_checked(path, fill, |_| Ok(()))
+}
+
+/// [`write_atomic`] with `check` run on the finished temp file before it takes the real name
+/// (SF1b-1d: a rendered title is decoded back first); a failed check removes it and is the error.
+pub(crate) fn write_atomic_checked(
+    path: &Path,
+    fill: impl FnOnce(&mut dyn Write) -> Result<u64, assetcraft_video::VideoError>,
+    check: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<u64, String> {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).ok_or_else(|| "no folder".to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| format!("could not make {}: {e}", dir.display()))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -612,6 +622,7 @@ pub(crate) fn write_atomic(
         let file = out.into_inner().map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         drop(file);
+        check(&tmp)?;
         std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
         Ok(bytes)
     })();

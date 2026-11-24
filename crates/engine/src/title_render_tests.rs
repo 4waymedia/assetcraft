@@ -277,3 +277,59 @@ fn inside_a_design_a_missing_font_stops_it_and_so_does_a_design_that_did_not_ope
     assert_eq!(what, [json!("design")], "the banner didn't open: {p}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// SF1b-1d: where a title is checked, and how a decoded frame is compared with the drawn one.
+#[test]
+fn a_title_is_checked_at_its_in_hold_and_out() {
+    assert_eq!(crate::title_render::sample_frames(0), Vec::<u64>::new());
+    assert_eq!(crate::title_render::sample_frames(1), vec![0]);
+    assert_eq!(crate::title_render::sample_frames(72), vec![9, 36, 62]);
+    let pic = |w: u32, h: u32, f: &dyn Fn(u32, u32) -> [u8; 3]| {
+        let mut data = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                data.extend_from_slice(&f(x, y));
+                data.push(255);
+            }
+        }
+        data
+    };
+    let banner =
+        |x: u32, y: u32| if (20..60).contains(&x) && (10..20).contains(&y) { [200, 160, 40] } else { [10, 10, 10] };
+    let want = assetcraft_animatic::Rgba { width: 80, height: 40, data: pic(80, 40, &banner) };
+    let frame = |rgba: Vec<u8>, w: u32, h: u32| assetcraft_media::Frame { width: w, height: h, rgba, index: 0 };
+    // The same picture, a little noisy, at half size: a match.
+    let half = pic(40, 20, &|x, y| {
+        let [r, g, b] = banner(x * 2, y * 2);
+        [r.saturating_add(3), g.saturating_sub(2), b]
+    });
+    let (mean, off) = crate::title_render::compare(&want, &frame(half, 40, 20));
+    assert!(mean <= crate::title_render::MATCH.0 && off <= crate::title_render::MATCH.1, "{mean} {off}");
+    // The banner gone: not a match.
+    let (mean, off) = crate::title_render::compare(&want, &frame(pic(80, 40, &|_, _| [10, 10, 10]), 80, 40));
+    assert!(off > crate::title_render::MATCH.1, "{mean} {off}");
+    // Nonsense sizes never match.
+    assert_eq!(crate::title_render::compare(&want, &frame(Vec::new(), 0, 0)), (255.0, 1.0));
+}
+
+/// SF1b-1d: a rendered file decodes back through FilmCraft's readers as drawn; checked against
+/// a picture it isn't (a plate missing), it fails, naming the file and the time.
+#[test]
+fn a_rendered_title_decodes_back_and_a_different_picture_fails() {
+    let dir = temp("decode");
+    let mut s = saved(&dir);
+    small(&mut s);
+    let out = run(&mut s, "storyboard.renderTitles", json!({ "wait": true }));
+    assert!(out["message"].as_str().unwrap().contains("decoded back"), "{out}");
+    let path = PathBuf::from(out["titles"][0]["path"].as_str().unwrap());
+    let plan = crate::title_render::plan(&s).unwrap();
+    let title = plan.titles[0].clone();
+    let black = assetcraft_animatic::Rgba::filled(160, 96, [0, 0, 0]);
+    let err = crate::title_render::decode_back(&path, &title, 24, &[(36, black)]).unwrap_err();
+    assert!(err.contains(path.file_name().unwrap().to_str().unwrap()) && err.contains("1.50 s"), "{err}");
+    // Too few frames is caught too.
+    let short = crate::title_render::TitlePlan { frames: title.frames + 5, ..title };
+    let err = crate::title_render::decode_back(&path, &short, 24, &[]).unwrap_err();
+    assert!(err.contains("frames, not"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
