@@ -1025,3 +1025,46 @@ fn a_designs_fill_takes_the_clips_own_fields() {
     assert_eq!(f.named_text("date"), Some("2026"));
     assert_eq!(crate::design_words("A\nB", &own), ("A".to_owned(), "Step one".to_owned()));
 }
+
+/// TF-1: on a tall frame a built-in banner goes where its area puts it, whichever way the frame
+/// crops its pictures — the Vertical slider reaches the top and the bottom (Paul, 2026-11-24:
+/// "Vertical set to 0 still has 20-30% top padding").
+#[test]
+fn a_built_in_banner_follows_its_area_on_a_tall_frame() {
+    use assetcraft_storyboard::{BoxAlign, DesignPick, Fill, FrameSpec, TextBox};
+    let stack = Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::STACK).unwrap().unwrap());
+    let set =
+        Arc::new(crate::DesignSet { builtins: vec![("banner-stack".into(), stack)], ..crate::DesignSet::default() });
+    for (fw, fh) in [(216u32, 270u32), (216, 384)] {
+        for fill in [Fill::Vertical, Fill::Horizontal] {
+            let spec = FrameSpec { width: fw, height: fh, fps: 24, fill, ..FrameSpec::default() };
+            let mut c = compositor(fw, fh).with_crop(Some(&spec)).with_designs(Arc::clone(&set));
+            let mut tops = Vec::new();
+            for y in [0u16, 500, 1000] {
+                let area = TextBox { align: BoxAlign::Center, width: 900, height: 300, y };
+                let mut over = clip(5, ShotType::Ws, 4);
+                over.overlay = Some("Chorus title".into());
+                over.text_style.design = Some(DesignPick::Stack);
+                over.text_style.area = Some(area);
+                let b = inked(&c.title_frame(&over, f64::INFINITY).unwrap()).expect("it draws");
+                let [ax, ay, aw, ah] = area.rect(fw as f32, fh as f32);
+                let slack = 3.0;
+                assert!(
+                    b[0] as f32 >= ax - slack
+                        && b[1] as f32 >= ay - slack
+                        && b[2] as f32 <= ax + aw + slack
+                        && b[3] as f32 <= ay + ah + slack,
+                    "{fw}×{fh} {fill:?} y={y}: drawn {b:?}, area {:?}",
+                    [ax, ay, aw, ah]
+                );
+                assert!(
+                    (b[1] as f32 - ay).abs() <= ah * 0.25,
+                    "{fw}×{fh} {fill:?} y={y}: its top {} by the area's {ay}",
+                    b[1]
+                );
+                tops.push(b[1]);
+            }
+            assert!(tops[0] < tops[1] && tops[1] < tops[2], "{fw}×{fh} {fill:?}: it moves with Vertical: {tops:?}");
+        }
+    }
+}

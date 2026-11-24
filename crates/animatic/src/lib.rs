@@ -136,22 +136,23 @@ fn builtin_banner(
     headline: &str,
     caption: &str,
     area: Option<[f32; 4]>,
-    placed: [f32; 4],
+    frame: (f32, f32),
 ) -> assetcraft_titles::builtin::Banner {
     use assetcraft_titles::builtin::Banner;
-    let (cw, ch) = Banner::COMP;
+    // The comp is the frame's own shape (TF-1), so it covers the frame exactly.
+    let (fw, fh) = (f64::from(frame.0).max(1.0), f64::from(frame.1).max(1.0));
+    let (cw, ch) = Banner::comp_for(fw, fh);
     let rect = match area {
         Some([ax, ay, aw, ah]) => {
-            let [px, py, pw, ph] = placed.map(f64::from);
-            let (sx, sy) = (cw / pw.max(1.0), ch / ph.max(1.0));
-            [(f64::from(ax) - px) * sx, (f64::from(ay) - py) * sy, f64::from(aw) * sx, f64::from(ah) * sy]
+            let (sx, sy) = (cw / fw, ch / fh);
+            [f64::from(ax) * sx, f64::from(ay) * sy, f64::from(aw) * sx, f64::from(ah) * sy]
         }
         None => {
-            let d = Banner::DEFAULT;
+            let d = Banner::default_in(ch);
             [d.x, d.y, d.w, d.h]
         }
     };
-    Banner::fit(rect, headline, caption)
+    Banner::fit_in(ch, rect, headline, caption)
 }
 
 /// Where a design goes for a title's area (L4): the whole design scaled evenly so what it covers
@@ -885,8 +886,10 @@ impl Compositor {
         // design is scaled whole into the area, keeping its shape (L4).
         let (design, [x, y, w]) = match builtin_id(d) {
             Some(id) => {
+                // Built in the frame's shape and laid over the whole frame, not placed by the
+                // picture crop (TF-1: on a tall board the crop held it in a 16:9 band).
                 let (headline, caption) = design_words(words, fields);
-                let banner = builtin_banner(&headline, &caption, area.map(|a| a.rect(fw, fh)), [x, y, w, h]);
+                let banner = builtin_banner(&headline, &caption, area.map(|a| a.rect(fw, fh)), (fw, fh));
                 let design = if banner == assetcraft_titles::builtin::Banner::DEFAULT {
                     std::sync::Arc::clone(&d.design)
                 } else {
@@ -896,7 +899,7 @@ impl Compositor {
                         None => std::sync::Arc::clone(&d.design),
                     }
                 };
-                (design, [x, y, w])
+                (design, [0.0, 0.0, fw])
             }
             None => {
                 let placed = area.and_then(|a| design_in_area(&d.design, [x, y, w, h], a.rect(fw, fh), a.align));
