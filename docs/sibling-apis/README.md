@@ -9,6 +9,7 @@ _2026-10-15 · read from source at each app's latest release tag; nothing was bu
 | [pdfcraft-wordcraft-designcraft.md](pdfcraft-wordcraft-designcraft.md)         | PdfCraft, WordCraft, DesignCraft                                               |
 | [effectcraft-vectorcraft-soundcraft.md](effectcraft-vectorcraft-soundcraft.md) | EffectCraft, VectorCraft, SoundCraft                                           |
 | [filmcraft-otio-import.md](filmcraft-otio-import.md) (2026-11-22)              | FilmCraft's OTIO import, checked against an AssetCraft-shaped fixture (SF1b-0) |
+| [filmcraft-graphic-clips.md](filmcraft-graphic-clips.md) (2026-11-25)          | An AssetCraft title as a native FilmCraft graphic clip (D-SF8 spike)           |
 
 - **Scope:** every surface an outside program can use (launch args, CLI, command registry, MCP,
   control channel, library crates, file formats).
