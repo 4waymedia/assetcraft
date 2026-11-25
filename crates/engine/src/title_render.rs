@@ -52,7 +52,10 @@ pub struct TitlePlan {
     pub kind: TextKind,
     /// Who draws it.
     pub renderer: Renderer,
-    /// Its frames at the board's rate.
+    /// The Cut's frame it starts on, at the board's rate (its start, to the nearest frame).
+    pub first: u64,
+    /// Its frames at the board's rate: from `first` to where the next clip starts, so the titles
+    /// and shots of a Cut add up to its frames exactly (SF1b-2).
     pub frames: u64,
     /// Its length.
     pub seconds: f64,
@@ -148,7 +151,7 @@ pub fn titles_folder(document: &Path) -> Option<PathBuf> {
 }
 
 /// Frames `t` lasts at `fps`, rounded to the nearest frame.
-fn frames_of(t: Ticks, fps: u32) -> u64 {
+pub fn frames_of(t: Ticks, fps: u32) -> u64 {
     let n = u128::from(t.0) * u128::from(fps) + u128::from(TICKS_PER_SECOND / 2);
     u64::try_from(n / u128::from(TICKS_PER_SECOND)).unwrap_or(u64::MAX)
 }
@@ -177,9 +180,12 @@ impl Fnv {
 /// look its theme gives it, the design that draws it (its file and the stamp of its bytes, or
 /// the built-in's id), and each picture or video it shows (its path, size and modified time, so a
 /// replaced file renders again).
-pub fn title_hash(s: &Session, clip: &Clip, frame: &assetcraft_storyboard::FrameSpec) -> u64 {
+pub fn title_hash(s: &Session, clip: &Clip, frame: &assetcraft_storyboard::FrameSpec, span: CutSpan) -> u64 {
     let mut h = Fnv::new();
     h.part(&RENDER_VERSION.to_le_bytes());
+    // Its frames, and where its start falls inside its first one (the frames are the Cut's).
+    h.part(&span.frames.to_le_bytes());
+    h.part(&span.phase.to_le_bytes());
     h.part(serde_json::to_string(frame).unwrap_or_default().as_bytes());
     h.part(clip.text().unwrap_or_default().as_bytes());
     h.part(serde_json::to_string(&clip.text_style).unwrap_or_default().as_bytes());
@@ -288,6 +294,36 @@ fn built_name(effect: BuiltEffect) -> &'static str {
     }
 }
 
+/// Where a clip sits in the Cut in whole frames (SF1b-2): its first frame, how many, and how far
+/// its start is past that frame's time, in ticks (negative: before it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CutSpan {
+    /// The Cut's frame it starts on.
+    pub first: u64,
+    /// Its frames: to the next clip's first.
+    pub frames: u64,
+    /// Its start less `first`'s time.
+    pub phase: i64,
+}
+
+/// Every clip's [`CutSpan`] at `fps`, in Cut order: each runs from its start, to the nearest
+/// frame, to the next one's, so together they are the Cut's frames with no gap or overlap. A
+/// clip shorter than a frame keeps one.
+pub fn cut_spans(board: &Storyboard, fps: u32) -> Vec<CutSpan> {
+    let tick = TICKS_PER_SECOND / u64::from(fps.max(1));
+    let starts = board.starts();
+    let mut out: Vec<CutSpan> = Vec::with_capacity(board.clips.len());
+    for (i, clip) in board.clips.iter().enumerate() {
+        let start = starts.get(i).copied().unwrap_or(Ticks::ZERO);
+        let first = out.last().map_or_else(|| frames_of(start, fps), |p| p.first + p.frames);
+        let end = frames_of(Ticks(start.0.saturating_add(clip.duration.0)), fps).max(first + 1);
+        let at = i128::from(first) * i128::from(tick);
+        let phase = i64::try_from(i128::from(start.0) - at).unwrap_or(0);
+        out.push(CutSpan { first, frames: end - first, phase });
+    }
+    out
+}
+
 /// The plan for the open, saved storyboard.
 pub fn plan(s: &Session) -> Result<RenderPlan, CmdError> {
     let board = s.boards.board.as_ref().ok_or_else(crate::storyboard::no_board)?;
@@ -300,11 +336,13 @@ pub fn plan(s: &Session) -> Result<RenderPlan, CmdError> {
     let designs = s.theme_designs();
     let mut titles = Vec::new();
     let mut problems = Vec::new();
+    let spans = cut_spans(board, frame.fps);
     for (index, clip) in board.clips.iter().enumerate() {
         let Some(kind) = clip.text_kind() else { continue };
+        let Some(span) = spans.get(index).copied() else { continue };
         let renderer =
             assetcraft_animatic::title_of(&designs, s.user_looks(), clip).map_or(Renderer::InApp, |t| t.renderer());
-        let hash = format!("{:016x}", title_hash(s, clip, &frame));
+        let hash = format!("{:016x}", title_hash(s, clip, &frame, span));
         let path = folder.join(format!("c{}-{hash}.mp4", clip.id.0));
         let reuse = s.services.entry(&path).is_ok_and(|e| e.size > 0);
         titles.push(TitlePlan {
@@ -312,7 +350,8 @@ pub fn plan(s: &Session) -> Result<RenderPlan, CmdError> {
             index,
             kind,
             renderer,
-            frames: frames_of(clip.duration, frame.fps),
+            first: span.first,
+            frames: span.frames,
             seconds: clip.duration.as_secs_f64(),
             hash,
             path,
@@ -491,7 +530,8 @@ impl TitleJob {
                 if self.cancel.load(Ordering::SeqCst) {
                     return Err(None);
                 }
-                let at = Ticks(start.0.saturating_add(tick.0.saturating_mul(i)).min(last.0));
+                // The Cut's frame `first + i`, held inside the clip.
+                let at = Ticks(tick.0.saturating_mul(title.first.saturating_add(i)).clamp(start.0, last.0));
                 let frame = compositor.frame(&self.board, at);
                 encoder.push_rgba(&frame.data).map_err(|e| Some(e.to_string()))?;
                 if samples.contains(&i) {

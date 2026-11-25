@@ -383,6 +383,7 @@ dependencies = [
  "effectcraft-text",
  "effectcraft-time",
  "filmcraft-edit",
+ "filmcraft-interchange",
  "filmcraft-project",
  "filmcraft-time",
  "serde",
@@ -1819,6 +1820,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "filmcraft-cfb"
+version = "0.20.1"
+source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb06a977d532402be2097c9ebe42"
+
+[[package]]
 name = "filmcraft-codecs"
 version = "0.20.1"
 source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb06a977d532402be2097c9ebe42"
@@ -1926,6 +1932,23 @@ source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb0
 dependencies = [
  "filmcraft-bitstream",
  "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-interchange"
+version = "0.20.1"
+source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb06a977d532402be2097c9ebe42"
+dependencies = [
+ "filmcraft-cfb",
+ "filmcraft-color",
+ "filmcraft-geom",
+ "filmcraft-media",
+ "filmcraft-project",
+ "filmcraft-time",
+ "roxmltree",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -4356,6 +4379,15 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

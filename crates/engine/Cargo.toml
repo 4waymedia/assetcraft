@@ -38,6 +38,8 @@ effectcraft-project = { workspace = true }
 effectcraft-color = { workspace = true }
 effectcraft-time = { workspace = true }
 effectcraft-text = { workspace = true }
+# SF1b-2: the written OTIO goes through FilmCraft's own importer in the tests.
+filmcraft-interchange = { workspace = true }
 
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.

@@ -343,6 +343,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::title_render::sb_render_titles
     ),
     cmd!(
+        EXPORT,
+        "storyboard.writeOtio",
+        "Write OTIO for FilmCraft",
+        "File",
+        None,
+        "{dryRun?: bool, path?: string, overwrite?: bool} → {path, fps, video, audio, markers, unrendered: [clip], problems, notes: [string], dryRun?, otio? (with dryRun), written?, bytes?, message?} (SF1b-2: the Cut for FilmCraft — V1 the shots and the rendered titles back to back in whole frames, A1 the song through its edit, title markers whose comment carries `assetcraft clip <id> · <theme> · <design>`, scene markers; `<name>.otio` beside the storyboard by default; every title rendered first; `notes` lists what FilmCraft won't get)",
+        crate::otio_out::sb_write_otio
+    ),
+    cmd!(
         READ,
         "storyboard.exportStatus",
         "Export Status",

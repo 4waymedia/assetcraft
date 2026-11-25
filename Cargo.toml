@@ -75,6 +75,8 @@ filmcraft-time = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.
 # In-app video decoding (P1, spike S3: +5.75 MB, docs/design/cut-editing.md §4.2).
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+# Tests only (SF1b-2): the OTIO AssetCraft writes is read back by FilmCraft's own importer.
+filmcraft-interchange = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 # UI (L6 and apps only; see xtask/src/layers.rs). craft-ui pinned to the rev FilmCraft/PhotoCraft used
 # with egui 0.36; the suite is on egui 0.37 now, so this moves with AssetCraft's egui (step S1b).
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }

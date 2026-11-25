@@ -23,6 +23,7 @@ mod library_cmd;
 mod model_cmd;
 mod motion_cmd;
 pub mod open_in;
+pub mod otio_out;
 pub mod paths;
 pub mod places;
 pub mod prefs;
@@ -901,6 +902,8 @@ mod library_tests;
 mod motion_tests;
 #[cfg(test)]
 mod open_in_tests;
+#[cfg(test)]
+mod otio_out_tests;
 #[cfg(test)]
 mod places_tests;
 #[cfg(test)]
