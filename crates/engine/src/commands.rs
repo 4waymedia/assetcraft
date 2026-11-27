@@ -352,6 +352,15 @@ static COMMANDS: &[CommandSpec] = &[
         crate::otio_out::sb_write_otio
     ),
     cmd!(
+        EXPORT,
+        "storyboard.writeFcproj",
+        "Write FilmCraft Project",
+        "File",
+        None,
+        "{dryRun?: bool, path?: string, overwrite?: bool} → {path, graphics: [clip], rendered: [clip], unrendered: [clip], problems, notes: [string], bytes, dryRun?, written?, message?} (FC-2, D-SF8: the Cut as a FilmCraft project — shots and the song as the OTIO carries them, read by FilmCraft's own importer; each in-app title a FilmCraft graphic clip you can edit there, built from the compositor's own layout of it (face, size, lines, plate, decor, finish; the in and out as keyframes), a card on V1, an overlay on V2 over its shot, its marker carrying `assetcraft clip <id> · <theme> · <design>`; a title drawn by a design goes as its render, so run storyboard.renderTitles first; `<name>.fcproj` beside the storyboard by default; `notes` lists what FilmCraft won't get)",
+        crate::fcproj_out::sb_write_fcproj
+    ),
+    cmd!(
         READ,
         "storyboard.exportStatus",
         "Export Status",

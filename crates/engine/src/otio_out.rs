@@ -127,6 +127,13 @@ pub struct OtioPlan {
 
 /// The document for `board`, its titles as `titles` plans them.
 pub fn document(board: &Storyboard, titles: &RenderPlan, path: PathBuf) -> OtioPlan {
+    document_with(board, titles, path, &[])
+}
+
+/// [`document`], with the clips at `graphics` (Cut indices) left for graphic clips (FC-2): such
+/// a clip goes as what is under its title — an overlay's shot, a card's own picture, else a gap
+/// — and gets no title marker (the graphic clip carries it).
+pub fn document_with(board: &Storyboard, titles: &RenderPlan, path: PathBuf, graphics: &[usize]) -> OtioPlan {
     let rate = titles.fps.max(1);
     let tick = TICKS_PER_SECOND / u64::from(rate);
     let spans = cut_spans(board, rate);
@@ -139,7 +146,7 @@ pub fn document(board: &Storyboard, titles: &RenderPlan, path: PathBuf) -> OtioP
         let Some(span) = spans.get(index).copied() else { continue };
         let name = clip_name(index, clip);
         let mut fc = json!({});
-        let title = titles.titles.iter().find(|t| t.index == index);
+        let title = titles.titles.iter().find(|t| t.index == index).filter(|_| !graphics.contains(&index));
         let (reference, start) = match (title, clip.asset_ids.first()) {
             (Some(t), _) => {
                 if !t.reuse {

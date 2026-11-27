@@ -25,10 +25,39 @@ impl std::fmt::Debug for Fonts {
     }
 }
 
-/// One laid-out line: glyphs with their x positions, and the line's width.
+/// One laid-out line: glyphs with their x positions, the line's width, and its words.
 struct Line {
     glyphs: Vec<(GlyphId, f32)>,
     width: f32,
+    words: Vec<String>,
+}
+
+/// A line of set text as drawn (FC-1): its words, where it starts and its width, its baseline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetLine {
+    /// Its words, as drawn (capitals applied).
+    pub words: Vec<String>,
+    /// Its left edge, px.
+    pub left: f32,
+    /// Its width, px.
+    pub width: f32,
+    /// Its baseline, px from the top.
+    pub baseline: f32,
+}
+
+/// A face's metrics at a text height (FC-1): what another renderer needs to set the same text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetMetrics {
+    /// The em size in px that gives this text height (`height` is ascent − descent).
+    pub em: f32,
+    /// Ascent above the baseline, px.
+    pub ascent: f32,
+    /// Descent below it, px (positive).
+    pub descent: f32,
+    /// The face's own line gap, px.
+    pub line_gap: f32,
+    /// Baseline to baseline here, px.
+    pub line_height: f32,
 }
 
 impl Fonts {
@@ -57,7 +86,7 @@ impl Fonts {
         let space = font.h_advance(font.glyph_id(' ')) + tracking;
         let mut lines: Vec<Line> = Vec::new();
         for paragraph in text.split('\n') {
-            let mut line = Line { glyphs: Vec::new(), width: 0.0 };
+            let mut line = Line { glyphs: Vec::new(), width: 0.0, words: Vec::new() };
             let mut x = 0.0f32;
             for word in paragraph.split(' ') {
                 let glyphs: Vec<(GlyphId, f32)> = word.chars().map(|c| (font.glyph_id(c), 0.0)).collect();
@@ -67,11 +96,13 @@ impl Fonts {
                 let start = if needs_space { x + space } else { x };
                 if needs_space && start + word_w > wrap.max(10.0) {
                     line.width = x;
-                    lines.push(std::mem::replace(&mut line, Line { glyphs: Vec::new(), width: 0.0 }));
+                    lines
+                        .push(std::mem::replace(&mut line, Line { glyphs: Vec::new(), width: 0.0, words: Vec::new() }));
                     x = 0.0;
                 } else {
                     x = start;
                 }
+                line.words.push(word.to_owned());
                 for (g, _) in glyphs {
                     line.glyphs.push((g, x));
                     x += font.h_advance(g) + tracking;
@@ -81,6 +112,62 @@ impl Fonts {
             lines.push(line);
         }
         lines
+    }
+
+    /// The family's name (the bundled face's is "Inter").
+    pub fn family(&self) -> &str {
+        &self.name
+    }
+
+    /// The face's metrics at text height `height` (FC-1).
+    pub fn metrics(&self, height: f32) -> SetMetrics {
+        let font = self.scaled(height);
+        let upem = self.regular.units_per_em().unwrap_or(1000.0).max(1.0);
+        let unscaled = self.regular.height_unscaled().max(1.0);
+        SetMetrics {
+            em: height.max(1.0) * upem / unscaled,
+            ascent: font.ascent(),
+            descent: -font.descent(),
+            line_gap: font.line_gap(),
+            line_height: height * LINE,
+        }
+    }
+
+    /// `text` set as [`draw_aligned`](Self::draw_aligned) sets it with its block's top-left at
+    /// `(left, top)`: each line's words, left edge, width and baseline (FC-1: what another
+    /// renderer is told, so it sets the same lines in the same places).
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_lines(
+        &self,
+        text: &str,
+        height: f32,
+        tracking: f32,
+        wrap: f32,
+        left: f32,
+        top: f32,
+        align: i8,
+    ) -> Vec<SetLine> {
+        let lines = self.layout(text, height, tracking, wrap);
+        let block_w = lines.iter().map(|l| l.width).fold(0.0, f32::max);
+        let font = self.scaled(height);
+        lines
+            .into_iter()
+            .enumerate()
+            .map(|(i, line)| SetLine {
+                left: left
+                    + match align {
+                        ..=-1 => 0.0,
+                        0 => (block_w - line.width) / 2.0,
+                        1.. => block_w - line.width,
+                    },
+                baseline: top
+                    + i as f32 * height * LINE
+                    + (height * LINE - (font.ascent() - font.descent())) / 2.0
+                    + font.ascent(),
+                width: line.width,
+                words: line.words,
+            })
+            .collect()
     }
 
     /// The block size `[w, h]` the text takes.

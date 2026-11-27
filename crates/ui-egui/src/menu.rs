@@ -39,6 +39,7 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // SF1b-1: CLI / MCP only until Send to › FilmCraft (SF1b-3) runs it from the File menu.
     "storyboard.renderTitles",
     "storyboard.writeOtio",
+    "storyboard.writeFcproj",
     // Open Recent is built from the session's list under the Open item.
     "storyboard.recent",
     "storyboard.select",

@@ -20,7 +20,7 @@
 #![forbid(unsafe_code)]
 
 mod draw;
-mod text;
+pub mod text;
 
 pub use draw::Rgba;
 
@@ -722,11 +722,17 @@ impl Compositor {
     /// The words where they fall by themselves: the theme's size, a card centred, an overlay at
     /// its position, the plate around them.
     fn draw_words_placed(&self, out: &mut Rgba, t: &Title, words: &str, anim: &AnimFrame, fonts: &text::Fonts) {
+        let shown = shown_text(words, t.text.uppercase, anim);
+        let l = self.words_placed(t, words, anim, fonts);
+        self.paint_words(out, t, &shown, anim, fonts, l);
+    }
+
+    /// Where [`draw_words_placed`](Self::draw_words_placed) sets the words (FC-1 reads it too).
+    fn words_placed(&self, t: &Title, words: &str, anim: &AnimFrame, fonts: &text::Fonts) -> Words {
         let (kind, look) = (t.kind, &t.look);
         let (w, h) = (self.width as f32, self.height as f32);
         let size = t.text.size;
         let height = (h * size * anim.scale).clamp(6.0, h);
-        let shown = shown_text(words, t.text.uppercase, anim);
         let full = shown_text(words, t.text.uppercase, &AnimFrame::REST);
         let wrap = w * if kind == TextKind::Card { 0.8 } else { 0.6 };
         let tracking = look.tracking * height;
@@ -744,7 +750,7 @@ impl Compositor {
         let pad = [height * 0.45, height * 0.25];
         let plate = [left - pad[0], top - pad[1], block[0] + 2.0 * pad[0], block[1] + 2.0 * pad[1]];
         let at = [left, top, block[0], block[1]];
-        self.paint_words(out, t, &shown, anim, fonts, Words { height, tracking, wrap, at, plate, align: 0, color });
+        Words { height, tracking, wrap, at, plate, align: 0, color }
     }
 
     /// The words in the title's area (L4): wrapped to its width less the padding, at the
@@ -759,10 +765,23 @@ impl Compositor {
         anim: &AnimFrame,
         fonts: &text::Fonts,
     ) {
+        let shown = shown_text(words, t.text.uppercase, anim);
+        let l = self.words_in(t, area, words, anim, fonts);
+        self.paint_words(out, t, &shown, anim, fonts, l);
+    }
+
+    /// Where [`draw_words_in`](Self::draw_words_in) sets the words (FC-1 reads it too).
+    fn words_in(
+        &self,
+        t: &Title,
+        area: assetcraft_storyboard::TextBox,
+        words: &str,
+        anim: &AnimFrame,
+        fonts: &text::Fonts,
+    ) -> Words {
         let look = &t.look;
         let (w, h) = (self.width as f32, self.height as f32);
         let [ax, ay, aw, ah] = area.rect_in(w, h, self.safe_area());
-        let shown = shown_text(words, t.text.uppercase, anim);
         let full = shown_text(words, t.text.uppercase, &AnimFrame::REST);
         // The theme's size, stepped down until the finished words fit inside the padding.
         let mut base = (h * t.text.size).clamp(6.0, h);
@@ -795,8 +814,7 @@ impl Compositor {
         let top = ay + (ah - block[1]) / 2.0 + anim.offset_y * h;
         let plate = [ax, ay + anim.offset_y * h, aw, ah];
         let at = [left, top, block[0], block[1]];
-        let words = Words { height, tracking, wrap: inner[0], at, plate, align, color: rgb(look.text) };
-        self.paint_words(out, t, &shown, anim, fonts, words);
+        Words { height, tracking, wrap: inner[0], at, plate, align, color: rgb(look.text) }
     }
 
     /// The plate (an overlay's, else the words' drop shadow), the words' decor, the finish
@@ -1167,6 +1185,7 @@ fn rgb(packed: u32) -> [u8; 3] {
     [(packed >> 16) as u8, (packed >> 8) as u8, packed as u8]
 }
 
+pub mod layout;
 #[cfg(test)]
 mod tests;
 

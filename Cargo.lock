@@ -383,6 +383,8 @@ dependencies = [
  "effectcraft-text",
  "effectcraft-time",
  "filmcraft-edit",
+ "filmcraft-format",
+ "filmcraft-geom",
  "filmcraft-interchange",
  "filmcraft-project",
  "filmcraft-time",
@@ -1893,6 +1895,21 @@ source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb0
 dependencies = [
  "filmcraft-project",
  "filmcraft-time",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "filmcraft-format"
+version = "0.20.1"
+source = "git+https://github.com/storytold/filmcraft?tag=v0.20.1#cedf0c9bd060eb06a977d532402be2097c9ebe42"
+dependencies = [
+ "chrono",
+ "filmcraft-media",
+ "filmcraft-project",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

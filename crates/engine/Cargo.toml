@@ -29,6 +29,11 @@ assetcraft-video = { workspace = true }
 filmcraft-edit = { workspace = true }
 filmcraft-project = { workspace = true }
 filmcraft-time = { workspace = true }
+# FC-2: the Cut goes to FilmCraft as its own project file: the OTIO read by its importer, in-app
+# titles added as graphic clips, written with its format crate.
+filmcraft-format = { workspace = true }
+filmcraft-geom = { workspace = true }
+filmcraft-interchange = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
@@ -38,8 +43,6 @@ effectcraft-project = { workspace = true }
 effectcraft-color = { workspace = true }
 effectcraft-time = { workspace = true }
 effectcraft-text = { workspace = true }
-# SF1b-2: the written OTIO goes through FilmCraft's own importer in the tests.
-filmcraft-interchange = { workspace = true }
 
 [features]
 # HEIF/HEIC thumbnails (HEVC, patent-encumbered): off by default, opt in with `--features heic`.

@@ -72,6 +72,9 @@ effectcraft-lottie = { git = "https://github.com/storytold/effectcraft", tag = "
 filmcraft-edit = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 filmcraft-project = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 filmcraft-time = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+# FC-2 (D-SF8): Send to FilmCraft writes its project file (`.fcproj`) with its own crates.
+filmcraft-format = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
+filmcraft-geom = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 # In-app video decoding (P1, spike S3: +5.75 MB, docs/design/cut-editing.md §4.2).
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft", tag = "v0.20.1" }

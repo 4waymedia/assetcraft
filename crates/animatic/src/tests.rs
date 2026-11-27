@@ -1114,3 +1114,96 @@ fn a_vertical_titles_area_keeps_inside_the_social_safe_area() {
         }
     }
 }
+
+/// FC-1: a title's layout is what is drawn. Drawn back from its numbers alone — the plate, the
+/// decor, the finish passes and each line at its place — it is the compositor's own frame, pixel
+/// for pixel; the words are broken where they are drawn and keep the case they were typed in.
+#[test]
+fn a_titles_layout_draws_back_to_its_frame() {
+    use crate::layout::{LayoutBackground, TitleLayout};
+    use assetcraft_storyboard::{BoxAlign, FrameSpec, TextBox, TextTheme};
+    let (fw, fh) = (270u32, 480u32);
+    let spec = FrameSpec { width: fw, height: fh, fps: 24, ..FrameSpec::default() };
+    let mut c = compositor(fw, fh).with_crop(Some(&spec));
+    let fonts = crate::text::Fonts::bundled().unwrap();
+    // The same pixels, but for a glyph edge or two where a baseline's float rounds the other way.
+    let same = |a: &Rgba, b: &Rgba| {
+        let off = a.data.as_chunks::<4>().0.iter().zip(b.data.as_chunks::<4>().0).filter(|(x, y)| x != y).count();
+        off * 2000 <= (fw * fh) as usize
+    };
+    let redraw = |l: &TitleLayout| {
+        let mut out = Rgba::clear(fw, fh);
+        let rgb = |v: u32| [(v >> 16) as u8, (v >> 8) as u8, v as u8];
+        assert!(l.background.is_none() || matches!(l.background, Some(LayoutBackground::Backdrop { .. })));
+        if let Some(p) = l.plate {
+            draw::rect(&mut out, p.x, p.y, p.w, p.h, rgb(p.color), p.alpha);
+        }
+        for r in &l.decor {
+            draw::rect(&mut out, r.x, r.y, r.w, r.h, rgb(r.color), r.alpha);
+        }
+        let w = &l.words;
+        let m = w.metrics;
+        let top_of = |baseline: f32| baseline - m.ascent - (m.line_height - (m.ascent + m.descent)) / 2.0;
+        let mut passes: Vec<(f32, f32, u32, f32)> = w.passes.iter().map(|p| (p.dx, p.dy, p.color, p.alpha)).collect();
+        passes.push((0.0, 0.0, w.color, 1.0));
+        for (dx, dy, color, alpha) in passes {
+            for line in &w.lines {
+                fonts.draw_aligned(
+                    &mut out,
+                    &line.drawn,
+                    w.height,
+                    w.tracking,
+                    1.0e6,
+                    line.left + dx,
+                    top_of(line.baseline) + dy,
+                    rgb(color),
+                    alpha,
+                    -1,
+                );
+            }
+        }
+        out
+    };
+    for (words, theme, area) in [
+        (
+            "Chorus title",
+            TextTheme::Bold,
+            Some(TextBox { align: BoxAlign::Center, width: 900, height: 140, y: 500, x: None }),
+        ),
+        (
+            "Some saints were never saved",
+            TextTheme::Cinematic,
+            Some(TextBox { align: BoxAlign::Left, width: 500, height: 300, y: 300, x: None }),
+        ),
+        ("Over the shot", TextTheme::Minimal, None),
+    ] {
+        let mut over = clip(5, ShotType::Ws, 4);
+        over.overlay = Some(words.into());
+        over.text_style.theme = theme;
+        over.text_style.area = area;
+        let l = c.title_layout(&over).expect("an in-app title");
+        let drawn = c.title_frame(&over, f64::INFINITY).unwrap();
+        assert!(same(&redraw(&l), &drawn), "{words}: the layout draws back to the frame");
+        let typed: Vec<&str> = l.words.lines.iter().map(|x| x.typed.as_str()).collect();
+        assert_eq!(typed.join(" "), words, "{words}: as typed");
+        assert_eq!(l.words.uppercase, l.words.lines[0].drawn != l.words.lines[0].typed);
+        // The em is what an editor calls the size: Inter's is ascent − descent over 1.21.
+        assert!((l.words.metrics.em * 1.2102 - l.words.height).abs() < 0.05 * l.words.height, "{:?}", l.words.metrics);
+    }
+    // A narrow area breaks the words where it draws them.
+    let mut card = clip(5, ShotType::Ws, 4);
+    card.overlay = Some("Some saints were never saved".into());
+    card.text_style.area = Some(TextBox { align: BoxAlign::Right, width: 300, height: 400, y: 500, x: None });
+    let l = c.title_layout(&card).unwrap();
+    assert!(l.words.lines.len() > 1, "{:?}", l.words.lines);
+    assert!(same(&redraw(&l), &c.title_frame(&card, f64::INFINITY).unwrap()), "{:?}", l.words.lines);
+    // A design draws its own: no layout.
+    card.text_style.design = Some(assetcraft_storyboard::DesignPick::Stack);
+    let stack =
+        std::sync::Arc::new(assetcraft_titles::builtin::builtin(assetcraft_titles::builtin::STACK).unwrap().unwrap());
+    let mut d = compositor(fw, fh).with_designs(std::sync::Arc::new(crate::DesignSet {
+        builtins: vec![("banner-stack".into(), stack)],
+        ..crate::DesignSet::default()
+    }));
+    assert!(d.title_layout(&card).is_none());
+}
