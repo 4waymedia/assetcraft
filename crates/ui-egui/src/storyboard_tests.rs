@@ -2806,6 +2806,7 @@ fn a_titles_area_previews_live_and_commits_once() {
         width: 400,
         height: 200,
         y: 300,
+        x: None,
     };
     nav.state.storyboard.area_drag = Some((card, held));
     settle(&mut nav, &mut t);

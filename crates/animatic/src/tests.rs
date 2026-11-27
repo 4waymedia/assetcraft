@@ -910,7 +910,7 @@ fn a_titles_area_places_and_sizes_it() {
     });
     let (w, h) = (640u32, 360u32);
     let mut c = compositor(w, h).with_designs(set);
-    let area = TextBox { align: BoxAlign::Center, width: 500, height: 200, y: 500 };
+    let area = TextBox { align: BoxAlign::Center, width: 500, height: 200, y: 500, x: None };
     let [ax, ay, aw, ah] = area.rect(w as f32, h as f32);
     let inside = |b: [u32; 4], slack: f32| {
         b[0] as f32 >= ax - slack
@@ -976,7 +976,7 @@ fn a_titles_area_places_and_sizes_it() {
     assert!(inside(b, 12.0), "within the area, give or take its glow: {b:?}");
     // L4c: built in the area's own shape, it fills the area's width and height both (a wide,
     // short area is not a scaled-down banner).
-    let wide = TextBox { align: BoxAlign::Center, width: 800, height: 120, y: 300 };
+    let wide = TextBox { align: BoxAlign::Center, width: 800, height: 120, y: 300, x: None };
     banner.text_style.area = Some(wide);
     let [wx, wy, ww, wh] = wide.rect(w as f32, h as f32);
     let b = inked(&c.title_frame(&banner, f64::INFINITY).unwrap()).unwrap();
@@ -1041,7 +1041,7 @@ fn a_built_in_banner_follows_its_area_on_a_tall_frame() {
             let mut c = compositor(fw, fh).with_crop(Some(&spec)).with_designs(Arc::clone(&set));
             let mut tops = Vec::new();
             for y in [0u16, 500, 1000] {
-                let area = TextBox { align: BoxAlign::Center, width: 900, height: 300, y };
+                let area = TextBox { align: BoxAlign::Center, width: 900, height: 300, y, x: None };
                 let mut over = clip(5, ShotType::Ws, 4);
                 over.overlay = Some("Chorus title".into());
                 over.text_style.design = Some(DesignPick::Stack);
@@ -1089,7 +1089,7 @@ fn a_vertical_titles_area_keeps_inside_the_social_safe_area() {
             over.overlay = Some("Chorus title".into());
             over.text_style.theme = TextTheme::Bold;
             over.text_style.design = design;
-            over.text_style.area = Some(TextBox { align: BoxAlign::Center, width: 1000, height: 140, y });
+            over.text_style.area = Some(TextBox { align: BoxAlign::Center, width: 1000, height: 140, y, x: None });
             let b = inked(&c.title_frame(&over, f64::INFINITY).unwrap()).expect("it draws");
             let slack = 3.0;
             assert!(

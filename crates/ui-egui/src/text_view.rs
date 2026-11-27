@@ -348,25 +348,19 @@ pub(crate) fn inspector_section(nav: &mut Navigator, ui: &mut Ui, clip: &Clip) {
             style_edit = Some(json!({ "clip": id, "exit": v }));
         }
         ui.end_row();
-        ui.label("Position");
-        ui.add_enabled_ui(kind == TextKind::Overlay && style.area.is_none(), |ui| {
-            egui::ComboBox::from_id_salt(("sb-pos", id))
-                .selected_text(style.position.name())
-                .show_ui(ui, |ui| {
-                    for p in TextPosition::ALL {
-                        if ui.selectable_label(style.position == p, p.name()).clicked() && style.position != p {
-                            style_edit = Some(json!({ "clip": id, "position": p.id() }));
-                        }
+        // A starting place for an overlay that has no area yet; once it has one (or on a card) the
+        // Area rows below place it, so the row isn't shown (TF-5: greyed out, it confused).
+        if kind == TextKind::Overlay && style.area.is_none() {
+            ui.label("Position").on_hover_text("Where the overlay starts; the Area rows move it from there");
+            egui::ComboBox::from_id_salt(("sb-pos", id)).selected_text(style.position.name()).show_ui(ui, |ui| {
+                for p in TextPosition::ALL {
+                    if ui.selectable_label(style.position == p, p.name()).clicked() && style.position != p {
+                        style_edit = Some(json!({ "clip": id, "position": p.id() }));
                     }
-                })
-                .response
-                .on_disabled_hover_text(if style.area.is_some() {
-                    "Placed by its area below; Reset the area to use Position"
-                } else {
-                    "Cards centre their text; switch to Overlay to place it"
-                });
-        });
-        ui.end_row();
+                }
+            });
+            ui.end_row();
+        }
         let safe = nav.session.storyboard().map_or(TextBox::FILM_SAFE, |b| b.frame_spec().safe_area());
         area_rows(ui, &mut area_ui, id, (style.area, natural), safe);
     });
@@ -475,10 +469,8 @@ fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, (area, natural): (Option<Text
     ui.label("Area").on_hover_text("Where the title sits and its size, inside the safe area");
     ui.horizontal(|ui| {
         for al in BoxAlign::ALL {
-            let on = area.is_some_and(|b| b.align == al);
-            if ui.selectable_label(on, al.name()).on_hover_text("Keep to this side of the title-safe area").clicked()
-                && !on
-            {
+            let on = area.is_some_and(|b| b.align == al && b.x.is_none());
+            if ui.selectable_label(on, al.name()).on_hover_text("Snap to this side of the safe area").clicked() && !on {
                 a.commit = Some(json!({ "clip": id, "align": al.id() }));
             }
         }
@@ -506,9 +498,21 @@ fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, (area, natural): (Option<Text
     let (top, bottom) = shown.y_range(safe);
     let span = f32::from(bottom.saturating_sub(top)).max(1.0);
     let vertical = if bottom > top { f32::from(shown.y.saturating_sub(top)) / span * 100.0 } else { 50.0 };
-    let rows: [AreaRow; 3] = [
+    // Horizontal the same way across (TF-5): from its left edge on the safe area's left (0 %) to
+    // its right edge on the safe area's right (100 %); Left / Center / Right are its snaps.
+    let (left, right) = shown.x_range(safe);
+    let xspan = f32::from(right.saturating_sub(left)).max(1.0);
+    let horizontal = if right > left { f32::from(shown.x_in(safe).saturating_sub(left)) / xspan * 100.0 } else { 50.0 };
+    let rows: [AreaRow; 4] = [
         ("Width", "width", pct(shown.width), (pct(TextBox::WIDTH.0), pct(big.width)), "Of the frame's width"),
         ("Height", "height", pct(shown.height), (pct(TextBox::HEIGHT.0), pct(big.height)), "Of the frame's height"),
+        (
+            "Horizontal",
+            "x",
+            horizontal,
+            (0.0, 100.0),
+            "0 % puts its left edge on the safe area's left, 100 % its right edge on the safe area's right",
+        ),
         (
             "Vertical",
             "y",
@@ -531,19 +535,25 @@ fn area_rows(ui: &mut Ui, a: &mut AreaUi, id: u32, (area, natural): (Option<Text
             match key {
                 "width" => b.width = pm,
                 "height" => b.height = pm,
+                "x" => b.x = Some(left + (v.clamp(0.0, 100.0) / 100.0 * xspan).round() as u16),
                 _ => b.y = top + (v.clamp(0.0, 100.0) / 100.0 * span).round() as u16,
             }
             a.drag = Some(b.clamped_in(safe));
         }
         if r.drag_stopped() || (moved && !r.dragged()) {
             let b = a.drag.unwrap_or(shown);
-            a.commit = Some(json!({
+            let mut commit = json!({
                 "clip": id,
-                "align": b.align.id(),
                 "width": f64::from(b.width) / 10.0,
                 "height": f64::from(b.height) / 10.0,
                 "y": f64::from(b.y) / 10.0,
-            }));
+            });
+            // Slid across: its `x`; otherwise still snapped to its side.
+            match b.x {
+                Some(x) => commit["x"] = json!(f64::from(x) / 10.0),
+                None => commit["align"] = json!(b.align.id()),
+            }
+            a.commit = Some(commit);
         }
         ui.end_row();
     }

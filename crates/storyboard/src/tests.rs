@@ -1772,7 +1772,7 @@ fn a_clip_places_and_sizes_its_title_area_inside_the_title_safe_area() {
     let c = d.centered();
     assert_eq!((c.align, c.y, c.width, c.height), (BoxAlign::Center, 500, d.width, d.height));
     // Out of range: sizes clamp, and the middle keeps the whole area inside the safe area.
-    let wild = TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0 }.clamped();
+    let wild = TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0, x: None }.clamped();
     assert_eq!((wild.width, wild.height, wild.y), (900, 80, 90));
     let low = TextBox { y: 1000, height: 600, ..d }.clamped();
     assert_eq!(low.y, 650);
@@ -2062,23 +2062,51 @@ fn an_area_keeps_inside_the_frames_safe_area() {
     let film = FrameSpec::default().safe_area();
     for b in [
         TextBox::BANNER,
-        TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0 },
-        TextBox { align: BoxAlign::Center, width: 600, height: 600, y: 1000 },
+        TextBox { align: BoxAlign::Right, width: 4000, height: 1, y: 0, x: None },
+        TextBox { align: BoxAlign::Center, width: 600, height: 600, y: 1000, x: None },
     ] {
         assert_eq!(b.clamped_in(film), b.clamped(), "{b:?}");
         assert_eq!(b.rect_in(1920.0, 1080.0, film), b.rect(1920.0, 1080.0), "{b:?}");
     }
     let vertical = FrameSpec { width: 1080, height: 1920, ..FrameSpec::default() }.safe_area();
-    let wide = TextBox { align: BoxAlign::Center, width: 1000, height: 1000, y: 0 }.clamped_in(vertical);
+    let wide = TextBox { align: BoxAlign::Center, width: 1000, height: 1000, y: 0, x: None }.clamped_in(vertical);
     assert_eq!((wide.width, wide.height), (750, 600), "the guide's 75 % × 60 %");
     let [x, y, w, h] = wide.rect_in(1080.0, 1920.0, vertical);
     assert!((x - 108.0).abs() < 1.0 && (w - 810.0).abs() < 1.0, "moved in to the guide: {x} {w}");
     assert!((y - 288.0).abs() < 1.0 && (h - 1152.0).abs() < 1.0, "{y} {h}");
-    let b = TextBox { align: BoxAlign::Center, width: 500, height: 140, y: 500 };
+    let b = TextBox { align: BoxAlign::Center, width: 500, height: 140, y: 500, x: None };
     assert_eq!(b.y_range(vertical), (220, 680), "top 15 % + half, bottom 75 % − half");
     assert_eq!(b.y_range(film), (120, 880));
     let [_, top, _, _] = TextBox { y: 0, ..b }.rect_in(1080.0, 1920.0, vertical);
     assert!((top - 288.0).abs() < 1.0, "Vertical 0 meets the guide's top: {top}");
     // Nonsense in, the film area out.
     assert_eq!(b.clamped_in([f32::NAN, 0.0, 2.0, -1.0]), b.clamped());
+}
+
+/// TF-5: a title's area slides across as well as down. `x` (its middle, ‰ of the width) places
+/// it anywhere between the safe area's sides; without one, `align` snaps it as before (and an old
+/// file, which has none, reads the same).
+#[test]
+fn an_area_slides_across_between_the_safe_areas_sides() {
+    use crate::{BoxAlign, FrameSpec, TextBox};
+    let film = TextBox::FILM_SAFE;
+    let b = TextBox { align: BoxAlign::Left, width: 400, height: 200, y: 500, x: None };
+    assert_eq!(b.x_range(film), (250, 750));
+    assert_eq!((b.x_in(film), TextBox { align: BoxAlign::Right, ..b }.x_in(film)), (250, 750));
+    assert_eq!(TextBox { align: BoxAlign::Center, ..b }.x_in(film), 500);
+    // Slid to 40 % of the frame's width: its middle there, its left edge 200 ‰ before it.
+    let slid = TextBox { x: Some(400), ..b };
+    let [x, _, w, _] = slid.rect(1000.0, 1000.0);
+    assert!((x - 200.0).abs() < 0.5 && (w - 400.0).abs() < 0.5, "{x} {w}");
+    // Past a side: held on it.
+    assert_eq!(TextBox { x: Some(0), ..b }.clamped().x, Some(250));
+    assert_eq!(TextBox { x: Some(1000), ..b }.rect(1000.0, 1000.0)[0], 550.0);
+    // A vertical frame's guide: 10 % in on the left, 15 % on the right.
+    let vertical = FrameSpec { width: 1080, height: 1920, ..FrameSpec::default() }.safe_area();
+    assert_eq!(b.x_range(vertical), (300, 650));
+    // Old files have no `x`; it isn't written when there is none.
+    let old: TextBox = serde_json::from_str(r#"{"align":"right","width":400,"height":200,"y":500}"#).unwrap();
+    assert_eq!(old.x, None);
+    assert!(!serde_json::to_string(&b).unwrap().contains("\"x\""));
+    assert!(serde_json::to_string(&slid).unwrap().contains("\"x\":400"));
 }

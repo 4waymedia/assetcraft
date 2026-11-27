@@ -304,6 +304,25 @@ fn a_text_area_moves_and_sizes_the_title() {
     assert_eq!(first(&s).text_style.area.map(|b| b.y), Some(650));
 }
 
+/// TF-5: `x` slides a title across; `align` snaps it back to a side and drops `x`; the two
+/// together are refused; Dead center drops it too.
+#[test]
+fn a_text_area_slides_across_and_snaps_back() {
+    let mut s = session();
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "width": 40, "x": 30}));
+    assert_eq!(r["area"], json!({"align": "center", "width": 40.0, "height": 40.0, "y": 50.0, "x": 30.0}));
+    // Past the side: held where the whole box stays inside the title-safe area.
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "x": 0}));
+    assert_eq!(r["area"]["x"], json!(25.0));
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "align": "right"}));
+    assert_eq!(r["area"], json!({"align": "right", "width": 40.0, "height": 40.0, "y": 50.0}), "snapped: no x");
+    run(&mut s, "storyboard.text.area", json!({"clip": 1, "x": 60}));
+    let r = run(&mut s, "storyboard.text.area", json!({"clip": 1, "center": true}));
+    assert!(r["area"].get("x").is_none(), "{r}");
+    assert!(s.execute("storyboard.text.area", &json!({"clip": 1, "align": "left", "x": 40})).is_err());
+    assert!(s.execute("storyboard.text.area", &json!({"clip": 1, "x": 101})).is_err());
+}
+
 /// L1: `storyboard.title` shows a clip's title as layers, and who draws it.
 #[test]
 fn title_shows_a_clips_layers_and_renderer() {

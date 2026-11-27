@@ -1167,6 +1167,11 @@ pub struct TextBox {
     pub height: u16,
     /// Where its middle is, ‰ of the frame's height from the top.
     pub y: u16,
+    /// Where its middle is, ‰ of the frame's width from the left (TF-5: the Inspector's
+    /// Horizontal); `None` places it by `align` (files from before TF-5, and the Left / Center /
+    /// Right buttons).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<u16>,
 }
 
 impl TextBox {
@@ -1178,14 +1183,14 @@ impl TextBox {
     pub const HEIGHT: (u16, u16) = (80, 600);
     /// The built-in banners' own (Laser Trace, Stack): left, 1100 × 236 of 1920 × 1080, its
     /// middle 834 px down. Where a new area starts until each title kind has its own (L4).
-    pub const BANNER: TextBox = TextBox { align: BoxAlign::Left, width: 573, height: 219, y: 772 };
+    pub const BANNER: TextBox = TextBox { align: BoxAlign::Left, width: 573, height: 219, y: 772, x: None };
     /// Where a title's area starts before it has one (L5): about where it falls by itself — a
     /// card's words in the middle, an overlay at its position, a built-in banner in its box.
     pub fn natural(kind: TextKind, position: TextPosition, banner: bool) -> TextBox {
         let banner_box = TextBox::BANNER;
         match (kind, banner) {
             (_, true) => banner_box,
-            (TextKind::Card, false) => TextBox { align: BoxAlign::Center, width: 800, height: 400, y: 500 },
+            (TextKind::Card, false) => TextBox { align: BoxAlign::Center, width: 800, height: 400, y: 500, x: None },
             (TextKind::Overlay, false) => match position {
                 TextPosition::LowerThirdLeft => banner_box,
                 TextPosition::LowerThirdRight => TextBox { align: BoxAlign::Right, ..banner_box },
@@ -1198,7 +1203,7 @@ impl TextBox {
 
     /// Dead centre, at the same size.
     pub fn centered(self) -> TextBox {
-        TextBox { align: BoxAlign::Center, y: 500, ..self }
+        TextBox { align: BoxAlign::Center, y: 500, x: None, ..self }
     }
 
     /// The film title-safe area, `[x, y, w, h]` fractions of the frame: [`SAFE`](Self::SAFE)
@@ -1220,10 +1225,11 @@ impl TextBox {
         let (w, h) = (width * f32::from(b.width) / 1000.0, height * f32::from(b.height) / 1000.0);
         let left = width * f32::from(safe[0]) / 1000.0;
         let right = width * f32::from(safe[0] + safe[2]) / 1000.0;
-        let x = match b.align {
-            BoxAlign::Left => left,
-            BoxAlign::Center => ((width - w) / 2.0).clamp(left, (right - w).max(left)),
-            BoxAlign::Right => (right - w).max(left),
+        let x = match (b.x, b.align) {
+            (Some(x), _) => (width * f32::from(x) / 1000.0 - w / 2.0).clamp(left, (right - w).max(left)),
+            (None, BoxAlign::Left) => left,
+            (None, BoxAlign::Center) => ((width - w) / 2.0).clamp(left, (right - w).max(left)),
+            (None, BoxAlign::Right) => (right - w).max(left),
         };
         [x, height * f32::from(b.y) / 1000.0 - h / 2.0, w, h]
     }
@@ -1250,13 +1256,38 @@ impl TextBox {
         (lo, (safe[1] + safe[3]).saturating_sub(half).max(lo))
     }
 
+    /// Where the area's middle can go across safe area `safe` at this width, `(left, right)` ‰
+    /// of the frame: the Inspector's Horizontal runs from one to the other (TF-5).
+    pub fn x_range(self, safe: [f32; 4]) -> (u16, u16) {
+        let safe = safe_permille(safe);
+        let b = self.clamped_in_permille(safe);
+        let half = b.width.div_ceil(2);
+        let lo = safe[0].saturating_add(half);
+        (lo, (safe[0] + safe[2]).saturating_sub(half).max(lo))
+    }
+
+    /// Where its middle is across the frame, ‰ of the width, in safe area `safe`: its `x`, or
+    /// where `align` puts it.
+    pub fn x_in(self, safe: [f32; 4]) -> u16 {
+        let (lo, hi) = self.x_range(safe);
+        match (self.x, self.align) {
+            (Some(x), _) => x.clamp(lo, hi),
+            (None, BoxAlign::Left) => lo,
+            (None, BoxAlign::Center) => 500u16.clamp(lo, hi),
+            (None, BoxAlign::Right) => hi,
+        }
+    }
+
     fn clamped_in_permille(self, safe: [u16; 4]) -> TextBox {
         let width = self.width.clamp(Self::WIDTH.0, Self::WIDTH.1.min(safe[2]).max(Self::WIDTH.0));
         let height = self.height.clamp(Self::HEIGHT.0, Self::HEIGHT.1.min(safe[3]).max(Self::HEIGHT.0));
         let half = height.div_ceil(2);
         let lo = safe[1].saturating_add(half);
         let hi = (safe[1] + safe[3]).saturating_sub(half).max(lo);
-        TextBox { align: self.align, width, height, y: self.y.clamp(lo, hi) }
+        let xhalf = width.div_ceil(2);
+        let (xlo, xhi) = (safe[0].saturating_add(xhalf), (safe[0] + safe[2]).saturating_sub(xhalf));
+        let x = self.x.map(|x| x.clamp(xlo, xhi.max(xlo)));
+        TextBox { align: self.align, width, height, y: self.y.clamp(lo, hi), x }
     }
 }
 

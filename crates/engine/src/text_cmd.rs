@@ -160,14 +160,17 @@ pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
         }
     };
     let align = parse(p, "align", BoxAlign::from_id, "left|center|right")?;
-    let (width, height, y) = (percent("width")?, percent("height")?, percent("y")?);
+    let (width, height, y, x) = (percent("width")?, percent("height")?, percent("y")?, percent("x")?);
     let (center, reset) = (flag("center")?, flag("reset")?);
-    if reset && (align.is_some() || width.is_some() || height.is_some() || y.is_some() || center) {
+    if align.is_some() && x.is_some() {
+        return Err(CmdError::BadParams("give `align` (snap to a side) or `x` (slide), not both".into()));
+    }
+    if reset && (align.is_some() || width.is_some() || height.is_some() || y.is_some() || x.is_some() || center) {
         return Err(CmdError::BadParams("`reset` lets the title fall where it does by itself; give it alone".into()));
     }
-    if !reset && !center && align.is_none() && width.is_none() && height.is_none() && y.is_none() {
+    if !reset && !center && align.is_none() && width.is_none() && height.is_none() && y.is_none() && x.is_none() {
         return Err(CmdError::BadParams(
-            "give at least one of `align`, `width`, `height`, `y`, `center`, `reset`".into(),
+            "give at least one of `align`, `width`, `height`, `x`, `y`, `center`, `reset`".into(),
         ));
     }
     let mut board = s.boards.board.clone().ok_or_else(no_board)?;
@@ -181,7 +184,14 @@ pub(crate) fn sb_text_area(s: &mut Session, p: &Value) -> CmdResult {
         if center {
             b = b.centered();
         }
-        b.align = align.unwrap_or(b.align);
+        // A side snaps (and forgets a slid `x`); `x` slides.
+        if let Some(a) = align {
+            b.align = a;
+            b.x = None;
+        }
+        if x.is_some() {
+            b.x = x;
+        }
         b.width = width.unwrap_or(b.width);
         b.height = height.unwrap_or(b.height);
         b.y = y.unwrap_or(b.y);
@@ -280,7 +290,11 @@ pub(crate) fn natural_area(s: &Session, clip: &assetcraft_storyboard::Clip) -> T
 /// An area in percent of the frame, as the command takes it.
 fn area_json(b: TextBox) -> Value {
     let pct = |v: u16| f64::from(v) / 10.0;
-    json!({ "align": b.align.id(), "width": pct(b.width), "height": pct(b.height), "y": pct(b.y) })
+    let mut o = json!({ "align": b.align.id(), "width": pct(b.width), "height": pct(b.height), "y": pct(b.y) });
+    if let Some(x) = b.x {
+        o["x"] = json!(pct(x));
+    }
+    o
 }
 
 /// `theme`: a built-in's id, or a loaded user theme's (TP2a-2).
