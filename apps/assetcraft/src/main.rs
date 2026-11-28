@@ -40,6 +40,7 @@ fn app_icon() -> egui::IconData {
 }
 
 mod diag;
+mod single;
 
 /// A frame slower than this is noted in the log (the window looks frozen at that point).
 const SLOW_FRAME: Duration = Duration::from_millis(500);
@@ -47,11 +48,24 @@ const SLOW_FRAME: Duration = Duration::from_millis(500);
 struct App {
     navigator: Navigator,
     store: PrefsStore,
+    /// The one-AssetCraft lock and its raise requests (FIND-T2); `None` when running alone.
+    instance: Option<single::Primary>,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let started = Instant::now();
+        if let Some(folder) = self.instance.as_ref().and_then(single::Primary::take) {
+            // Started again: come forward (Windows may only flash the taskbar button if
+            // another app has the focus), and open the folder it was given.
+            let ctx = ui.ctx();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(egui::UserAttentionType::Informational));
+            if let Some(folder) = folder {
+                self.navigator.open_folder(&folder);
+            }
+        }
         self.navigator.ui(ui);
         let took = started.elapsed();
         if took > SLOW_FRAME {
@@ -109,6 +123,23 @@ fn main() -> ExitCode {
     let path = prefs_file::config_path();
     // The log beside prefs.json (`diag`): frame and surface trouble, panics.
     let _ = diag::install(path.as_deref().and_then(std::path::Path::parent));
+    // One AssetCraft at a time (FIND-T2): a second start hands its folder over and exits.
+    let folder = std::env::args_os().nth(1).map(PathBuf::from);
+    let instance = match path.as_deref().and_then(std::path::Path::parent) {
+        Some(dir) => single::claim(dir, folder.as_deref()),
+        None => single::Start::Alone("no config folder".into()),
+    };
+    let instance = match instance {
+        single::Start::First(primary) => Some(primary),
+        single::Start::Handed => {
+            log::info!(target: "assetcraft", "already running: asked that window to come forward");
+            return ExitCode::SUCCESS;
+        }
+        single::Start::Alone(why) => {
+            log::info!(target: "assetcraft", "running without the one-window lock: {why}");
+            None
+        }
+    };
     let prefs = path.as_deref().map(prefs_file::load).unwrap_or_default();
     // In-app track analyses live beside prefs.json (macOS: ~/Library/Application Support/AssetCraft/analysis),
     // never beside the user's music.
@@ -134,7 +165,7 @@ fn main() -> ExitCode {
     // Watch your Cut plays the track on the default output device (opened on the first ▶).
     session.set_player(Arc::new(assetcraft_playback::DevicePlayer::new()));
     let mut navigator = Navigator::new(session).with_custom_chrome();
-    if let Some(folder) = std::env::args_os().nth(1).map(PathBuf::from) {
+    if let Some(folder) = folder {
         navigator.open_folder(&folder);
     }
 
@@ -151,12 +182,16 @@ fn main() -> ExitCode {
     #[cfg(not(target_os = "macos"))]
     let viewport = viewport.with_decorations(false);
     let options = eframe::NativeOptions { viewport, wgpu_options: wgpu_options(), ..eframe::NativeOptions::default() };
-    let mut app = App { navigator, store };
+    let mut app = App { navigator, store, instance };
     let create = move |cc: &eframe::CreationContext<'_>| -> Result<Box<dyn eframe::App>, _> {
         // Folder events arrive on the watcher's thread; wake the UI so they show without input.
         let ctx = cc.egui_ctx.clone();
         let waker: assetcraft_watch::Waker = Arc::new(move || ctx.request_repaint());
         app.navigator.set_watcher(Box::new(assetcraft_watch::NotifyWatcher::new(Some(waker))));
+        if let Some(instance) = &app.instance {
+            let ctx = cc.egui_ctx.clone();
+            instance.watch(move || ctx.request_repaint());
+        }
         Ok(Box::new(app))
     };
     match eframe::run_native("AssetCraft", options, Box::new(create)) {

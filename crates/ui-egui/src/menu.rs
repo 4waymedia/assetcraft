@@ -860,6 +860,7 @@ pub(crate) fn windows(nav: &mut Navigator, ctx: &egui::Context) {
     egui::Window::new("FilmCraft isn't installed")
         .open(&mut open)
         .resizable(false)
+        .min_width(440.0)
         .collapsible(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
