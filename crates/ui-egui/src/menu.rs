@@ -36,7 +36,7 @@ pub const NOT_IN_MENUS: &[&str] = &[
     // The video export's progress and Esc live in the Viewer (`export_view`).
     "storyboard.exportStatus",
     "storyboard.exportCancel",
-    // SF1b-1: CLI / MCP only until Send to › FilmCraft (SF1b-3) runs it from the File menu.
+    // SF1b: CLI / MCP; the File menu's Send to FilmCraft (SF1b-3) runs them for the user.
     "storyboard.renderTitles",
     "storyboard.writeOtio",
     "storyboard.writeFcproj",
@@ -154,6 +154,9 @@ pub enum MenuAction {
     /// File → Send to FilmCraft: `storyboard.sendToFilmCraft`, sent again by itself once the
     /// titles a design draws are rendered (SF1b-3).
     SendToFilmCraft,
+    /// The greyed Send to FilmCraft item, clicked while FilmCraft isn't installed: the info box
+    /// with its download links (D-SF9).
+    FilmCraftMissing,
     /// File → Save as Template…: the name window, then `storyboard.saveTemplate`.
     SaveTemplate,
     /// File → Storyboard Setup…: the frame window (`storyboard.frame`; F4).
@@ -167,6 +170,13 @@ pub enum MenuAction {
     BatchRename,
     /// A Tools item whose step hasn't landed yet (always disabled; the tooltip says when).
     NotYet,
+}
+
+impl MenuAction {
+    /// `true` for an action a greyed item still runs when clicked, to say why it is greyed.
+    pub fn explains_when_greyed(&self) -> bool {
+        matches!(self, Self::FilmCraftMissing)
+    }
 }
 
 /// One menu entry.
@@ -649,6 +659,14 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 },
             ]
         }
+        "storyboard.sendToFilmCraft" if s.app_program("filmcraft").is_none() => vec![MenuEntry::Item {
+            label: spec.label.to_owned(),
+            shortcut: None,
+            enabled: false,
+            checked: None,
+            tooltip: Some(assetcraft_engine::FILMCRAFT_MISSING.into()),
+            action: MenuAction::FilmCraftMissing,
+        }],
         "storyboard.sendToFilmCraft" => {
             let enabled = s.enabled(spec.id);
             vec![MenuEntry::Item {
@@ -721,6 +739,13 @@ pub(crate) fn draw(
                 if response.clicked() && *enabled {
                     *chosen = Some(action.clone());
                 }
+                // A greyed item that explains itself when clicked (D-SF9).
+                if !*enabled
+                    && action.explains_when_greyed()
+                    && ui.interact(response.rect, response.id.with("greyed"), egui::Sense::click()).clicked()
+                {
+                    *chosen = Some(action.clone());
+                }
             }
             MenuEntry::Sub { label, entries } => {
                 let response = ui.menu_button(pad(label), |ui| draw(ui, entries, chosen, rects));
@@ -764,6 +789,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
         }
         MenuAction::ExportVideo => crate::export_view::open(nav),
         MenuAction::SendToFilmCraft => crate::export_view::send_to_filmcraft(nav),
+        MenuAction::FilmCraftMissing => nav.state.show_filmcraft_missing = true,
         MenuAction::SaveTemplate => crate::template_view::open(nav),
         MenuAction::Setup => crate::setup_view::open(nav),
         MenuAction::ImportTheme(pack) => crate::document_view::import_theme(nav, pack),
@@ -828,4 +854,28 @@ pub(crate) fn windows(nav: &mut Navigator, ctx: &egui::Context) {
     if clear {
         nav.run("cache.clear", json!({}));
     }
+
+    // File › Send to FilmCraft while FilmCraft isn't installed (D-SF9, Paul 2026-11-28).
+    let mut open = nav.state.show_filmcraft_missing;
+    egui::Window::new("FilmCraft isn't installed")
+        .open(&mut open)
+        .resizable(false)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.label(assetcraft_engine::FILMCRAFT_MISSING);
+            ui.add_space(6.0);
+            egui::Grid::new("filmcraft-links").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+                for (from, url) in assetcraft_engine::FILMCRAFT_LINKS {
+                    ui.label(*from);
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(*url).font(crate::theme::numbers(12.0))).selectable(true),
+                    );
+                    ui.end_row();
+                }
+            });
+            ui.add_space(6.0);
+            ui.weak("Installed it already? Press F5 (View › Refresh) so AssetCraft finds it.");
+        });
+    nav.state.show_filmcraft_missing = open;
 }

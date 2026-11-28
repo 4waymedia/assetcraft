@@ -513,7 +513,7 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::ExportVideo => {
                 used.insert("storyboard.exportVideo");
             }
-            MenuAction::SendToFilmCraft => {
+            MenuAction::SendToFilmCraft | MenuAction::FilmCraftMissing => {
                 used.insert("storyboard.sendToFilmCraft");
             }
             MenuAction::SaveTemplate => {
@@ -1051,10 +1051,19 @@ fn new_from_template_and_save_as_template_round_trip_through_the_file_menu() {
 #[test]
 fn send_to_filmcraft_is_in_the_file_menu_and_waits_for_its_titles() {
     let ctx = Context::default();
-    let (mut nav, _) = navigator(fake(), Prefs::default());
+    // FilmCraft installed (the locator is fixed, so the PC this runs on doesn't matter).
+    let filmcraft = Arc::new(assetcraft_engine::FakeLocator {
+        installed: vec![("filmcraft", std::path::PathBuf::from("/opt/filmcraft"))],
+    });
+    let session = Session::new(Arc::new(fake()), Arc::new(RecordingLauncher::default()), Prefs::default())
+        .with_app_locator(filmcraft);
+    let mut nav = Navigator::with_one_worker(session);
     frame(&ctx, &mut nav);
     let item = find_item(&nav, "File", "Send to FilmCraft");
-    assert!(matches!(&item, MenuEntry::Item { enabled: false, tooltip: Some(_), .. }), "{item:?}");
+    assert!(
+        matches!(&item, MenuEntry::Item { enabled: false, tooltip: Some(_), action: MenuAction::SendToFilmCraft, .. }),
+        "{item:?}"
+    );
     let file = nav.menus().into_iter().find(|m| m.title == "File").unwrap();
     let mut items = Vec::new();
     walk(&file.entries, &mut items);
@@ -1073,4 +1082,26 @@ fn send_to_filmcraft_is_in_the_file_menu_and_waits_for_its_titles() {
     nav.state.export_seen = Some(assetcraft_engine::ExportStage::Rendering);
     frame(&ctx, &mut nav);
     assert!(!nav.state.send_after_render && nav.state.export_seen.is_none());
+}
+
+/// D-SF9 (Paul, 2026-11-28): without FilmCraft, Send to FilmCraft is greyed with the info text,
+/// and clicking it opens the info box with the download links.
+#[test]
+fn send_to_filmcraft_without_filmcraft_is_greyed_and_explains() {
+    let ctx = Context::default();
+    let launcher = Arc::new(RecordingLauncher::default());
+    let session = Session::new(Arc::new(fake()), launcher.clone(), Prefs::default())
+        .with_app_locator(Arc::new(assetcraft_engine::FakeLocator { installed: vec![] }));
+    let mut nav = Navigator::with_one_worker(session);
+    frame(&ctx, &mut nav);
+    let item = find_item(&nav, "File", "Send to FilmCraft");
+    let MenuEntry::Item { enabled, tooltip, action, .. } = item else { panic!("{item:?}") };
+    assert!(!enabled);
+    assert_eq!(tooltip.as_deref(), Some(assetcraft_engine::FILMCRAFT_MISSING));
+    assert!(action.explains_when_greyed());
+    crate::menu::apply(&mut nav, &ctx, action);
+    assert!(nav.state.show_filmcraft_missing);
+    frame(&ctx, &mut nav);
+    assert!(nav.state.show_filmcraft_missing, "the info box stays until closed");
+    assert!(launcher.calls.lock().unwrap().is_empty(), "nothing is launched");
 }

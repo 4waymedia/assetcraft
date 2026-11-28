@@ -232,22 +232,25 @@ fn send_to_filmcraft_renders_then_writes_and_opens() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Without FilmCraft installed the project is still written, and the answer says where; a title
-/// problem stops the send before anything is written.
+/// Without FilmCraft installed Send is disabled with the info text (D-SF9), and the project can
+/// still be written on its own; a title problem stops a send before anything is written.
 #[test]
-fn send_without_filmcraft_writes_and_says_where() {
+fn send_needs_filmcraft_and_title_problems_stop_it() {
     let dir = temp("send-none");
     let mut s = saved(&dir).with_app_locator(Arc::new(crate::open_in::FakeLocator { installed: vec![] }));
-    let sent = run(&mut s, "storyboard.sendToFilmCraft", json!({}));
-    assert_eq!(sent["stage"], json!("written"), "{sent}");
-    let message = sent["message"].as_str().unwrap();
-    assert!(message.contains("blossom.fcproj") && message.contains("isn't installed"), "{message}");
-    let quiet = run(&mut s, "storyboard.sendToFilmCraft", json!({ "open": false }));
-    assert_eq!(quiet["stage"], json!("written"), "{quiet}");
-    s.boards.board.as_mut().unwrap().clips[1].asset_ids =
-        vec![AssetId(dir.join("gone.jpg").to_string_lossy().into_owned())];
-    s.boards.board.as_mut().unwrap().clips[2].asset_ids =
-        vec![AssetId(dir.join("gone.jpg").to_string_lossy().into_owned())];
+    assert_eq!(s.enabled("storyboard.sendToFilmCraft"), Err(crate::open_in::FILMCRAFT_MISSING.to_owned()));
+    let err = s.execute("storyboard.sendToFilmCraft", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("installing it"), "{err}");
+    assert!(!dir.join("blossom.fcproj").exists());
+    run(&mut s, "storyboard.writeFcproj", json!({}));
+    assert!(dir.join("blossom.fcproj").is_file());
+
+    let mut s = s.with_app_locator(Arc::new(crate::open_in::FakeLocator {
+        installed: vec![("filmcraft", PathBuf::from("/opt/filmcraft"))],
+    }));
+    let gone = AssetId(dir.join("gone.jpg").to_string_lossy().into_owned());
+    s.boards.board.as_mut().unwrap().clips[1].asset_ids = vec![gone.clone()];
+    s.boards.board.as_mut().unwrap().clips[2].asset_ids = vec![gone];
     let err = s.execute("storyboard.sendToFilmCraft", &json!({})).unwrap_err().to_string();
     assert!(err.contains("problem"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);

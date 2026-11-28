@@ -58,7 +58,10 @@ pub use launch::{
     LaunchAction, Launcher, PROGRAM_EXTENSIONS, RecordingLauncher, SystemLauncher, explorer_command_line,
     has_program_extension,
 };
-pub use open_in::{AppLocator, FakeLocator, OpenInTarget, SIBLING_APPS, SiblingApp, SystemLocator, find_app};
+pub use open_in::{
+    AppLocator, FILMCRAFT_LINKS, FILMCRAFT_MISSING, FakeLocator, OpenInTarget, SIBLING_APPS, SiblingApp, SystemLocator,
+    find_app,
+};
 pub use paths::{clean_user_path, same_path};
 pub use prefs::{FormatPrefs, ModelBackground, ModelDisplay, ModelPrefs, Prefs, ThemeMode, ViewMode, ViewPrefs};
 pub use resize_cmd::MIN_CLIP_SECS;

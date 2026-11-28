@@ -74,10 +74,17 @@ impl Session {
                 }
                 Ok(())
             }
-            "storyboard.renderTitles"
-            | "storyboard.writeOtio"
-            | "storyboard.writeFcproj"
-            | "storyboard.sendToFilmCraft" => {
+            "storyboard.renderTitles" | "storyboard.writeOtio" | "storyboard.writeFcproj" => {
+                self.board()?;
+                if self.document().is_none() {
+                    return Err("save the storyboard first: its titles go in a folder beside it".into());
+                }
+                Ok(())
+            }
+            "storyboard.sendToFilmCraft" => {
+                if self.app_program("filmcraft").is_none() {
+                    return Err(crate::open_in::FILMCRAFT_MISSING.into());
+                }
                 self.board()?;
                 if self.document().is_none() {
                     return Err("save the storyboard first: its titles go in a folder beside it".into());

@@ -91,6 +91,8 @@ struct UiState {
     custom_chrome: bool,
     chrome_icon: Option<egui::TextureHandle>,
     show_about: bool,
+    /// The "FilmCraft isn't installed" info box (D-SF9).
+    show_filmcraft_missing: bool,
     exit_requested: bool,
     /// "Save changes?" before the window closes (SF1), while it is up.
     unsaved: Option<document_view::Pending>,

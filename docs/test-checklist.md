@@ -1,13 +1,13 @@
 # Manual test pass: storyboard titles, frames and the road to FilmCraft
 
-_2026-11-27 · SF1b (titles to FilmCraft) · in use; TF-1 to TF-5 fixed; Send to FilmCraft added (T-S8 to T-S11)_
+_2026-11-28 · SF1b (titles to FilmCraft) · in use; TF-1 to TF-5 fixed; Send to FilmCraft added (T-S8 to T-S13)_
 
 - **Scope:** what to try by hand in the app after each storyboard or title step: the frame
   (film and social shapes), title cards and overlays (themes, designs, area, fields), the
   Viewer and the Inspector preview, export, and the title render for FilmCraft.
 - **Project goal it serves:** a storyboard that looks the same in the Viewer, the exported
   video and FilmCraft, on any frame shape, with nothing designed going missing.
-- **Immediate area of improvement:** File › Send to FilmCraft on Paul's PC (T-S8 to T-S11), then
+- **Immediate area of improvement:** File › Send to FilmCraft on Paul's PC (T-S8 to T-S13), then
   recheck T-T4 and T-T12 after TF-5.
 
 How to use it: run a section after the step that touches it, and the whole list before a
@@ -64,16 +64,18 @@ release. Each check names what to do and what you should see. Write a failure up
 
 Run from the repo with the app's CLI against a saved storyboard.
 
-| ID    | Do                                                                           | Expect                                                                                                   |
-|-------|------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| T-S1  | `storyboard.renderTitles {"dryRun": true}`                                   | Every title listed, card or overlay, with its `c<clip>-<hash>.mp4` path; `ready: true`                   |
-| T-S2  | Point a clip at a missing picture, dry run again                             | `ready: false` and a `media` problem naming the file                                                     |
-| T-S3  | `storyboard.renderTitles {"wait": true}`                                     | The `.mp4` files appear in `<name>.media\titles\`, play, and match the Viewer                            |
-| T-S4  | Run it again                                                                 | Nothing rendered (`filesTotal: 0`)                                                                       |
-| T-S5  | Change one title's words, run again                                          | Only that title renders                                                                                  |
-| T-S6  | A vertical board                                                             | Tall title files, titles where the Viewer puts them (after TF-1)                                         |
-| T-S7  | `filmcraft-cli import` of `docs\sibling-apis\filmcraft-otio-fixture.otio`    | Imports with the media offline (OT-6)                                                                    |
-| T-S8  | Saved board, in-app titles only: File › Send to FilmCraft                    | `<name>.fcproj` beside the storyboard; FilmCraft opens it; no new files in `<name>.media\titles\`        |
-| T-S9  | In FilmCraft: play it, then edit a title's words                             | Titles, shots and song where the Viewer has them; the words change; shots fill as on the board (GC-12)   |
-| T-S10 | Give one title a design, Send again                                          | The status bar says it is rendering that title; when it ends, FilmCraft opens the project                |
-| T-S11 | Point a shot at a missing picture and Send; then Send with FilmCraft missing | A problem names the clip, nothing written; with FilmCraft missing, the message says where the project is |
+| ID    | Do                                                                        | Expect                                                                                                             |
+|-------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| T-S1  | `storyboard.renderTitles {"dryRun": true}`                                | Every title listed, card or overlay, with its `c<clip>-<hash>.mp4` path; `ready: true`                             |
+| T-S2  | Point a clip at a missing picture, dry run again                          | `ready: false` and a `media` problem naming the file                                                               |
+| T-S3  | `storyboard.renderTitles {"wait": true}`                                  | The `.mp4` files appear in `<name>.media\titles\`, play, and match the Viewer                                      |
+| T-S4  | Run it again                                                              | Nothing rendered (`filesTotal: 0`)                                                                                 |
+| T-S5  | Change one title's words, run again                                       | Only that title renders                                                                                            |
+| T-S6  | A vertical board                                                          | Tall title files, titles where the Viewer puts them (after TF-1)                                                   |
+| T-S7  | `filmcraft-cli import` of `docs\sibling-apis\filmcraft-otio-fixture.otio` | Imports with the media offline (OT-6)                                                                              |
+| T-S8  | Saved board, in-app titles only: File › Send to FilmCraft                 | `<name>.fcproj` beside the storyboard; FilmCraft opens it; no new files in `<name>.media\titles\`                  |
+| T-S9  | In FilmCraft: play it, then edit a title's words                          | Titles, shots and song where the Viewer has them; the words change; shots fill as on the board (GC-12)             |
+| T-S10 | Give one title a design, Send again                                       | The status bar says it is rendering that title; when it ends, FilmCraft opens the project                          |
+| T-S11 | Point a shot at a missing picture and Send                                | A problem names the clip; nothing is written                                                                       |
+| T-S12 | Hide FilmCraft (rename its folder), press F5, open the File menu          | Send to FilmCraft is greyed; hovering shows "You can send to FilmCraft by installing it…"                          |
+| T-S13 | Click the greyed item                                                     | An info box opens with the GitHub and ArtCraft links (select and copy them); F5 after restoring it re-enables Send |

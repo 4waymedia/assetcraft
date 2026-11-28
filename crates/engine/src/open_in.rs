@@ -254,6 +254,15 @@ impl AppLocator for FakeLocator {
     }
 }
 
+/// Why File › Send to FilmCraft is greyed out, and the first line of its info box (Paul,
+/// 2026-11-28).
+pub const FILMCRAFT_MISSING: &str =
+    "You can send to FilmCraft by installing it. Download direct from GitHub or ArtCraft.";
+
+/// Where to get FilmCraft, shown in that info box as `(where, link)`.
+pub const FILMCRAFT_LINKS: &[(&str, &str)] =
+    &[("GitHub", "https://github.com/storytold/filmcraft/releases"), ("ArtCraft", "https://getartcraft.com/")];
+
 /// One entry of the Open In menu for a selection (see [`crate::Session::open_in_targets`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenInTarget {

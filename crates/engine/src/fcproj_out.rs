@@ -491,10 +491,15 @@ pub(crate) fn sb_write_fcproj(s: &mut Session, p: &Value) -> CmdResult {
 /// hand-off as one command. A title a design draws that isn't rendered yet is rendered first, on
 /// the export thread (`{stage: "rendering"}`: send again when `storyboard.exportStatus` says
 /// done — the app does that by itself); then the project is written beside the storyboard
-/// (`storyboard.writeFcproj`) and, unless `open: false`, opened in FilmCraft (`file.openIn`). A
-/// FilmCraft that isn't installed leaves the project written and says where it is.
+/// (`storyboard.writeFcproj`) and, unless `open: false`, opened in FilmCraft (`file.openIn`).
+/// It needs FilmCraft installed: without it the command is disabled with
+/// [`crate::open_in::FILMCRAFT_MISSING`] (D-SF9, Paul 2026-11-28), and the File menu's greyed
+/// item opens an info box with the download links ([`crate::open_in::FILMCRAFT_LINKS`]).
 pub(crate) fn sb_send_to_filmcraft(s: &mut Session, p: &Value) -> CmdResult {
     let open = p.get("open").and_then(Value::as_bool).unwrap_or(true);
+    if s.app_program("filmcraft").is_none() {
+        return Err(CmdError::Unavailable(crate::open_in::FILMCRAFT_MISSING.into()));
+    }
     let titles = crate::title_render::plan(s)?;
     if !titles.problems.is_empty() {
         let list: Vec<String> = titles.problems.iter().map(|x| format!("clip {}: {}", x.clip, x.why)).collect();

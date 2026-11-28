@@ -90,8 +90,14 @@ Video…:
    graphic clip). The answer is `{stage: "rendering"}`, and the app sends again by itself when
    `storyboard.exportStatus` says done; a cancelled or failed render drops the send.
 3. `storyboard.writeFcproj` writes `<name>.fcproj` beside the storyboard (`stage: "written"`).
-4. `file.openIn {app: "filmcraft"}` opens it (`stage: "opened"`). When FilmCraft isn't installed
-   the project stays written and the message says where it is.
+4. `file.openIn {app: "filmcraft"}` opens it (`stage: "opened"`).
+
+**D-SF9 (Paul, 2026-11-28): FilmCraft not installed.** The item is greyed out with the hover text
+"You can send to FilmCraft by installing it. Download direct from GitHub or ArtCraft."
+(`open_in::FILMCRAFT_MISSING`, also the command's disabled reason). Clicking the greyed item
+opens an info box with that text, the two links as text you can select and copy (GitHub
+`https://github.com/storytold/filmcraft/releases`, ArtCraft `https://getartcraft.com/`;
+`open_in::FILMCRAFT_LINKS`) and a reminder to press F5 once it is installed.
 
 ## Findings
 

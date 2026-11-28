@@ -366,7 +366,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Send to FilmCraft",
         "File",
         None,
-        "{open?: bool (default true)} → {stage: rendering | written | opened, …} (SF1b-3: renders any title a design draws that isn't rendered yet, on the export thread — then `stage: rendering`; send again once storyboard.exportStatus is done, as the app does — else writes `<name>.fcproj` beside the storyboard (storyboard.writeFcproj: in-app titles as graphic clips you edit in FilmCraft) and opens it there (file.openIn); a title problem stops it, listed)",
+        "{open?: bool (default true)} → {stage: rendering | written | opened, …} (SF1b-3: renders any title a design draws that isn't rendered yet, on the export thread — then `stage: rendering`; send again once storyboard.exportStatus is done, as the app does — else writes `<name>.fcproj` beside the storyboard (storyboard.writeFcproj: in-app titles as graphic clips you edit in FilmCraft) and opens it there (file.openIn); a title problem stops it, listed; disabled while FilmCraft isn't installed)",
         crate::fcproj_out::sb_send_to_filmcraft
     ),
     cmd!(
