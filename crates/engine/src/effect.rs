@@ -186,7 +186,8 @@ mod tests {
                 "storyboard.exportVideo",
                 "storyboard.renderTitles",
                 "storyboard.writeOtio",
-                "storyboard.writeFcproj"
+                "storyboard.writeFcproj",
+                "storyboard.sendToFilmCraft"
             ])
         );
         assert_eq!(
@@ -229,7 +230,8 @@ mod tests {
                 "storyboard.exportVideo",
                 "storyboard.renderTitles",
                 "storyboard.writeOtio",
-                "storyboard.writeFcproj"
+                "storyboard.writeFcproj",
+                "storyboard.sendToFilmCraft"
             ])
         );
         assert!(ids(|e| e.classes.contains(&EffectClass::ExternalNetwork)).is_empty(), "no network before Stage 5");

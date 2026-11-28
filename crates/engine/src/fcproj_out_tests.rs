@@ -29,7 +29,11 @@ fn library(rel: &str) -> String {
 /// A saved vertical board (270 × 480, 24 fps): a Bold title card, a still, the still again with
 /// a Bold overlay in an area, an empty clip.
 fn saved(dir: &Path) -> Session {
-    let mut s = Session::new(Arc::new(RealFs), Arc::new(RecordingLauncher::default()), Prefs::default());
+    saved_with(dir, Arc::new(RecordingLauncher::default()))
+}
+
+fn saved_with(dir: &Path, launcher: Arc<RecordingLauncher>) -> Session {
+    let mut s = Session::new(Arc::new(RealFs), launcher, Prefs::default());
     run(&mut s, "storyboard.new", json!({ "name": "blossom" }));
     let board = s.boards.board.as_mut().unwrap();
     board.frame = Some(assetcraft_storyboard::FrameSpec {
@@ -140,6 +144,25 @@ fn in_app_titles_become_graphic_clips_filmcraft_reads() {
         opacity.f64_at(filmcraft_time::Tick(0)) < 1.0 && opacity.f64_at(filmcraft_time::Tick(12 * tick)) > 99.0,
         "{keys:?}"
     );
+    // GC-12: the still is framed as the board frames it — FilmCraft fits it, the Motion scales it
+    // on to the board's fill and moves it to its snap.
+    let (pw, ph) = {
+        let p = assetcraft_probe::probe(s.services.as_ref(), Path::new(&library("environments/soul_light_forest.jpg")))
+            .unwrap();
+        let d = p.dimensions.unwrap();
+        (f64::from(d.width), f64::from(d.height))
+    };
+    let spec = s.boards.board.as_ref().unwrap().frame_spec();
+    let [x, y, fw, fh] = spec.place(pw as f32, ph as f32).map(f64::from);
+    let still = &v1[1];
+    assert!(still.scale_to_frame);
+    let motion = still.effect("motion").expect("a Motion");
+    let fit = (270.0 / pw).min(480.0 / ph);
+    let scale = motion.f64_at("scale", filmcraft_time::Tick(0));
+    assert!((scale / 100.0 * fit * pw - fw * 270.0).abs() < 0.01, "{scale}");
+    let at = motion.vec2_at("position", filmcraft_time::Tick(0));
+    assert!((at.x - (x + fw / 2.0) * 270.0).abs() < 0.01 && (at.y - (y + fh / 2.0) * 480.0).abs() < 0.01, "{at:?}");
+    assert!(scale > 100.0, "a landscape picture fills a tall frame: bigger than fitted");
     // A card's background doesn't fade with its words.
     let background = &card
         .effects
@@ -176,5 +199,56 @@ fn a_design_drawn_title_goes_as_its_render() {
         })
         .collect();
     assert!(media.iter().any(|m| m.contains("blossom.media") && m.contains("c3-")), "{media:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// SF1b-3: Send to FilmCraft renders a design-drawn title first (and only that one: the in-app
+/// card goes as a graphic clip), then writes the project and opens it in FilmCraft.
+#[test]
+fn send_to_filmcraft_renders_then_writes_and_opens() {
+    let dir = temp("send");
+    let launcher = Arc::new(RecordingLauncher::default());
+    let mut s = saved_with(&dir, launcher.clone()).with_app_locator(Arc::new(crate::open_in::FakeLocator {
+        installed: vec![("filmcraft", PathBuf::from("/opt/filmcraft"))],
+    }));
+    s.boards.board.as_mut().unwrap().clips[2].text_style.design = Some(DesignPick::Stack);
+    let first = run(&mut s, "storyboard.sendToFilmCraft", json!({}));
+    assert_eq!((first["stage"].clone(), first["render"].clone()), (json!("rendering"), json!(1)), "{first}");
+    if let Some(h) = s.exporter.thread.take() {
+        h.join().unwrap();
+    }
+    let titles = dir.join("blossom.media").join("titles");
+    let names: Vec<String> =
+        std::fs::read_dir(&titles).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(names.len() == 1 && names[0].starts_with("c3-"), "only the design-drawn title renders: {names:?}");
+    let sent = run(&mut s, "storyboard.sendToFilmCraft", json!({}));
+    assert_eq!(sent["stage"], json!("opened"), "{sent}");
+    let path = dir.join("blossom.fcproj");
+    assert!(path.is_file());
+    let spawned = launcher.spawned.lock().unwrap().clone();
+    assert_eq!(spawned.len(), 1, "{spawned:?}");
+    assert_eq!(spawned[0].0, PathBuf::from("/opt/filmcraft"));
+    assert!(spawned[0].1.iter().any(|a| Path::new(a) == path), "{spawned:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Without FilmCraft installed the project is still written, and the answer says where; a title
+/// problem stops the send before anything is written.
+#[test]
+fn send_without_filmcraft_writes_and_says_where() {
+    let dir = temp("send-none");
+    let mut s = saved(&dir).with_app_locator(Arc::new(crate::open_in::FakeLocator { installed: vec![] }));
+    let sent = run(&mut s, "storyboard.sendToFilmCraft", json!({}));
+    assert_eq!(sent["stage"], json!("written"), "{sent}");
+    let message = sent["message"].as_str().unwrap();
+    assert!(message.contains("blossom.fcproj") && message.contains("isn't installed"), "{message}");
+    let quiet = run(&mut s, "storyboard.sendToFilmCraft", json!({ "open": false }));
+    assert_eq!(quiet["stage"], json!("written"), "{quiet}");
+    s.boards.board.as_mut().unwrap().clips[1].asset_ids =
+        vec![AssetId(dir.join("gone.jpg").to_string_lossy().into_owned())];
+    s.boards.board.as_mut().unwrap().clips[2].asset_ids =
+        vec![AssetId(dir.join("gone.jpg").to_string_lossy().into_owned())];
+    let err = s.execute("storyboard.sendToFilmCraft", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("problem"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -339,7 +339,7 @@ static COMMANDS: &[CommandSpec] = &[
         "Render Titles",
         "File",
         None,
-        "{dryRun?: bool, overwrite?: bool, wait?: bool} → {folder, width, height, fps, titles: [{clip, index, kind: card|overlay, renderer, frames, seconds, hash, path, reuse}], problems: [{clip, index, what: design|theme|media|effect|font, why}], ready, render, reuse, message} (D-SF7: every title as a finished .mp4 in <name>.media/titles/, an overlay merged with its shot; a problem stops the send; without `dryRun` renders the missing ones on the export thread — follow with storyboard.exportStatus, stop with storyboard.exportCancel)",
+        "{dryRun?: bool, overwrite?: bool, wait?: bool, designed?: bool (only titles a design draws)} → {folder, width, height, fps, titles: [{clip, index, kind: card|overlay, renderer, frames, seconds, hash, path, reuse}], problems: [{clip, index, what: design|theme|media|effect|font, why}], ready, render, reuse, message} (D-SF7: every title as a finished .mp4 in <name>.media/titles/, an overlay merged with its shot; a problem stops the send; without `dryRun` renders the missing ones on the export thread — follow with storyboard.exportStatus, stop with storyboard.exportCancel)",
         crate::title_render::sb_render_titles
     ),
     cmd!(
@@ -359,6 +359,15 @@ static COMMANDS: &[CommandSpec] = &[
         None,
         "{dryRun?: bool, path?: string, overwrite?: bool} → {path, graphics: [clip], rendered: [clip], unrendered: [clip], problems, notes: [string], bytes, dryRun?, written?, message?} (FC-2, D-SF8: the Cut as a FilmCraft project — shots and the song as the OTIO carries them, read by FilmCraft's own importer; each in-app title a FilmCraft graphic clip you can edit there, built from the compositor's own layout of it (face, size, lines, plate, decor, finish; the in and out as keyframes), a card on V1, an overlay on V2 over its shot, its marker carrying `assetcraft clip <id> · <theme> · <design>`; a title drawn by a design goes as its render, so run storyboard.renderTitles first; `<name>.fcproj` beside the storyboard by default; `notes` lists what FilmCraft won't get)",
         crate::fcproj_out::sb_write_fcproj
+    ),
+    cmd!(
+        EXPORT,
+        "storyboard.sendToFilmCraft",
+        "Send to FilmCraft",
+        "File",
+        None,
+        "{open?: bool (default true)} → {stage: rendering | written | opened, …} (SF1b-3: renders any title a design draws that isn't rendered yet, on the export thread — then `stage: rendering`; send again once storyboard.exportStatus is done, as the app does — else writes `<name>.fcproj` beside the storyboard (storyboard.writeFcproj: in-app titles as graphic clips you edit in FilmCraft) and opens it there (file.openIn); a title problem stops it, listed)",
+        crate::fcproj_out::sb_send_to_filmcraft
     ),
     cmd!(
         READ,

@@ -247,6 +247,18 @@ fn pick_path(nav: &mut Navigator, _ext: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+/// File → Send to FilmCraft (SF1b-3): the command; when it first renders the titles a design
+/// draws, [`tick`] sends again once they are done.
+pub(crate) fn send_to_filmcraft(nav: &mut Navigator) {
+    nav.state.send_after_render = false;
+    if let Some(out) = nav.run("storyboard.sendToFilmCraft", json!({}))
+        && out["stage"] == "rendering"
+    {
+        nav.state.send_after_render = true;
+        nav.state.export_seen = Some(ExportStage::Rendering);
+    }
+}
+
 /// Each frame: notice when a running export ends and say so once.
 pub(crate) fn tick(nav: &mut Navigator, ctx: &egui::Context) {
     let progress = nav.session.export_progress();
@@ -259,10 +271,15 @@ pub(crate) fn tick(nav: &mut Navigator, ctx: &egui::Context) {
         && seen != progress.stage
     {
         // `exportStatus` joins the finished thread and carries the message.
-        if let Some(status) = nav.run("storyboard.exportStatus", json!({}))
-            && status["stage"] == "failed"
+        let status = nav.run("storyboard.exportStatus", json!({}));
+        let stage = status.as_ref().map(|s| s["stage"].clone()).unwrap_or_default();
+        if stage == "failed"
+            && let Some(status) = &status
         {
             nav.notify(status["message"].as_str().unwrap_or("Export failed").to_owned());
+        }
+        if std::mem::take(&mut nav.state.send_after_render) && stage == "done" {
+            send_to_filmcraft(nav);
         }
     }
 }

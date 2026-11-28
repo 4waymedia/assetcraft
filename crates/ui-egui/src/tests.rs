@@ -513,6 +513,9 @@ fn every_menu_item_is_a_registered_command_or_a_window_action() {
             MenuAction::ExportVideo => {
                 used.insert("storyboard.exportVideo");
             }
+            MenuAction::SendToFilmCraft => {
+                used.insert("storyboard.sendToFilmCraft");
+            }
             MenuAction::SaveTemplate => {
                 used.insert("storyboard.saveTemplate");
             }
@@ -1040,4 +1043,34 @@ fn new_from_template_and_save_as_template_round_trip_through_the_file_menu() {
     assert!(nav.state.save_template.as_ref().is_some_and(|d| d.name == "My tutorial"));
     assert!(crate::template_view::save(&mut nav, true));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// SF1b-3: File › Send to FilmCraft sits right after Export Video…, greyed with the reason
+/// until there is a saved storyboard; a send waiting on its titles goes on only when they end
+/// done (a stopped or failed render drops it).
+#[test]
+fn send_to_filmcraft_is_in_the_file_menu_and_waits_for_its_titles() {
+    let ctx = Context::default();
+    let (mut nav, _) = navigator(fake(), Prefs::default());
+    frame(&ctx, &mut nav);
+    let item = find_item(&nav, "File", "Send to FilmCraft");
+    assert!(matches!(&item, MenuEntry::Item { enabled: false, tooltip: Some(_), .. }), "{item:?}");
+    let file = nav.menus().into_iter().find(|m| m.title == "File").unwrap();
+    let mut items = Vec::new();
+    walk(&file.entries, &mut items);
+    let labels: Vec<String> = items
+        .iter()
+        .filter_map(|e| match e {
+            MenuEntry::Item { label, .. } => Some(label.clone()),
+            _ => None,
+        })
+        .collect();
+    let export = labels.iter().position(|l| l == "Export Video…").unwrap();
+    assert_eq!(labels.get(export + 1).map(String::as_str), Some("Send to FilmCraft"), "{labels:?}");
+
+    // A render that didn't end done (here: nothing ran) drops the waiting send.
+    nav.state.send_after_render = true;
+    nav.state.export_seen = Some(assetcraft_engine::ExportStage::Rendering);
+    frame(&ctx, &mut nav);
+    assert!(!nav.state.send_after_render && nav.state.export_seen.is_none());
 }

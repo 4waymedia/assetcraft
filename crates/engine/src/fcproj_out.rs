@@ -267,6 +267,18 @@ fn animate(
     types
 }
 
+/// A shot's size in pixels: its header (pictures, most videos), else the video's first stream.
+fn picture_size(s: &Session, file: &std::path::Path) -> Option<(u32, u32)> {
+    if let Some(d) = assetcraft_probe::probe(s.services.as_ref(), file).ok().and_then(|p| p.dimensions)
+        && d.width > 0
+        && d.height > 0
+    {
+        return Some((d.width, d.height));
+    }
+    let reader = assetcraft_media::VideoReader::open(file).ok()?;
+    Some(reader.size()).filter(|(w, h)| *w > 0 && *h > 0)
+}
+
 /// `<folder>/<name>.fcproj` beside the saved storyboard.
 fn default_path(s: &Session) -> Result<PathBuf, CmdError> {
     let document = s
@@ -356,14 +368,36 @@ pub fn build(s: &Session, titles: &RenderPlan, path: PathBuf) -> Result<FcprojPl
     seq.settings.height = h;
     seq.settings.frame_rate = frame_rate;
     seq.settings.preset = format!("AssetCraft {w} × {h} {rate} fps");
-    // Shots fill the frame the way FilmCraft fits them (scaled to the frame, whole).
+    // Shots framed as the board frames them (GC-12): FilmCraft fits each to the frame, then the
+    // clip's Motion scales it on to the board's fill and moves it to its snap.
+    let spec = board.frame_spec();
+    let at_start: std::collections::HashMap<i64, usize> =
+        spans.iter().enumerate().map(|(i, span)| (ticks(span.first).0, i)).collect();
     for track in &mut seq.video_tracks {
         for item in &mut track.items {
             item.scale_to_frame = true;
+            let Some(index) = at_start.get(&item.start.0) else { continue };
+            let Some(clip) = board.clips.get(*index) else { continue };
+            if indices.contains(index) && clip.text_kind() == Some(TextKind::Card) {
+                continue;
+            }
+            let Some(file) = clip.asset_ids.first().map(|a| std::path::PathBuf::from(&a.0)) else { continue };
+            if titles.titles.iter().any(|t| t.index == *index && !indices.contains(index)) {
+                continue; // a rendered title is the frame's own size
+            }
+            let Some((pw, ph)) = picture_size(s, &file) else {
+                notes.push(format!("#{:02}: its size couldn't be read, so FilmCraft fits it whole", index + 1));
+                continue;
+            };
+            let Some(motion) = item.effect_mut("motion") else { continue };
+            let (fw, fh) = (f64::from(w), f64::from(h));
+            let [x, y, pw_frac, ph_frac] = spec.place(pw as f32, ph as f32).map(f64::from);
+            let placed_w = pw_frac * fw;
+            let fit = (fw / f64::from(pw)).min(fh / f64::from(ph));
+            let scale = placed_w / f64::from(pw) / fit * 100.0;
+            set(motion, "scale", ParamValue::Float(scale));
+            set(motion, "position", ParamValue::Vec2(Vec2::new((x + pw_frac / 2.0) * fw, (y + ph_frac / 2.0) * fh)));
         }
-    }
-    if board.frame.is_some() {
-        notes.push("shots are scaled to fit the frame in FilmCraft; the board's fill and snap aren't carried".into());
     }
     for (kind, item) in items {
         // A card where it sits on V1 (its gap there); an overlay on V2 over its shot.
@@ -450,5 +484,58 @@ pub(crate) fn sb_write_fcproj(s: &mut Session, p: &Value) -> CmdResult {
         plan.graphics.len(),
         plan.rendered.len()
     ));
+    Ok(out)
+}
+
+/// `storyboard.sendToFilmCraft {open?: bool}` (SF1b-3; File › Send to FilmCraft): the whole
+/// hand-off as one command. A title a design draws that isn't rendered yet is rendered first, on
+/// the export thread (`{stage: "rendering"}`: send again when `storyboard.exportStatus` says
+/// done — the app does that by itself); then the project is written beside the storyboard
+/// (`storyboard.writeFcproj`) and, unless `open: false`, opened in FilmCraft (`file.openIn`). A
+/// FilmCraft that isn't installed leaves the project written and says where it is.
+pub(crate) fn sb_send_to_filmcraft(s: &mut Session, p: &Value) -> CmdResult {
+    let open = p.get("open").and_then(Value::as_bool).unwrap_or(true);
+    let titles = crate::title_render::plan(s)?;
+    if !titles.problems.is_empty() {
+        let list: Vec<String> = titles.problems.iter().map(|x| format!("clip {}: {}", x.clip, x.why)).collect();
+        return Err(CmdError::Unavailable(format!(
+            "{} problem(s) to fix before sending, so nothing goes missing: {}",
+            list.len(),
+            list.join("; ")
+        )));
+    }
+    if s.exporter.running() {
+        return Err(CmdError::Unavailable("an export is running: wait for it, or press Esc to stop it".into()));
+    }
+    let board = s.boards.board.as_ref().ok_or_else(crate::storyboard::no_board)?;
+    let designed = titles
+        .titles
+        .iter()
+        .filter(|t| t.renderer == Renderer::EffectCraft && !t.reuse && board.clips.get(t.index).is_some())
+        .count();
+    if designed > 0 {
+        crate::title_render::sb_render_titles(s, &json!({ "designed": true }))?;
+        return Ok(json!({
+            "stage": "rendering",
+            "render": designed,
+            "message": format!("Rendering {designed} title(s) drawn by a design first…"),
+        }));
+    }
+    let written = sb_write_fcproj(s, &json!({}))?;
+    let path = written["path"].as_str().unwrap_or_default().to_owned();
+    let mut out = written;
+    out["stage"] = json!("written");
+    if !open {
+        return Ok(out);
+    }
+    match s.execute("file.openIn", &json!({ "app": "filmcraft", "paths": [path.clone()] })) {
+        Ok(_) => {
+            out["stage"] = json!("opened");
+            out["message"] = json!(format!("Sent to FilmCraft: {}", out["message"].as_str().unwrap_or_default()));
+        }
+        Err(e) => {
+            out["message"] = json!(format!("Wrote {path}; FilmCraft didn't open it ({e})"));
+        }
+    }
     Ok(out)
 }

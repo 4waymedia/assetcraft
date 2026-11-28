@@ -151,6 +151,9 @@ pub enum MenuAction {
     SaveAs,
     /// File → Export Video…: the settings window, the picker, then `storyboard.exportVideo`.
     ExportVideo,
+    /// File → Send to FilmCraft: `storyboard.sendToFilmCraft`, sent again by itself once the
+    /// titles a design draws are rendered (SF1b-3).
+    SendToFilmCraft,
     /// File → Save as Template…: the name window, then `storyboard.saveTemplate`.
     SaveTemplate,
     /// File → Storyboard Setup…: the frame window (`storyboard.frame`; F4).
@@ -646,6 +649,19 @@ fn entries_for(nav: &Navigator, spec: &'static CommandSpec) -> Vec<MenuEntry> {
                 },
             ]
         }
+        "storyboard.sendToFilmCraft" => {
+            let enabled = s.enabled(spec.id);
+            vec![MenuEntry::Item {
+                label: spec.label.to_owned(),
+                shortcut: None,
+                enabled: enabled.is_ok(),
+                checked: None,
+                tooltip: enabled.err().or_else(|| {
+                    Some("Write the Cut as a FilmCraft project beside the storyboard and open it there".into())
+                }),
+                action: MenuAction::SendToFilmCraft,
+            }]
+        }
         "storyboard.delete" => {
             let storyboard = s.mode() == assetcraft_engine::Mode::Storyboard;
             simple(storyboard && !s.selected_clips().is_empty())
@@ -747,6 +763,7 @@ pub(crate) fn apply(nav: &mut Navigator, ctx: &egui::Context, action: MenuAction
             crate::document_view::save_as(nav);
         }
         MenuAction::ExportVideo => crate::export_view::open(nav),
+        MenuAction::SendToFilmCraft => crate::export_view::send_to_filmcraft(nav),
         MenuAction::SaveTemplate => crate::template_view::open(nav),
         MenuAction::Setup => crate::setup_view::open(nav),
         MenuAction::ImportTheme(pack) => crate::document_view::import_theme(nav, pack),

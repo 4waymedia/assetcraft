@@ -362,9 +362,10 @@ pub fn plan(s: &Session) -> Result<RenderPlan, CmdError> {
     Ok(RenderPlan { folder, width: frame.width, height: frame.height, fps: frame.fps, titles, problems })
 }
 
-/// `storyboard.renderTitles {dryRun?, overwrite?, wait?}`: the plan with `dryRun`; otherwise,
-/// when nothing stops it, every title not already rendered (all of them with `overwrite`) is
-/// rendered on the export thread. Progress and cancel are `storyboard.exportStatus` /
+/// `storyboard.renderTitles {dryRun?, overwrite?, wait?, designed?}`: the plan with `dryRun`;
+/// otherwise, when nothing stops it, every title not already rendered (all of them with
+/// `overwrite`; only those a design draws with `designed`, as Send to FilmCraft asks, since an
+/// in-app title goes there as a graphic clip) is rendered on the export thread. Progress and cancel are `storyboard.exportStatus` /
 /// `storyboard.exportCancel`, as for the Cut; `wait` blocks until it ends.
 pub(crate) fn sb_render_titles(s: &mut Session, p: &Value) -> CmdResult {
     let plan = plan(s)?;
@@ -390,7 +391,13 @@ pub(crate) fn sb_render_titles(s: &mut Session, p: &Value) -> CmdResult {
     }
     let Some(board) = s.boards.board.as_ref() else { return Err(crate::storyboard::no_board()) };
     let overwrite = flag("overwrite");
-    let todo: Vec<TitlePlan> = plan.titles.iter().filter(|t| overwrite || !t.reuse).cloned().collect();
+    let designed = flag("designed");
+    let todo: Vec<TitlePlan> = plan
+        .titles
+        .iter()
+        .filter(|t| (overwrite || !t.reuse) && (!designed || t.renderer == Renderer::EffectCraft))
+        .cloned()
+        .collect();
     let job = TitleJob {
         board: drawn_board(board),
         settings: Settings { width: plan.width, height: plan.height, fps: plan.fps, qp: TITLE_QP },

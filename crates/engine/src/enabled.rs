@@ -74,7 +74,10 @@ impl Session {
                 }
                 Ok(())
             }
-            "storyboard.renderTitles" | "storyboard.writeOtio" | "storyboard.writeFcproj" => {
+            "storyboard.renderTitles"
+            | "storyboard.writeOtio"
+            | "storyboard.writeFcproj"
+            | "storyboard.sendToFilmCraft" => {
                 self.board()?;
                 if self.document().is_none() {
                     return Err("save the storyboard first: its titles go in a folder beside it".into());

@@ -104,6 +104,8 @@ struct UiState {
     save_template: Option<template_view::SaveTemplateDialog>,
     /// The export stage last seen, to notice when a job ends.
     export_seen: Option<assetcraft_engine::ExportStage>,
+    /// Send to FilmCraft is waiting for its titles to render, and goes on when they are done.
+    send_after_render: bool,
     /// What the Save picker "returns" in tests (no native dialog there).
     #[cfg(test)]
     test_save_path: Option<PathBuf>,

@@ -1,14 +1,14 @@
 # FilmCraft graphic clips: can an AssetCraft title arrive editable?
 
-_2026-11-27 · D-SF8 FC-1 / FC-2 · built; in-app titles reach FilmCraft as they draw_
+_2026-11-27 · D-SF8 FC-1 / FC-2, GC-12, SF1b-3 · built; in-app titles reach FilmCraft as they draw, shots as they're framed_
 
 - **Scope:** whether an AssetCraft in-app title (a theme's words on a plate, in an area, with
   its in) can be handed to FilmCraft as a native graphic clip instead of a rendered `.mp4`.
 - **Project goal it serves:** Send to FilmCraft without baking titles to video files (Paul,
   2026-11-25: rendered `.mp4`s waste disk and make moving a project harder; FilmCraft's and
   EffectCraft's effect controls aren't shared).
-- **Immediate area of improvement:** the rest of a card's background (GC-11), how shots fill
-  the frame (GC-12), and Send to FilmCraft in the menus (SF1b-3).
+- **Immediate area of improvement:** the rest of a card's background (GC-11); Paul's check of
+  File › Send to FilmCraft on his PC (T-S8 … T-S11 in the test checklist).
 
 ## How it was checked
 
@@ -63,6 +63,36 @@ written file, at 1080 × 1920:
 
 The card's remaining difference is its backdrop's grain and vignette (GC-11).
 
+### GC-12: shots framed as the board frames them (2026-11-27)
+
+FilmCraft fits each shot whole to the frame (`scale_to_frame`, factor `min(fw/pw, fh/ph)`) and then
+applies the clip's Motion. So `fcproj_out.rs` sets Motion scale to `cover / fit × 100` and Motion
+position to the centre `FrameSpec::place` gives, for every picture shot (an overlay's shot under
+its graphic clip included; a render stays fitted, since it is already the frame). Exported by
+FilmCraft's engine at 1080 × 1920 from a landscape still:
+
+![Board frames beside FilmCraft's for Fill vertical and horizontal](img/filmcraft-fcproj-gc12.png)
+
+| Shot framing                  | Mean difference per channel | Pixels off by > 64 |
+|-------------------------------|-----------------------------|--------------------|
+| Fill vertical · center        | 0.1                         | 0 %                |
+| Fill horizontal · top         | 0.03                        | 0 %                |
+
+## SF1b-3: File › Send to FilmCraft (2026-11-27)
+
+`storyboard.sendToFilmCraft {open?}` (`fcproj_out.rs`), in the File menu right after Export
+Video…:
+
+1. A title problem (design, theme, media, effect, font) stops it, listed, before anything is
+   written.
+2. Titles a design draws that aren't rendered yet render first on the export thread
+   (`storyboard.renderTitles {designed: true}`: an in-app title never renders, it goes as a
+   graphic clip). The answer is `{stage: "rendering"}`, and the app sends again by itself when
+   `storyboard.exportStatus` says done; a cancelled or failed render drops the send.
+3. `storyboard.writeFcproj` writes `<name>.fcproj` beside the storyboard (`stage: "written"`).
+4. `file.openIn {app: "filmcraft"}` opens it (`stage: "opened"`). When FilmCraft isn't installed
+   the project stays written and the message says where it is.
+
 ## Findings
 
 | ID    | Finding                                                                                                                                                                                                                                                                                                       | Evidence                                                                                     | Fix / next step                                                                                                                                                                                               | Owner           | Status                                         |
@@ -78,5 +108,5 @@ The card's remaining difference is its backdrop's grain and vignette (GC-11).
 | GC-9  | **Accent bar:** AssetCraft's is inset from the plate's left edge and shorter than the plate; spike 2's sat on the edge, full height                                                                                                                                                                           | spike 2 frames                                                                               | The bar's rectangle comes from `text_decor` through the layout                                                                                                                                                | Claude          | fixed 2026-11-27                               |
 | GC-10 | **The in:** AssetCraft fades and lifts the whole title (plate and bar too); spike 2 animated the words only. AssetCraft's plate also has a slight shade FilmCraft's flat fill lacks                                                                                                                           | spike 2 frames                                                                               | Opacity / position / scale keys on the title's layers, sampled a frame at a time where the motion changes; a card's background stays still; words anchored on their block's middle so a push grows from there | Claude          | fixed 2026-11-27 (card lines on the same rows) |
 | GC-11 | A card's backdrop: FilmCraft's rectangle has a two-stop linear gradient; a backdrop's grain, vignette, radial or third / fourth stop aren't carried (listed in `notes`)                                                                                                                                       | FC-2 frames: card mean 4.4                                                                   | Leave as a note, or ask FilmCraft for noise / vignette fills (upstream)                                                                                                                                       | Paul / upstream | open                                           |
-| GC-12 | Shots are set to FilmCraft's scale-to-frame (whole, fitted); the board's fill (cover) and snap aren't carried                                                                                                                                                                                                 | `fcproj_out.rs`                                                                              | Map Fill vertical / horizontal and snap to the clip's Motion scale and position                                                                                                                               | Claude          | open                                           |
+| GC-12 | Shots were set to FilmCraft's scale-to-frame (whole, fitted); the board's fill (cover) and snap weren't carried. **Fixed:** each shot's Motion scale and position put it where `FrameSpec::place` does (mean 0.1 Fill vertical · center, 0.03 Fill horizontal · top; 0 % off)                                 | `fcproj_out.rs`; `img/filmcraft-fcproj-gc12.png`                                             | Fit factor × Motion scale = the board's cover size; Motion position = the snapped centre                                                                                                                      | Claude          | fixed 2026-11-27                               |
 | GC-13 | A plate at 92 % comes out a touch brighter in FilmCraft (it blends in linear light; the compositor in sRGB)                                                                                                                                                                                                   | FC-2 overlay frames                                                                          | Accept (inside the match), or pre-darken the plate's colour                                                                                                                                                   | Claude          | noted                                          |
